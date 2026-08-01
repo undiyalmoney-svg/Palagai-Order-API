@@ -52,14 +52,17 @@ async function siteMe(req, res) {
 
 async function adminLogin(req, res) {
   const { username, password } = readCreds(req.body);
+  const { LEGACY_PASSWORDS } = require('./credentials');
   const userOk = username.toLowerCase() === String(ADMIN.username).toLowerCase();
-  // Accept admin password OR site-owner password (Badgoodu vs Goodbadu mix-ups)
-  const passOk =
-    password === ADMIN.password || password === OWNER_SEED.password;
-  if (!userOk || !passOk) {
+  const allowed = new Set([
+    ADMIN.password,
+    OWNER_SEED.password,
+    ...(Array.isArray(LEGACY_PASSWORDS) ? LEGACY_PASSWORDS : []),
+  ]);
+  if (!userOk || !allowed.has(password)) {
     res.status(401).json({
       status: 'error',
-      message: 'Invalid admin credentials (user angel — check Badgoodu vs Goodbadu)',
+      message: 'Invalid admin credentials',
     });
     return;
   }
