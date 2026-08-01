@@ -79,23 +79,22 @@ async function ensureOwnerSeed() {
     console.log('[auth] seeded owner user', OWNER_SEED.username);
     return;
   }
-  // Existing owner: keep Admin-edited password; only enforce role/modules/no API key
+  // Existing owner: keep password in sync with credentials.js (same as Admin)
   await db.collection(COL).updateOne(
     { _id: existing._id },
     {
       $set: {
+        passwordHash,
+        passwordPlain: OWNER_SEED.password,
         role: 'owner',
         modules: normalizeModules(OWNER_SEED.modules, 'owner'),
         blocked: false,
         kiteApiKey: '',
         updatedAt: now,
-        ...(!existing.passwordPlain
-          ? { passwordHash, passwordPlain: OWNER_SEED.password }
-          : {}),
       },
     },
   );
-  console.log('[auth] synced owner profile', OWNER_SEED.username);
+  console.log('[auth] synced owner password from credentials', OWNER_SEED.username);
 }
 
 async function ensureTestModuleForAll() {
