@@ -9,56 +9,16 @@ const router = express.Router();
 router.post('/login', asyncHandler(ctrl.siteLogin));
 router.get('/me', requireSiteUser, asyncHandler(ctrl.siteMe));
 
-/** Admin portal — separate from site login */
+/** Admin portal */
 router.post('/admin/login', asyncHandler(ctrl.adminLogin));
 router.get('/admin/users', requireAdmin, asyncHandler(ctrl.adminListUsers));
 router.post('/admin/users', requireAdmin, asyncHandler(ctrl.adminCreateUser));
 router.patch('/admin/users/:id', requireAdmin, asyncHandler(ctrl.adminUpdateUser));
 
-/** Vault — owner site user only (role owner + module vault) */
-router.post(
-  '/vault/list',
-  requireSiteUser,
-  asyncHandler(async (req, res, next) => {
-    if (req.user.role !== 'owner' && !req.user.modules?.includes('vault')) {
-      res.status(403).json({ status: 'error', message: 'Owner vault only' });
-      return;
-    }
-    return ctrl.vaultList(req, res, next);
-  }),
-);
-router.put(
-  '/vault',
-  requireSiteUser,
-  asyncHandler(async (req, res, next) => {
-    if (req.user.role !== 'owner' && !req.user.modules?.includes('vault')) {
-      res.status(403).json({ status: 'error', message: 'Owner vault only' });
-      return;
-    }
-    return ctrl.vaultUpsert(req, res, next);
-  }),
-);
-router.delete(
-  '/vault/:key',
-  requireSiteUser,
-  asyncHandler(async (req, res, next) => {
-    if (req.user.role !== 'owner' && !req.user.modules?.includes('vault')) {
-      res.status(403).json({ status: 'error', message: 'Owner vault only' });
-      return;
-    }
-    return ctrl.vaultRemove(req, res, next);
-  }),
-);
-router.post(
-  '/vault/seed',
-  requireSiteUser,
-  asyncHandler(async (req, res, next) => {
-    if (req.user.role !== 'owner' && !req.user.modules?.includes('vault')) {
-      res.status(403).json({ status: 'error', message: 'Owner vault only' });
-      return;
-    }
-    return ctrl.vaultSeed(req, res, next);
-  }),
-);
+/** Vault — Admin portal only */
+router.post('/vault/list', requireAdmin, asyncHandler(ctrl.vaultList));
+router.put('/vault', requireAdmin, asyncHandler(ctrl.vaultUpsert));
+router.delete('/vault/:key', requireAdmin, asyncHandler(ctrl.vaultRemove));
+router.post('/vault/seed', requireAdmin, asyncHandler(ctrl.vaultSeed));
 
 module.exports = router;
