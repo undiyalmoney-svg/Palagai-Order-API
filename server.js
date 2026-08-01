@@ -10,6 +10,7 @@ async function boot() {
     if (mongo?.db) {
       await liveStore.attachMongo(mongo.db);
       await usersStore.ensureOwnerSeed();
+      await usersStore.ensureTestModuleForAll();
     }
   } catch (err) {
     console.error('[palagai-order-api] mongo attach failed (Kite order API still up):', err.message);

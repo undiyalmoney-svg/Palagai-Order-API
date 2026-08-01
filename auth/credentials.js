@@ -20,9 +20,10 @@ module.exports = {
     username: 'Devil',
     password: 'Goodbadu1789@21',
     role: 'owner',
-    modules: ['trade', 'crude', 'auto', 'token', 'strat', 'pnl', 'vault'],
+    modules: ['trade', 'crude', 'auto', 'token', 'test', 'strat', 'pnl', 'vault'],
   },
-  FRIEND_MODULES: ['trade', 'crude', 'auto', 'token'],
+  /** Friends may be granted these (test is always on for everyone) */
+  FRIEND_MODULES: ['trade', 'crude', 'auto', 'token', 'test'],
   OWNER_ONLY_MODULES: ['strat', 'pnl', 'vault'],
-  ALL_MODULES: ['trade', 'crude', 'auto', 'token', 'strat', 'pnl', 'vault'],
+  ALL_MODULES: ['trade', 'crude', 'auto', 'token', 'test', 'strat', 'pnl', 'vault'],
 };

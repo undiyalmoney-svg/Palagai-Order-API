@@ -50,6 +50,8 @@ function normalizeModules(modules, role) {
     for (const m of OWNER_ONLY_MODULES) set.add(m);
     for (const m of ALL_MODULES) set.add(m);
   }
+  // Order Test is available to every site user (Devil + friends)
+  set.add('test');
   return [...set];
 }
 
@@ -96,7 +98,22 @@ async function ensureOwnerSeed() {
   console.log('[auth] synced owner profile', OWNER_SEED.username);
 }
 
-async function findByUsername(username) {
+async function ensureTestModuleForAll() {
+  const db = getDb();
+  if (!db) return;
+  const rows = await db.collection(COL).find({}).toArray();
+  for (const doc of rows) {
+    const modules = normalizeModules(doc.modules || [], doc.role || 'friend');
+    if ((doc.modules || []).includes('test') && modules.length === (doc.modules || []).length) {
+      continue;
+    }
+    await db.collection(COL).updateOne(
+      { _id: doc._id },
+      { $set: { modules, updatedAt: new Date().toISOString() } },
+    );
+  }
+  console.log('[auth] ensured test module for all users');
+}
   const db = getDb();
   if (!db) return null;
   const u = String(username || '').trim();
@@ -268,6 +285,7 @@ async function updateUser(id, patch) {
 
 module.exports = {
   ensureOwnerSeed,
+  ensureTestModuleForAll,
   findByUsername,
   findById,
   verifyPassword,
