@@ -114,6 +114,8 @@ async function ensureTestModuleForAll() {
   }
   console.log('[auth] ensured test module for all users');
 }
+
+async function findByUsername(username) {
   const db = getDb();
   if (!db) return null;
   const u = String(username || '').trim();
