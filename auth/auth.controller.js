@@ -88,6 +88,11 @@ async function adminUpdateUser(req, res) {
   res.json({ status: 'ok', user });
 }
 
+async function adminDeleteUser(req, res) {
+  const out = await users.deleteUser(req.params.id);
+  res.json({ status: 'ok', ...out });
+}
+
 async function vaultList(req, res) {
   const password = req.body?.password || req.headers['x-vault-password'];
   const secrets = await vault.listSecrets(password);
@@ -118,6 +123,7 @@ module.exports = {
   adminListUsers,
   adminCreateUser,
   adminUpdateUser,
+  adminDeleteUser,
   vaultList,
   vaultUpsert,
   vaultRemove,

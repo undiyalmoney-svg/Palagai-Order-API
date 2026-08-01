@@ -60,9 +60,9 @@ async function ensureOwnerSeed() {
   if (!db) return;
   const passwordHash = await bcrypt.hash(OWNER_SEED.password, 10);
   const now = new Date().toISOString();
-  const existing = await db.collection(COL).findOne({
-    username: OWNER_SEED.username,
-  });
+  const existing =
+    (await db.collection(COL).findOne({ role: 'owner' })) ||
+    (await db.collection(COL).findOne({ username: OWNER_SEED.username }));
   if (!existing) {
     await db.collection(COL).insertOne({
       username: OWNER_SEED.username,
@@ -79,22 +79,23 @@ async function ensureOwnerSeed() {
     console.log('[auth] seeded owner user', OWNER_SEED.username);
     return;
   }
-  // Existing owner: keep password in sync with credentials.js (same as Admin)
+  // Keep modules/role; username + password are editable in Admin (do not overwrite)
   await db.collection(COL).updateOne(
     { _id: existing._id },
     {
       $set: {
-        passwordHash,
-        passwordPlain: OWNER_SEED.password,
         role: 'owner',
-        modules: normalizeModules(OWNER_SEED.modules, 'owner'),
+        modules: normalizeModules(existing.modules || OWNER_SEED.modules, 'owner'),
         blocked: false,
         kiteApiKey: '',
         updatedAt: now,
+        ...(!existing.passwordPlain || !existing.passwordHash
+          ? { passwordHash, passwordPlain: OWNER_SEED.password }
+          : {}),
       },
     },
   );
-  console.log('[auth] synced owner password from credentials', OWNER_SEED.username);
+  console.log('[auth] synced owner profile', existing.username || OWNER_SEED.username);
 }
 
 async function ensureTestModuleForAll() {
@@ -239,11 +240,6 @@ async function updateUser(id, patch) {
       err.status = 400;
       throw err;
     }
-    if (doc.role === 'owner' && u !== OWNER_SEED.username) {
-      const err = new Error('cannot rename owner away from Devil');
-      err.status = 400;
-      throw err;
-    }
     const clash = await findByUsername(u);
     if (clash && String(clash._id) !== String(doc._id)) {
       const err = new Error('username already exists');
@@ -284,6 +280,28 @@ async function updateUser(id, patch) {
   return adminUser(updated);
 }
 
+async function deleteUser(id) {
+  const db = getDb();
+  if (!db) {
+    const err = new Error('Mongo required');
+    err.status = 503;
+    throw err;
+  }
+  const doc = await findById(id);
+  if (!doc) {
+    const err = new Error('user not found');
+    err.status = 404;
+    throw err;
+  }
+  if (doc.role === 'owner') {
+    const err = new Error('cannot delete owner');
+    err.status = 400;
+    throw err;
+  }
+  await db.collection(COL).deleteOne({ _id: doc._id });
+  return { ok: true, id: String(doc._id), username: doc.username };
+}
+
 module.exports = {
   ensureOwnerSeed,
   ensureTestModuleForAll,
@@ -293,6 +311,7 @@ module.exports = {
   listUsers,
   createUser,
   updateUser,
+  deleteUser,
   publicUser,
   adminUser,
   normalizeModules,

@@ -14,6 +14,7 @@ router.post('/admin/login', asyncHandler(ctrl.adminLogin));
 router.get('/admin/users', requireAdmin, asyncHandler(ctrl.adminListUsers));
 router.post('/admin/users', requireAdmin, asyncHandler(ctrl.adminCreateUser));
 router.patch('/admin/users/:id', requireAdmin, asyncHandler(ctrl.adminUpdateUser));
+router.delete('/admin/users/:id', requireAdmin, asyncHandler(ctrl.adminDeleteUser));
 
 /** Vault — Admin portal only */
 router.post('/vault/list', requireAdmin, asyncHandler(ctrl.vaultList));
