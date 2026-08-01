@@ -1,6 +1,6 @@
 /**
  * In-memory + Mongo-backed store for Server Live.
- * Separate from Kite order proxy — never calls kite.service for Phase-1 scaffold.
+ * Separate from Kite order HTTP controllers — worker calls kite.service directly.
  */
 const crypto = require('crypto');
 
@@ -18,7 +18,7 @@ const STALE_SEC = 180;
  * }} */
 const state = {
   status: 'stopped',
-  message: 'Server Live idle (scaffold — strategy ticks not wired yet)',
+  message: 'Server Live idle — push Kite token, then Start (Trap / Genie / All-Green)',
   startedAt: null,
   stoppedAt: null,
   lastHeartbeatAt: null,
@@ -29,6 +29,37 @@ const state = {
 
 let mongoDb = null;
 let tickTimer = null;
+let worker = null;
+
+function getWorker() {
+  if (!worker) {
+    const { LiveWorker } = require('./live.worker');
+    worker = new LiveWorker({
+      readAuth: readAuthPlain,
+      pushEvent,
+      heartbeat,
+      getConfig: () => state.config,
+    });
+  }
+  return worker;
+}
+
+function startTickLoop() {
+  if (tickTimer) return;
+  const w = getWorker();
+  w.resetWarm();
+  const run = () => {
+    if (state.status !== 'running') return;
+    void w.onTick().then(() => persistRun()).catch((err) => {
+      console.error('[live-store] tick', err.message);
+    });
+  };
+  // Immediate first tick, then every 60s (same as Trade Desk Local Live).
+  run();
+  tickTimer = setInterval(run, 60_000);
+  heartbeat('Server Live running — strategy worker active (Trap / Genie / All-Green)');
+  pushEvent('WORKER', 'Strategy ticks wired · 60s · orders via kite.service when realOrders=true');
+}
 
 function getEncKey() {
   const raw = process.env.LIVE_AUTH_SECRET || process.env.MONGODB_PASSWORD || 'palagai-dev-only';
@@ -160,8 +191,7 @@ function stopTickLoop() {
 async function start(config) {
   if (state.status === 'running') {
     pushEvent('START_IGNORED', 'Already running — Stop first to change books/lots');
-    state.message =
-      'Already running (scaffold). Stop first to change config. No trade signals until strategy worker is wired.';
+    state.message = 'Already running. Stop first to change config.';
     return statusPayload();
   }
   state.config = {
@@ -176,6 +206,16 @@ async function start(config) {
     crudeStrategy: 'all-green',
     realOrders: !!config.realOrders,
   };
+  if (state.config.realOrders && !state.auth) {
+    const err = new Error('Push Kite token first (Auto Trader → Push Kite token) before real money Start');
+    err.status = 400;
+    throw err;
+  }
+  if (!state.config.enableNifty && !state.config.enableBank && !state.config.enableCrude) {
+    const err = new Error('Enable at least one book');
+    err.status = 400;
+    throw err;
+  }
   state.status = 'running';
   state.startedAt = new Date().toISOString();
   state.stoppedAt = null;

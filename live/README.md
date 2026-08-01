@@ -1,26 +1,26 @@
-# Server Live (additive) — does NOT change /api/kite order endpoints.
+# Server Live — strategy worker (additive)
 
-## What this folder is
-Control plane for Auto Trader (start/stop/status/auth/heartbeat scaffold).
+Runs on the Order-API droplet. **Does not change** `/api/kite/*` handlers.
 
-## What this folder is NOT
-- Not a replacement for `controllers/kiteOrders.controller.js`
-- Not a change to `services/kite.service.js`
-- Not a change to existing Order Test / Trade Desk Local Live flows
-
-## Endpoints (new)
-- GET  /live/health
-- GET  /live/status
-- GET  /live/events
-- POST /live/start
-- POST /live/stop
-- PUT  /live/auth
-
-## Fixed DNA (Phase 1)
-- Nifty = Trap
-- Crude = All-Green
+## DNA (Phase 1)
+- Nifty = Trap (fixed)
+- Crude = All-Green (fixed)
 - Bank = Trap | Genie (selectable)
 
+## Behaviour
+- `POST /live/start` → 60s ticks (same cadence as Trade Desk Local Live)
+- Replays Trap / Genie / All-Green on Kite 5m candles
+- When `realOrders=true`: MARKET BUY + SL-M via `kite.service` (tags `PALAGAI` / `PALAGAISL`)
+- When `realOrders=false`: signals/events only (paper)
+- Auth: `PUT /live/auth` with daily apiKey + accessToken
+
+## Files
+- `strategy-core.cjs` — bundled Trap/Genie/All-Green engines (rebuild from palagai `scripts/server-live/build-strategy-core.cjs`)
+- `live.worker.js` — tick orchestrator
+- `live-broker.js` — place / modify SL / exit
+- `kite-market.js` — instruments + historical + quotes
+
 ## Safety
-Strategy order placement is NOT wired in this scaffold yet.
-Heartbeat-only until strategy port is explicitly approved.
+- Push token before real-money Start
+- Prefer paper first (`realOrders` unchecked) to watch SIGNAL / DATA events
+- Stop Local Live on the same books if you run Server Live real money (avoid double orders)
