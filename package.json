@@ -1,7 +1,7 @@
 {
   "name": "palagai-order-api",
-  "version": "1.0.0",
-  "description": "Fixed-IP Kite order proxy for Palagai (DigitalOcean Droplet)",
+  "version": "1.1.0",
+  "description": "Fixed-IP Kite order proxy for Palagai (DigitalOcean Droplet) + additive Server Live control",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -17,6 +17,7 @@
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "helmet": "^8.0.0",
+    "mongodb": "^6.21.0",
     "morgan": "^1.10.0"
   }
 }

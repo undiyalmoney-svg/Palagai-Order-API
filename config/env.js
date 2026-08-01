@@ -15,6 +15,9 @@ const config = {
       process.env.FRONTEND_URL ||
       'https://palagai.app,http://localhost:4200,http://127.0.0.1:4200',
   ),
+  // Server Live (additive) — optional; empty = in-memory only
+  mongodbUri: process.env.MONGODB_URI || '',
+  mongodbDb: process.env.MONGODB_DB || 'palagai',
 };
 
 module.exports = { config };
