@@ -141,12 +141,13 @@ function startTickLoop() {
   // Scaffold heartbeat only — does NOT place Kite orders.
   tickTimer = setInterval(() => {
     if (state.status !== 'running') return;
-    heartbeat(
-      `Scaffold tick · Nifty Trap · Bank ${state.config?.bankStrategy || 'trap'} · Crude All-Green · realOrders=${!!state.config?.realOrders}`,
-    );
+    const detail = `Scaffold tick · Nifty Trap · Bank ${state.config?.bankStrategy || 'trap'} · Crude All-Green · realOrders=${!!state.config?.realOrders}`;
+    heartbeat(detail);
+    pushEvent('HEARTBEAT', detail);
     void persistRun();
   }, 60_000);
-  heartbeat('Server Live running (scaffold heartbeat)');
+  heartbeat('Server Live running (scaffold heartbeat — no strategy orders yet)');
+  pushEvent('HEARTBEAT', 'Worker alive — strategy ticks not wired yet (no ENTRY/EXIT)');
 }
 
 function stopTickLoop() {
@@ -158,9 +159,10 @@ function stopTickLoop() {
 
 async function start(config) {
   if (state.status === 'running') {
-    const err = new Error('A Server Live run is already active');
-    err.status = 409;
-    throw err;
+    pushEvent('START_IGNORED', 'Already running — Stop first to change books/lots');
+    state.message =
+      'Already running (scaffold). Stop first to change config. No trade signals until strategy worker is wired.';
+    return statusPayload();
   }
   state.config = {
     enableNifty: !!config.enableNifty,
