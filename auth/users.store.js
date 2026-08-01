@@ -58,7 +58,7 @@ async function ensureOwnerSeed() {
       role: 'owner',
       modules: OWNER_SEED.modules,
       blocked: false,
-      kiteApiKey: '',
+      kiteApiKey: '', // Devil never stores API key in Admin/Mongo
       note: 'Owner',
       createdAt: now,
       updatedAt: now,
@@ -75,6 +75,7 @@ async function ensureOwnerSeed() {
         role: 'owner',
         modules: normalizeModules(OWNER_SEED.modules, 'owner'),
         blocked: false,
+        kiteApiKey: '',
         updatedAt: now,
       },
     },
@@ -157,15 +158,24 @@ async function createUser({ username, password, modules, kiteApiKey, note }) {
     err.status = 400;
     throw err;
   }
-  const now = new Date().toISOString();
   const role = u === OWNER_SEED.username ? 'owner' : 'friend';
+  const key = String(kiteApiKey || '').trim();
+  // Devil/owner: never store API key. Friends: required.
+  if (role === 'owner') {
+    // no kite key for owner
+  } else if (!key) {
+    const err = new Error('Kite API key required for friends');
+    err.status = 400;
+    throw err;
+  }
+  const now = new Date().toISOString();
   const doc = {
     username: u,
     passwordHash: await bcrypt.hash(pwd, 10),
     role,
     modules: normalizeModules(modules, role),
     blocked: false,
-    kiteApiKey: String(kiteApiKey || '').trim(),
+    kiteApiKey: role === 'owner' ? '' : key,
     note: String(note || '').trim().slice(0, 200),
     createdAt: now,
     updatedAt: now,
@@ -193,7 +203,17 @@ async function updateUser(id, patch) {
     $set.modules = normalizeModules(patch.modules, doc.role);
   }
   if (patch.blocked != null) $set.blocked = !!patch.blocked;
-  if (patch.kiteApiKey != null) $set.kiteApiKey = String(patch.kiteApiKey).trim();
+  if (doc.role === 'owner') {
+    $set.kiteApiKey = ''; // Devil never stores API key
+  } else if (patch.kiteApiKey != null) {
+    const key = String(patch.kiteApiKey).trim();
+    if (!key) {
+      const err = new Error('Kite API key required for friends');
+      err.status = 400;
+      throw err;
+    }
+    $set.kiteApiKey = key;
+  }
   if (patch.note != null) $set.note = String(patch.note).trim().slice(0, 200);
   if (patch.password) {
     if (String(patch.password).length < 6) {
