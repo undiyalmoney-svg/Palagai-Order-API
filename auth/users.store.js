@@ -16,6 +16,12 @@ const COL = 'users';
 
 function publicUser(doc) {
   if (!doc) return null;
+  const adminMessage = String(doc.adminMessage || '').trim();
+  const adminMessageAt = doc.adminMessageAt || null;
+  const dismissedAt = doc.messageDismissedAt || null;
+  const messageVisible =
+    !!adminMessage &&
+    (!dismissedAt || String(dismissedAt) !== String(adminMessageAt));
   return {
     id: String(doc._id),
     username: doc.username,
@@ -24,18 +30,33 @@ function publicUser(doc) {
     blocked: !!doc.blocked,
     kiteApiKey: doc.kiteApiKey || '',
     note: doc.note || '',
+    adminMessage: messageVisible ? adminMessage : '',
+    adminMessageAt: messageVisible ? adminMessageAt : null,
+    paymentStatus: normalizePaymentStatus(doc.paymentStatus, doc.role),
+    paymentNote: String(doc.paymentNote || '').trim(),
+    paymentUpdatedAt: doc.paymentUpdatedAt || null,
     createdAt: doc.createdAt || null,
     updatedAt: doc.updatedAt || null,
   };
 }
 
-/** Admin list/detail — includes plaintext password for editing */
+/** Admin list/detail — includes plaintext password + full message even if dismissed */
 function adminUser(doc) {
   if (!doc) return null;
+  const base = publicUser(doc);
   return {
-    ...publicUser(doc),
+    ...base,
     password: doc.passwordPlain || '',
+    adminMessage: String(doc.adminMessage || '').trim(),
+    adminMessageAt: doc.adminMessageAt || null,
+    messageDismissedAt: doc.messageDismissedAt || null,
   };
+}
+
+function normalizePaymentStatus(status, role) {
+  const s = String(status || '').toLowerCase();
+  if (s === 'paid' || s === 'unpaid' || s === 'pending') return s;
+  return role === 'owner' ? 'paid' : 'unpaid';
 }
 
 function normalizeModules(modules, role) {
@@ -205,6 +226,12 @@ async function createUser({ username, password, modules, kiteApiKey, note }) {
     blocked: false,
     kiteApiKey: role === 'owner' ? '' : key,
     note: String(note || '').trim().slice(0, 200),
+    adminMessage: '',
+    adminMessageAt: null,
+    messageDismissedAt: null,
+    paymentStatus: role === 'owner' ? 'paid' : 'unpaid',
+    paymentNote: '',
+    paymentUpdatedAt: now,
     createdAt: now,
     updatedAt: now,
   };
@@ -265,6 +292,27 @@ async function updateUser(id, patch) {
     $set.kiteApiKey = key;
   }
   if (patch.note != null) $set.note = String(patch.note).trim().slice(0, 200);
+  if (patch.adminMessage != null) {
+    const msg = String(patch.adminMessage || '').trim().slice(0, 2000);
+    $set.adminMessage = msg;
+    $set.adminMessageAt = msg ? new Date().toISOString() : null;
+    // New / cleared message resets dismiss so the user sees it again (or nothing).
+    $set.messageDismissedAt = null;
+  }
+  if (patch.paymentStatus != null) {
+    const s = String(patch.paymentStatus || '').toLowerCase();
+    if (s !== 'paid' && s !== 'unpaid' && s !== 'pending') {
+      const err = new Error('paymentStatus must be paid, unpaid, or pending');
+      err.status = 400;
+      throw err;
+    }
+    $set.paymentStatus = s;
+    $set.paymentUpdatedAt = new Date().toISOString();
+  }
+  if (patch.paymentNote != null) {
+    $set.paymentNote = String(patch.paymentNote || '').trim().slice(0, 500);
+    $set.paymentUpdatedAt = new Date().toISOString();
+  }
   if (patch.password != null && String(patch.password).length > 0) {
     const pwd = String(patch.password).trim();
     if (pwd.length < 6) {
@@ -302,6 +350,27 @@ async function deleteUser(id) {
   return { ok: true, id: String(doc._id), username: doc.username };
 }
 
+async function dismissAdminMessage(id) {
+  const db = getDb();
+  if (!db) {
+    const err = new Error('Mongo required');
+    err.status = 503;
+    throw err;
+  }
+  const doc = await findById(id);
+  if (!doc) {
+    const err = new Error('user not found');
+    err.status = 404;
+    throw err;
+  }
+  const at = doc.adminMessageAt || new Date().toISOString();
+  await db.collection(COL).updateOne(
+    { _id: doc._id },
+    { $set: { messageDismissedAt: at, updatedAt: new Date().toISOString() } },
+  );
+  return publicUser(await findById(id));
+}
+
 module.exports = {
   ensureOwnerSeed,
   ensureTestModuleForAll,
@@ -312,9 +381,11 @@ module.exports = {
   createUser,
   updateUser,
   deleteUser,
+  dismissAdminMessage,
   publicUser,
   adminUser,
   normalizeModules,
+  normalizePaymentStatus,
   FRIEND_MODULES,
   ALL_MODULES,
 };

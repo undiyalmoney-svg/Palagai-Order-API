@@ -8,6 +8,7 @@ const router = express.Router();
 /** Site users (Devil + friends) */
 router.post('/login', asyncHandler(ctrl.siteLogin));
 router.get('/me', requireSiteUser, asyncHandler(ctrl.siteMe));
+router.post('/me/dismiss-message', requireSiteUser, asyncHandler(ctrl.siteDismissMessage));
 
 /** Admin portal */
 router.post('/admin/login', asyncHandler(ctrl.adminLogin));

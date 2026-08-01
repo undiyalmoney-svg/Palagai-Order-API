@@ -28,10 +28,12 @@ async function siteLogin(req, res) {
   const result = await users.verifyPassword(username, password);
   if (!result.ok) {
     if (result.reason === 'blocked') {
+      const msg = String(result.user?.adminMessage || '').trim();
       res.status(403).json({
         status: 'error',
-        message: 'Contact admin',
+        message: msg || 'Contact admin',
         code: 'BLOCKED',
+        adminMessage: msg || '',
       });
       return;
     }
@@ -48,6 +50,11 @@ async function siteLogin(req, res) {
 
 async function siteMe(req, res) {
   res.json({ status: 'ok', user: req.user });
+}
+
+async function siteDismissMessage(req, res) {
+  const user = await users.dismissAdminMessage(req.user.id);
+  res.json({ status: 'ok', user });
 }
 
 async function adminLogin(req, res) {
@@ -119,6 +126,7 @@ async function vaultSeed(req, res) {
 module.exports = {
   siteLogin,
   siteMe,
+  siteDismissMessage,
   adminLogin,
   adminListUsers,
   adminCreateUser,

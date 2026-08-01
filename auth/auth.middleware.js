@@ -48,10 +48,12 @@ async function requireSiteUser(req, res, next) {
       return;
     }
     if (doc.blocked) {
+      const msg = String(doc.adminMessage || '').trim();
       res.status(403).json({
         status: 'error',
-        message: 'Contact admin',
+        message: msg || 'Contact admin',
         code: 'BLOCKED',
+        adminMessage: msg || '',
       });
       return;
     }
