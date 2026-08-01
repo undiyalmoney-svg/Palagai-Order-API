@@ -148,7 +148,7 @@ async function createUser({ username, password, modules, kiteApiKey, note }) {
     err.status = 400;
     throw err;
   }
-  if (u.toLowerCase() === 'angel') {
+  if (u.toLowerCase() === 'angel' || u.toLowerCase() === 'admin') {
     const err = new Error('reserved username');
     err.status = 400;
     throw err;

@@ -71,7 +71,10 @@ function requireAdmin(req, res, next) {
       return;
     }
     const payload = verifyToken(token);
-    if (payload.role !== 'admin' || payload.username !== ADMIN.username) {
+    if (
+      payload.role !== 'admin' ||
+      String(payload.username || '').toLowerCase() !== String(ADMIN.username).toLowerCase()
+    ) {
       res.status(403).json({ status: 'error', message: 'Admin only' });
       return;
     }

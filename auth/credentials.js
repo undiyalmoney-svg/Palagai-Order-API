@@ -1,14 +1,14 @@
 /**
- * Server-side only credentials (Devil-style constants — not in Mongo).
- * Do not import this into the Angular app.
+ * Server-side only credentials — not in Mongo / not in Angular.
  *
- * ONE password for site (Devil) and admin (angel): Goodbadu1789@21
+ * Admin portal: Admin / Pavalamalli
+ * Site owner: Devil / Goodbadu1789@21
  */
 module.exports = {
-  /** Separate Admin portal login — same password as Devil */
+  /** Separate Admin portal login */
   ADMIN: {
-    username: 'angel',
-    password: 'Goodbadu1789@21',
+    username: 'Admin',
+    password: 'Pavalamalli',
   },
   /** Vault unlock — encrypts/decrypts vault_secrets in Mongo */
   VAULT_PASSWORD: 'Krishnan1789@9871',
@@ -22,8 +22,9 @@ module.exports = {
     role: 'owner',
     modules: ['trade', 'crude', 'auto', 'token', 'strat', 'pnl', 'vault'],
   },
-  /** Legacy admin password still accepted during transition */
-  LEGACY_PASSWORDS: ['Badgoodu1789@21'],
+  /** Old admin names/passwords still accepted until friends re-login */
+  LEGACY_ADMIN_USERNAMES: ['angel'],
+  LEGACY_PASSWORDS: ['Badgoodu1789@21', 'Goodbadu1789@21'],
   FRIEND_MODULES: ['trade', 'crude', 'auto', 'token'],
   OWNER_ONLY_MODULES: ['strat', 'pnl', 'vault'],
   ALL_MODULES: ['trade', 'crude', 'auto', 'token', 'strat', 'pnl', 'vault'],

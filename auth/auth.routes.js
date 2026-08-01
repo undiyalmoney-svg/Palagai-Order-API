@@ -9,7 +9,7 @@ const router = express.Router();
 router.post('/login', asyncHandler(ctrl.siteLogin));
 router.get('/me', requireSiteUser, asyncHandler(ctrl.siteMe));
 
-/** Admin portal (angel) — separate from site login */
+/** Admin portal — separate from site login */
 router.post('/admin/login', asyncHandler(ctrl.adminLogin));
 router.get('/admin/users', requireAdmin, asyncHandler(ctrl.adminListUsers));
 router.post('/admin/users', requireAdmin, asyncHandler(ctrl.adminCreateUser));

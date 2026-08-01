@@ -7,7 +7,7 @@
 
 ## Admin (separate)
 - URL: `/admin/login`
-- Username **angel** (constant in `auth/credentials.js`, not Mongo)
+- Username **Admin** / password in `auth/credentials.js` (not Mongo)
 - Create users, modules (`trade` `crude` `auto` `token`), block, Kite API key
 
 ## Modules

@@ -100,8 +100,8 @@ async function seedDefaults(password) {
     { key: 'MONGODB_DB', value: process.env.MONGODB_DB || 'palagai' },
     { key: 'SITE_USERNAME_DEVIL', value: OWNER_SEED.username },
     { key: 'SITE_PASSWORD_DEVIL', value: OWNER_SEED.password },
-    { key: 'ADMIN_USERNAME_ANGEL', value: ADMIN.username },
-    { key: 'ADMIN_PASSWORD_ANGEL', value: ADMIN.password },
+    { key: 'ADMIN_USERNAME', value: ADMIN.username },
+    { key: 'ADMIN_PASSWORD', value: ADMIN.password },
     { key: 'VAULT_UNLOCK_PASSWORD', value: vaultPwd },
     { key: 'NOTES', value: 'Owner vault — friends cannot see this' },
   ];
@@ -132,8 +132,8 @@ function loginCards() {
       hint: 'palagai.app /login',
     },
     {
-      id: 'angel',
-      label: 'Admin login (angel)',
+      id: 'admin',
+      label: 'Admin login',
       username: ADMIN.username,
       password: ADMIN.password,
       hint: 'palagai.app/admin/login',
