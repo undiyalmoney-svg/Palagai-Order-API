@@ -1,13 +1,30 @@
 const users = require('./users.store');
 const vault = require('./vault.store');
-const { ADMIN, FRIEND_MODULES, ALL_MODULES } = require('./credentials');
+const {
+  ADMIN,
+  OWNER_SEED,
+  FRIEND_MODULES,
+  ALL_MODULES,
+} = require('./credentials');
 const {
   signUserToken,
   signAdminToken,
 } = require('./auth.middleware');
 
+function readCreds(body) {
+  const username = String(body?.username || '')
+    .replace(/^\uFEFF/, '')
+    .trim();
+  // Trim ends only — mobile/autofill often leaves a trailing newline/space
+  const password = String(body?.password || '')
+    .replace(/^\uFEFF/, '')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .trim();
+  return { username, password };
+}
+
 async function siteLogin(req, res) {
-  const { username, password } = req.body || {};
+  const { username, password } = readCreds(req.body);
   const result = await users.verifyPassword(username, password);
   if (!result.ok) {
     if (result.reason === 'blocked') {
@@ -34,12 +51,16 @@ async function siteMe(req, res) {
 }
 
 async function adminLogin(req, res) {
-  const { username, password } = req.body || {};
-  if (
-    String(username || '') !== ADMIN.username ||
-    String(password || '') !== ADMIN.password
-  ) {
-    res.status(401).json({ status: 'error', message: 'Invalid admin credentials' });
+  const { username, password } = readCreds(req.body);
+  const userOk = username.toLowerCase() === String(ADMIN.username).toLowerCase();
+  // Accept admin password OR site-owner password (Badgoodu vs Goodbadu mix-ups)
+  const passOk =
+    password === ADMIN.password || password === OWNER_SEED.password;
+  if (!userOk || !passOk) {
+    res.status(401).json({
+      status: 'error',
+      message: 'Invalid admin credentials (user angel — check Badgoodu vs Goodbadu)',
+    });
     return;
   }
   res.json({

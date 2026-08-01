@@ -69,8 +69,13 @@ async function ensureOwnerSeed() {
 async function findByUsername(username) {
   const db = getDb();
   if (!db) return null;
+  const u = String(username || '').trim();
+  if (!u) return null;
+  // Exact match first, then case-insensitive (Devil / devil)
+  const exact = await db.collection(COL).findOne({ username: u });
+  if (exact) return exact;
   return db.collection(COL).findOne({
-    username: String(username || '').trim(),
+    username: { $regex: `^${u.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' },
   });
 }
 

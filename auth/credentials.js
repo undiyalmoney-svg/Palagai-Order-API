@@ -3,7 +3,7 @@
  * Do not import this into the Angular app.
  */
 module.exports = {
-  /** Separate Admin portal login */
+  /** Separate Admin portal login (same password family as Devil — either Bad/Good accepted in controller) */
   ADMIN: {
     username: 'angel',
     password: 'Badgoodu1789@21',
