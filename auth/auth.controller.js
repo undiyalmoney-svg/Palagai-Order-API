@@ -71,7 +71,7 @@ async function adminUpdateUser(req, res) {
 async function vaultList(req, res) {
   const password = req.body?.password || req.headers['x-vault-password'];
   const secrets = await vault.listSecrets(password);
-  res.json({ status: 'ok', secrets });
+  res.json({ status: 'ok', secrets, logins: vault.loginCards() });
 }
 
 async function vaultUpsert(req, res) {
@@ -88,7 +88,7 @@ async function vaultRemove(req, res) {
 
 async function vaultSeed(req, res) {
   const secrets = await vault.seedDefaults(req.body?.password);
-  res.json({ status: 'ok', secrets });
+  res.json({ status: 'ok', secrets, logins: vault.loginCards() });
 }
 
 module.exports = {

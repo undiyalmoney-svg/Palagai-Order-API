@@ -16,10 +16,9 @@
 | trade, crude, auto, token | Friends (as granted) + owner |
 | strat, pnl, vault | Owner only |
 
-## Vault
-- Unlock password constant: `VAULT_PASSWORD` in `auth/credentials.js` (not in Mongo)
-- Encrypted rows in Mongo `vault_secrets`
-- UI: `/dashboard/vault` (owner)
+VAULT unlock password: **Krishnan1789@9871** (constant in `credentials.js`, not Mongo).
+
+After changing the vault password, unlock once and click **Seed defaults** so Devil / angel / IP keys are written with the new encryption key.
 
 ## Multi-user Auto Trader
 - Each site user has own `/live` session + encrypted kite auth

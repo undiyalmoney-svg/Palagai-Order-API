@@ -92,22 +92,60 @@ async function removeSecret(password, key) {
 
 async function seedDefaults(password) {
   assertVaultPassword(password);
+  const { ADMIN, OWNER_SEED, VAULT_PASSWORD: vaultPwd } = require('./credentials');
   const defaults = [
     { key: 'STATIC_IP', value: '168.144.28.89' },
     { key: 'ORDER_API_URL', value: 'http://168.144.28.89:3000' },
     { key: 'MONGODB_URI', value: process.env.MONGODB_URI || '' },
     { key: 'MONGODB_DB', value: process.env.MONGODB_DB || 'palagai' },
+    { key: 'SITE_USERNAME_DEVIL', value: OWNER_SEED.username },
+    { key: 'SITE_PASSWORD_DEVIL', value: OWNER_SEED.password },
+    { key: 'ADMIN_USERNAME_ANGEL', value: ADMIN.username },
+    { key: 'ADMIN_PASSWORD_ANGEL', value: ADMIN.password },
+    { key: 'VAULT_UNLOCK_PASSWORD', value: vaultPwd },
     { key: 'NOTES', value: 'Owner vault — friends cannot see this' },
   ];
   for (const row of defaults) {
     const db = getDb();
     if (!db) break;
+    // Always refresh login/vault password keys; other keys only if missing
+    const force =
+      row.key.includes('DEVIL') ||
+      row.key.includes('ANGEL') ||
+      row.key === 'VAULT_UNLOCK_PASSWORD';
     const exists = await db.collection(COL).findOne({ key: row.key });
-    if (!exists && row.value) {
+    if (force || (!exists && row.value)) {
       await upsertSecret(password, row);
     }
   }
   return listSecrets(password);
+}
+
+function loginCards() {
+  const { ADMIN, OWNER_SEED, VAULT_PASSWORD: vaultPwd } = require('./credentials');
+  return [
+    {
+      id: 'devil',
+      label: 'Site login (Devil)',
+      username: OWNER_SEED.username,
+      password: OWNER_SEED.password,
+      hint: 'palagai.app /login',
+    },
+    {
+      id: 'angel',
+      label: 'Admin login (angel)',
+      username: ADMIN.username,
+      password: ADMIN.password,
+      hint: 'palagai.app/admin/login',
+    },
+    {
+      id: 'vault',
+      label: 'Vault unlock password',
+      username: '—',
+      password: vaultPwd,
+      hint: 'Unlock this vault page',
+    },
+  ];
 }
 
 module.exports = {
@@ -116,4 +154,5 @@ module.exports = {
   removeSecret,
   seedDefaults,
   assertVaultPassword,
+  loginCards,
 };
