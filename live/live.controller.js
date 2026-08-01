@@ -4,31 +4,35 @@ async function health(_req, res) {
   res.json({
     status: 'ok',
     service: 'palagai-live-control',
-    note: 'Additive Server Live API — does not alter /api/kite order routes',
+    note: 'Multi-user Server Live — does not alter /api/kite order routes',
   });
 }
 
-async function status(_req, res) {
-  res.json(store.statusPayload());
+function userId(req) {
+  return req.user?.id || 'anonymous';
 }
 
-async function events(_req, res) {
-  const s = store.statusPayload();
+async function status(req, res) {
+  res.json(store.statusFor(userId(req)));
+}
+
+async function events(req, res) {
+  const s = store.statusFor(userId(req));
   res.json({ events: s.events || [] });
 }
 
 async function start(req, res) {
-  const out = await store.start(req.body || {});
+  const out = await store.start(userId(req), req.body || {});
   res.json(out);
 }
 
-async function stop(_req, res) {
-  const out = await store.stop();
+async function stop(req, res) {
+  const out = await store.stop(userId(req));
   res.json(out);
 }
 
 async function putAuth(req, res) {
-  const out = await store.putAuth(req.body || {});
+  const out = await store.putAuth(userId(req), req.body || {});
   res.json(out);
 }
 

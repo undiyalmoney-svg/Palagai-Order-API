@@ -3,13 +3,12 @@ const { asyncHandler } = require('../utils/asyncHandler');
 const ctrl = require('../controllers/kiteOrders.controller');
 const liveRoutes = require('../live/live.routes');
 const pnlRoutes = require('../pnl/pnl.routes');
+const authRoutes = require('../auth/auth.routes');
 
 const router = express.Router();
 
 /**
  * Same path shapes as Kite Connect / existing Palagai proxy:
- * POST   /api/kite/orders/:variety
- * ...
  * UNCHANGED — do not alter these handlers.
  */
 const kiteRouter = express.Router();
@@ -27,10 +26,8 @@ kiteRouter.get('/portfolio/positions', asyncHandler(ctrl.getPositions));
 router.use('/api/kite', kiteRouter);
 router.get('/health', ctrl.health);
 
-// Additive Server Live control plane (Auto Trader). Does not touch /api/kite/*.
+router.use('/auth', authRoutes);
 router.use('/live', liveRoutes);
-
-// Additive manual daily P/L records.
 router.use('/pnl', pnlRoutes);
 
 module.exports = router;
