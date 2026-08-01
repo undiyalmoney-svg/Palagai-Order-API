@@ -114,16 +114,8 @@ async function verifyPassword(username, password) {
     .replace(/^\uFEFF/, '')
     .replace(/[\u200B-\u200D\uFEFF]/g, '')
     .trim();
-  let match = await bcrypt.compare(pwd, doc.passwordHash || '');
-  if (!match && doc.role === 'owner') {
-    const { ADMIN, LEGACY_PASSWORDS } = require('./credentials');
-    const allowed = new Set([
-      OWNER_SEED.password,
-      ADMIN.password,
-      ...(Array.isArray(LEGACY_PASSWORDS) ? LEGACY_PASSWORDS : []),
-    ]);
-    if (allowed.has(pwd)) match = true;
-  }
+  // Site login: Mongo bcrypt only (Devil + Admin-created friends)
+  const match = await bcrypt.compare(pwd, doc.passwordHash || '');
   if (!match) return { ok: false, reason: 'invalid' };
   return { ok: true, user: doc };
 }

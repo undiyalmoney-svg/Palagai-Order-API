@@ -52,18 +52,10 @@ async function siteMe(req, res) {
 
 async function adminLogin(req, res) {
   const { username, password } = readCreds(req.body);
-  const { LEGACY_PASSWORDS, LEGACY_ADMIN_USERNAMES } = require('./credentials');
-  const allowedUsers = new Set([
-    String(ADMIN.username).toLowerCase(),
-    ...(Array.isArray(LEGACY_ADMIN_USERNAMES)
-      ? LEGACY_ADMIN_USERNAMES.map((u) => String(u).toLowerCase())
-      : []),
-  ]);
-  const allowedPass = new Set([
-    ADMIN.password,
-    ...(Array.isArray(LEGACY_PASSWORDS) ? LEGACY_PASSWORDS : []),
-  ]);
-  if (!allowedUsers.has(username.toLowerCase()) || !allowedPass.has(password)) {
+  const userOk =
+    username.toLowerCase() === String(ADMIN.username).toLowerCase();
+  const passOk = password === ADMIN.password;
+  if (!userOk || !passOk) {
     res.status(401).json({
       status: 'error',
       message: 'Invalid admin credentials',

@@ -7,7 +7,8 @@
 
 ## Admin (separate)
 - URL: `/admin/login`
-- Username **Admin** / password in `auth/credentials.js` (not Mongo)
+- Admin portal: `/admin/login` — **Admin** / (see `credentials.js`) — create friends, modules, block
+- Site login: `/login` — Mongo users only (owner **Devil** + friends Admin creates; bcrypt check)
 - Create users, modules (`trade` `crude` `auto` `token`), block, Kite API key
 
 ## Modules
