@@ -100,7 +100,7 @@ async function ensureOwnerSeed() {
     console.log('[auth] seeded owner user', OWNER_SEED.username);
     return;
   }
-  // Keep modules/role; username + password are editable in Admin (do not overwrite)
+  // Keep modules/role; username + password + kiteApiKey are editable in Admin (do not overwrite)
   await db.collection(COL).updateOne(
     { _id: existing._id },
     {
@@ -108,7 +108,6 @@ async function ensureOwnerSeed() {
         role: 'owner',
         modules: normalizeModules(existing.modules || OWNER_SEED.modules, 'owner'),
         blocked: false,
-        kiteApiKey: '',
         updatedAt: now,
         ...(!existing.passwordPlain || !existing.passwordHash
           ? { passwordHash, passwordPlain: OWNER_SEED.password }
@@ -224,7 +223,7 @@ async function createUser({ username, password, modules, kiteApiKey, note }) {
     role,
     modules: normalizeModules(modules, role),
     blocked: false,
-    kiteApiKey: role === 'owner' ? '' : key,
+    kiteApiKey: key,
     note: String(note || '').trim().slice(0, 200),
     adminMessage: '',
     adminMessageAt: null,
@@ -280,11 +279,9 @@ async function updateUser(id, patch) {
     $set.modules = normalizeModules(patch.modules, doc.role);
   }
   if (patch.blocked != null) $set.blocked = !!patch.blocked;
-  if (doc.role === 'owner') {
-    $set.kiteApiKey = '';
-  } else if (patch.kiteApiKey != null) {
+  if (patch.kiteApiKey != null) {
     const key = String(patch.kiteApiKey).trim();
-    if (!key) {
+    if (doc.role !== 'owner' && !key) {
       const err = new Error('Kite API key required for friends');
       err.status = 400;
       throw err;
