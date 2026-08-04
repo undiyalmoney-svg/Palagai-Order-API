@@ -5,6 +5,8 @@ async function health(_req, res) {
     status: 'ok',
     service: 'palagai-live-control',
     note: 'Multi-user Server Live — does not alter /api/kite order routes',
+    version: '1.2.0',
+    appBuild: '2026.08.04-crude-selective',
     crudeDefault: 'selective',
     crudeDna: 'session-or · maxOrWidth 60 · eve 18:30–22:00 · SL40/TP80 · confirm · first-win · max 1/day · protect off',
   });
