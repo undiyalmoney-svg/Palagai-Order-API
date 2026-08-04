@@ -2940,7 +2940,33 @@ var CRUDE_TRAP_CONFIRM_PARAMS = {
   dailyBandLabel: "S/R trap + confirm \xB7 3.5R \xB7 unlimited \xB7 no day stop",
   ...PROTECT_OFF
 };
+/** Charge-aware Crude DNA — shared Trade Desk / Autobot default (not unlimited All-Green). */
+var CRUDE_SELECTIVE_PARAMS = {
+  profileId: "selective",
+  label: "Selective (1/day \xB7 OR\u226460)",
+  stopPts: 40,
+  morningTargetPts: 80,
+  eveningTargetPts: 80,
+  targetRMultiple: 0,
+  dayLossStopPts: 40,
+  strictDayLossPts: 40,
+  dayProfitLockPts: 0,
+  entryMode: "session-or",
+  requireConfirm: true,
+  firstWinLock: true,
+  eveningEntryStart: "18:30",
+  eveningEntryEnd: "22:00",
+  sessionOrStart: CRUDE_SOR_OR_START,
+  sessionOrEnd: CRUDE_SOR_OR_END,
+  maxOrWidth: 60,
+  maxEveningTradesDay: 1,
+  defaultEnableMorning: false,
+  defaultEnableEvening: true,
+  dailyBandLabel: "OR\u226460 \xB7 eve 18:30\u201322:00 \xB7 SL40/TP80 \xB7 confirm \xB7 first-win \xB7 max 1/day",
+  ...PROTECT_OFF
+};
 var CRUDE_STRATEGY_PROFILES = {
+  selective: CRUDE_SELECTIVE_PARAMS,
   "all-green": CRUDE_ALL_GREEN_PARAMS,
   "daily-profit": CRUDE_DAILY_PROFIT_PARAMS,
   champion: CRUDE_CHAMPION_PARAMS,
@@ -2951,7 +2977,7 @@ function resolveCrudeStrategyProfile(profileId) {
   if (profileId && CRUDE_STRATEGY_PROFILES[profileId]) {
     return CRUDE_STRATEGY_PROFILES[profileId];
   }
-  return CRUDE_ALL_GREEN_PARAMS;
+  return CRUDE_SELECTIVE_PARAMS;
 }
 function resolveCrudeProfileDayLossPts(params, strictDayStop) {
   return strictDayStop ? params.strictDayLossPts : params.dayLossStopPts;
@@ -3306,7 +3332,7 @@ function replayPaperOnCrude(params) {
   } = params;
   const forceCloseOpen = params.forceCloseOpen !== false;
   const lotsMultiplier = Math.max(1, Math.floor(params.lotsMultiplier ?? 1) || 1);
-  const tradeParams = params.tradeParams ?? resolveCrudeStrategyProfile("all-green");
+  const tradeParams = params.tradeParams ?? resolveCrudeStrategyProfile("selective");
   const dayLossStopPts = params.dayLossStopPts ?? tradeParams.dayLossStopPts;
   const dayProfitLockPts = tradeParams.dayProfitLockPts;
   const enableMorning = params.enableMorning !== false;
@@ -4368,17 +4394,27 @@ function computeProtectiveSlTrigger(params) {
 }
 
 // src/app/core/utils/instrument-resolver.util.ts
+/** Prefer next contract on expiry day (same as Trade Desk Eu resolver). Options already roll via liveExpiries. */
 function resolveCrudeOilMiniFuturesToken(instruments) {
   const today = startOfDay3(/* @__PURE__ */ new Date());
-  return instruments.filter(
+  const pool = instruments.filter(
     (item) => item.exchange === "MCX" && item.instrumentType === "FUT" && item.tradingSymbol.startsWith("CRUDEOILM")
-  ).filter((item) => {
+  ).sort((left, right) => expiryTime(left) - expiryTime(right));
+  const next = pool.find((item) => {
     if (!item.expiry) {
       return true;
     }
-    const expiry = startOfDay3(new Date(item.expiry));
-    return expiry >= today;
-  }).sort((left, right) => expiryTime(left) - expiryTime(right))[0];
+    return startOfDay3(new Date(item.expiry)) > today;
+  });
+  if (next) {
+    return next;
+  }
+  return pool.find((item) => {
+    if (!item.expiry) {
+      return true;
+    }
+    return startOfDay3(new Date(item.expiry)) >= today;
+  });
 }
 function expiryTime(instrument) {
   if (!instrument.expiry) {

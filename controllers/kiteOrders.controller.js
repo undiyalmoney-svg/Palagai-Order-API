@@ -98,7 +98,13 @@ async function getPositions(req, res) {
 }
 
 function health(_req, res) {
-  res.json({ status: 'ok', service: 'palagai-order-api' });
+  res.json({
+    status: 'ok',
+    service: 'palagai-order-api',
+    version: '1.2.0',
+    appBuild: '2026.08.04-crude-selective',
+    crudeDefault: 'selective',
+  });
 }
 
 module.exports = {

@@ -1,5 +1,5 @@
 /**
- * Server Live strategy worker — Trap / Genie / All-Green on 60s ticks.
+ * Server Live strategy worker — Trap / Genie / Selective Crude on 60s ticks.
  * Places orders via live-broker → kite.service (does NOT touch kiteOrders.controller).
  */
 const {
@@ -269,9 +269,13 @@ class LiveWorker {
       }
 
       if (config.enableCrude && crudeSession && this.candles.crude.length) {
-        const tradeParams = resolveCrudeStrategyProfile('all-green');
+        const crudeProfile =
+          config.crudeStrategy === 'all-green' ? 'all-green' : 'selective';
+        const tradeParams = resolveCrudeStrategyProfile(crudeProfile);
         const dayLossStopPts = resolveCrudeProfileDayLossPts(tradeParams, false);
         const futSym = this.crudeFuture?.tradingSymbol || 'CRUDEOILM';
+        const crudeLabel =
+          tradeParams.profileId === 'selective' ? 'Crude Selective' : `Crude ${tradeParams.label}`;
         const replay = replayPaperOnCrude({
           instrumentId: CRUDE_OIL_MINI_INSTRUMENT.id,
           instrumentName: `Crude Mini (${futSym})`,
@@ -291,12 +295,12 @@ class LiveWorker {
         await this.broker.syncInstrument({
           authorization,
           instrumentId: CRUDE_OIL_MINI_INSTRUMENT.id,
-          instrumentName: 'Crude All-Green',
+          instrumentName: crudeLabel,
           open: toLiveOpen(replay.open),
           lots: config.crudeLots || 1,
         });
         const crudeSig =
-          `Crude All-Green · ${replay.lastSignal}` +
+          `${crudeLabel} · ${replay.lastSignal}` +
           (replay.open ? ` · OPEN ${replay.open.direction}` : '');
         if (crudeSig !== this.lastSignals.crude) {
           this.lastSignals.crude = crudeSig;

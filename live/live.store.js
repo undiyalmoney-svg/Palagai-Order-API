@@ -230,7 +230,8 @@ async function start(userId, config) {
     crudeLots: Math.max(1, Math.floor(Number(config.crudeLots)) || 1),
     bankStrategy: config.bankStrategy === 'genie' ? 'genie' : 'trap',
     niftyStrategy: 'trap',
-    crudeStrategy: 'all-green',
+    // Fee protection: Selective DNA by default (max 1/day · OR≤60). All-Green only if explicitly requested.
+    crudeStrategy: config.crudeStrategy === 'all-green' ? 'all-green' : 'selective',
     realOrders: !!config.realOrders,
   };
   if (session.config.realOrders && !session.auth) {
@@ -249,7 +250,7 @@ async function start(userId, config) {
   pushEvent(
     session,
     'START',
-    `books N${session.config.enableNifty ? 1 : 0}/B${session.config.enableBank ? 1 : 0}/C${session.config.enableCrude ? 1 : 0} · bank=${session.config.bankStrategy} · real=${session.config.realOrders}`,
+    `books N${session.config.enableNifty ? 1 : 0}/B${session.config.enableBank ? 1 : 0}/C${session.config.enableCrude ? 1 : 0} · bank=${session.config.bankStrategy} · crude=${session.config.crudeStrategy} · real=${session.config.realOrders}`,
   );
   startTickLoop(session);
   await persistRun(session);
