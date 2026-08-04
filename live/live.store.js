@@ -3,6 +3,18 @@
  * Does not touch /api/kite HTTP controllers; workers call kite.service directly.
  */
 const crypto = require('crypto');
+const {
+  APP_BUILD,
+  APP_VERSION,
+  DAILY_3K_PRESET,
+  deskRiskLots,
+  profitLockMoneyRs,
+  strictStopMoneyRs,
+  riskStatusLabels,
+  normalizeStartConfig,
+  DAY_PROFIT_LOCK_RS,
+  STRICT_DAY_STOP_RS,
+} = require('./daily-desk-defaults');
 
 const STALE_SEC = 180;
 
@@ -95,6 +107,8 @@ function statusPayload(session) {
   const ageSec = session.lastHeartbeatAt
     ? Math.round((Date.now() - Date.parse(session.lastHeartbeatAt)) / 1000)
     : null;
+  const cfg = session.config || DAILY_3K_PRESET;
+  const lots = deskRiskLots(cfg);
   return {
     status: session.status,
     message: session.message,
@@ -104,6 +118,18 @@ function statusPayload(session) {
     heartbeatAgeSec: ageSec,
     stale: ageSec == null ? session.status === 'running' : ageSec > STALE_SEC,
     config: session.config,
+    defaults: DAILY_3K_PRESET,
+    risk: {
+      dayProfitLockRsBase: DAY_PROFIT_LOCK_RS,
+      strictDayStopRsBase: STRICT_DAY_STOP_RS,
+      riskLots: lots,
+      profitLockMoneyRs: profitLockMoneyRs(lots),
+      strictStopMoneyRs: strictStopMoneyRs(lots),
+      labels: riskStatusLabels(cfg),
+      checkboxHint: `₹${DAY_PROFIT_LOCK_RS.toLocaleString('en-IN')} × lots (1→₹3k · 3→₹9k)`,
+    },
+    version: APP_VERSION,
+    appBuild: APP_BUILD,
     authPresent: !!session.auth,
     events: session.events.slice(0, 40),
     mongo: !!mongoDb,
@@ -221,19 +247,7 @@ async function start(userId, config) {
     session.message = 'Already running. Stop first to change config.';
     return statusPayload(session);
   }
-  session.config = {
-    enableNifty: !!config.enableNifty,
-    enableBank: !!config.enableBank,
-    enableCrude: !!config.enableCrude,
-    niftyLots: Math.max(1, Math.floor(Number(config.niftyLots)) || 1),
-    bankLots: Math.max(1, Math.floor(Number(config.bankLots)) || 1),
-    crudeLots: Math.max(1, Math.floor(Number(config.crudeLots)) || 1),
-    bankStrategy: config.bankStrategy === 'genie' ? 'genie' : 'trap',
-    niftyStrategy: 'trap',
-    // Fee protection: Selective DNA by default (max 1/day · OR≤60). All-Green only if explicitly requested.
-    crudeStrategy: config.crudeStrategy === 'all-green' ? 'all-green' : 'selective',
-    realOrders: !!config.realOrders,
-  };
+  session.config = normalizeStartConfig(config);
   if (session.config.realOrders && !session.auth) {
     const err = new Error('Push Kite token first before real money Start');
     err.status = 400;
@@ -247,10 +261,12 @@ async function start(userId, config) {
   session.status = 'running';
   session.startedAt = new Date().toISOString();
   session.stoppedAt = null;
+  const riskBits = riskStatusLabels(session.config);
   pushEvent(
     session,
     'START',
-    `books N${session.config.enableNifty ? 1 : 0}/B${session.config.enableBank ? 1 : 0}/C${session.config.enableCrude ? 1 : 0} · bank=${session.config.bankStrategy} · crude=${session.config.crudeStrategy} · real=${session.config.realOrders}`,
+    `Daily desk · books N${session.config.enableNifty ? 1 : 0}/B${session.config.enableBank ? 1 : 0}/C${session.config.enableCrude ? 1 : 0} · bank=${session.config.bankStrategy} · crude=${session.config.crudeStrategy} · real=${session.config.realOrders}` +
+      (riskBits.length ? ` · ${riskBits.join(' · ')}` : ''),
   );
   startTickLoop(session);
   await persistRun(session);

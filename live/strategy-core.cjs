@@ -2940,29 +2940,29 @@ var CRUDE_TRAP_CONFIRM_PARAMS = {
   dailyBandLabel: "S/R trap + confirm \xB7 3.5R \xB7 unlimited \xB7 no day stop",
   ...PROTECT_OFF
 };
-/** Charge-aware Crude DNA — shared Trade Desk / Autobot default (not unlimited All-Green). */
+/** Daily desk Crude DNA — match Trade Desk Selective (not unlimited All-Green). */
 var CRUDE_SELECTIVE_PARAMS = {
   profileId: "selective",
-  label: "Selective (1/day \xB7 OR\u226460)",
-  stopPts: 40,
-  morningTargetPts: 80,
-  eveningTargetPts: 80,
+  label: "Selective (\u22642/day \xB7 SL30/TP60)",
+  stopPts: 30,
+  morningTargetPts: 60,
+  eveningTargetPts: 60,
   targetRMultiple: 0,
   dayLossStopPts: 40,
   strictDayLossPts: 40,
   dayProfitLockPts: 0,
   entryMode: "session-or",
   requireConfirm: true,
-  firstWinLock: true,
-  eveningEntryStart: "18:30",
+  firstWinLock: false,
+  eveningEntryStart: "10:00",
   eveningEntryEnd: "22:00",
   sessionOrStart: CRUDE_SOR_OR_START,
   sessionOrEnd: CRUDE_SOR_OR_END,
-  maxOrWidth: 60,
-  maxEveningTradesDay: 1,
+  maxOrWidth: 0,
+  maxEveningTradesDay: 2,
   defaultEnableMorning: false,
   defaultEnableEvening: true,
-  dailyBandLabel: "OR\u226460 \xB7 eve 18:30\u201322:00 \xB7 SL40/TP80 \xB7 confirm \xB7 first-win \xB7 max 1/day",
+  dailyBandLabel: "10:00\u201322:00 \xB7 SL30/TP60 \xB7 confirm \xB7 max 2/day \xB7 no OR skip",
   ...PROTECT_OFF
 };
 var CRUDE_STRATEGY_PROFILES = {
@@ -4430,6 +4430,7 @@ function startOfDay3(date) {
 }
 
 // scripts/server-live/bundle-entry.ts
+/** Daily ₹1k–₹3k Trap DNA — must match Trade Desk SR Trap Confirm. Next-bar confirm stays ON. */
 var TRAP_DEFAULTS = defaultStrategySettings({
   entryTimeStart: "09:45",
   entryTimeEnd: "14:45",
@@ -4442,7 +4443,7 @@ var TRAP_DEFAULTS = defaultStrategySettings({
   instrumentType: "futures",
   dayStopPts: 80,
   dayProfitLockPts: 0,
-  targetRMultiple: 3.5,
+  targetRMultiple: 2,
   profitProtectEnabled: true,
   profitProtectArmR: 1,
   profitProtectLockR: 0,
@@ -4451,18 +4452,18 @@ var TRAP_DEFAULTS = defaultStrategySettings({
   extras: {
     trapMode: "both",
     swingLb: 5,
-    piercePts: 3,
+    piercePts: 10,
     minRiskPts: 4,
     maxRiskPts: 28,
     slPadPts: 2,
     minConfirmBody: 0,
-    profitLockArmRs: 600,
-    profitLockLockRs: 300,
-    profitLockGivebackRs: 300,
-    slConfirmCutoffEnabled: true,
-    slConfirmCutoffFracR: 0.55,
-    slConfirmCutoffMaxMfeR: 0.75,
-    slConfirmSoftRs: 700
+    profitLockArmRs: 150,
+    profitLockLockRs: 75,
+    profitLockGivebackRs: 75,
+    slConfirmCutoffEnabled: false,
+    slConfirmCutoffFracR: 0,
+    slConfirmCutoffMaxMfeR: 0,
+    slConfirmSoftRs: 0
   }
 });
 var GENIE_DEFAULTS = defaultStrategySettings({

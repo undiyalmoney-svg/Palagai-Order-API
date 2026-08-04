@@ -101,9 +101,10 @@ function health(_req, res) {
   res.json({
     status: 'ok',
     service: 'palagai-order-api',
-    version: '1.2.0',
-    appBuild: '2026.08.04-crude-selective',
+    version: '1.3.0',
+    appBuild: '2026.08.04-autobot-daily-3k',
     crudeDefault: 'selective',
+    deskPreset: 'daily-3k',
   });
 }
 

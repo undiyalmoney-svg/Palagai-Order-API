@@ -18,6 +18,7 @@ function requireAutoModule(req, res, next) {
 }
 
 router.get('/health', asyncHandler(ctrl.health));
+router.get('/defaults', asyncHandler(ctrl.defaults));
 router.use(requireSiteUser);
 router.use(requireAutoModule);
 router.get('/status', asyncHandler(ctrl.status));

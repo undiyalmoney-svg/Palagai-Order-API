@@ -1,5 +1,5 @@
 /**
- * Server Live strategy worker — Trap / Genie / Selective Crude on 60s ticks.
+ * Server Live strategy worker — Daily desk DNA: Trap + Selective Crude.
  * Places orders via live-broker → kite.service (does NOT touch kiteOrders.controller).
  */
 const {
@@ -17,6 +17,7 @@ const {
 } = require('./strategy-core.cjs');
 const { fetchInstruments, fetchHistorical5m } = require('./kite-market');
 const { LiveBroker } = require('./live-broker');
+const { indexDayRiskOverrides, riskStatusLabels } = require('./daily-desk-defaults');
 
 const CRUDE_EXIT_BY = '23:10';
 const LOOKBACK_DAYS = 12;
@@ -67,6 +68,18 @@ function toLiveOpen(replayOpen) {
     option: replayOpen.option,
     optionEntryPremium: replayOpen.optionEntryPremium ?? null,
   };
+}
+
+function trapInitOverrides(config, instrumentId) {
+  return (
+    indexDayRiskOverrides({
+      instrumentId,
+      enableNifty: !!config.enableNifty,
+      enableBank: !!config.enableBank,
+      dayProfitLock: !!config.dayProfitLock,
+      strictDayStop: !!config.strictDayStop,
+    }) || {}
+  );
 }
 
 class LiveWorker {
@@ -196,10 +209,11 @@ class LiveWorker {
       const needed = new Set();
       const indexSession = now >= '09:15' && now <= '15:30';
       const crudeSession = now >= '09:00' && now <= '23:15';
+      const enableKutty = !!config.enableKutty;
 
       if (config.enableNifty && indexSession) {
         const strategy = createTrapStrategy();
-        strategy.initialize();
+        strategy.initialize(trapInitOverrides(config, NIFTY_50_INSTRUMENT.id));
         const replay = replayPaperOnIndex({
           instrumentId: NIFTY_50_INSTRUMENT.id,
           instrumentName: NIFTY_50_INSTRUMENT.name,
@@ -213,8 +227,8 @@ class LiveWorker {
           forceCloseOpen: now >= '15:15',
           lotsMultiplier: config.niftyLots || 1,
           strategy,
-          enableKutty: false,
-          kuttyAlone: false,
+          enableKutty,
+          kuttyAlone: !!config.kuttyAlone,
         });
         await this.broker.syncInstrument({
           authorization,
@@ -235,7 +249,11 @@ class LiveWorker {
       if (config.enableBank && indexSession) {
         const strategy =
           config.bankStrategy === 'genie' ? createGenieStrategy() : createTrapStrategy();
-        strategy.initialize();
+        if (config.bankStrategy !== 'genie') {
+          strategy.initialize(trapInitOverrides(config, BANK_NIFTY_INSTRUMENT.id));
+        } else {
+          strategy.initialize();
+        }
         const replay = replayPaperOnIndex({
           instrumentId: BANK_NIFTY_INSTRUMENT.id,
           instrumentName: BANK_NIFTY_INSTRUMENT.name,
@@ -249,8 +267,8 @@ class LiveWorker {
           forceCloseOpen: now >= '15:15',
           lotsMultiplier: config.bankLots || 1,
           strategy,
-          enableKutty: false,
-          kuttyAlone: false,
+          enableKutty,
+          kuttyAlone: !!config.kuttyAlone,
         });
         await this.broker.syncInstrument({
           authorization,
@@ -272,7 +290,10 @@ class LiveWorker {
         const crudeProfile =
           config.crudeStrategy === 'all-green' ? 'all-green' : 'selective';
         const tradeParams = resolveCrudeStrategyProfile(crudeProfile);
-        const dayLossStopPts = resolveCrudeProfileDayLossPts(tradeParams, false);
+        const dayLossStopPts = resolveCrudeProfileDayLossPts(
+          tradeParams,
+          !!config.strictDayStop,
+        );
         const futSym = this.crudeFuture?.tradingSymbol || 'CRUDEOILM';
         const crudeLabel =
           tradeParams.profileId === 'selective' ? 'Crude Selective' : `Crude ${tradeParams.label}`;
@@ -308,8 +329,10 @@ class LiveWorker {
         }
       }
 
+      const riskBits = riskStatusLabels(config);
+      const riskTxt = riskBits.length ? ` · ${riskBits.join(' · ')}` : '';
       this.heartbeat(
-        `Live tick · ${now} IST · real=${!!config.realOrders} · N${config.enableNifty ? 1 : 0}/B${config.enableBank ? 1 : 0}/C${config.enableCrude ? 1 : 0}`,
+        `Live tick · ${now} IST · real=${!!config.realOrders} · N${config.enableNifty ? 1 : 0}/B${config.enableBank ? 1 : 0}/C${config.enableCrude ? 1 : 0}${riskTxt}`,
       );
     } catch (err) {
       const msg = err?.message || String(err);
