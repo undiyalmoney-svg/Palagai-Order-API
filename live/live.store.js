@@ -311,6 +311,36 @@ function statusFor(userId) {
   return statusPayload(getSession(userId));
 }
 
+/**
+ * Kite `token apiKey:accessToken` for a user, using the in-memory session or,
+ * if absent, the encrypted token stored in Mongo (kite_auth) from a prior Push.
+ * Lets Paper backtests reuse the pushed token instead of a per-request browser
+ * session. Returns null when no token is available.
+ */
+async function getAuthorizationFor(userId) {
+  const session = getSession(userId);
+  let plain = readAuthPlain(session);
+  if ((!plain?.apiKey || !plain?.accessToken) && mongoDb) {
+    try {
+      const auth = await mongoDb.collection('kite_auth').findOne({ _id: String(userId) });
+      if (auth?.apiKeyEnc && auth?.accessTokenEnc) {
+        session.auth = {
+          apiKeyEnc: auth.apiKeyEnc,
+          accessTokenEnc: auth.accessTokenEnc,
+          updatedAt: auth.updatedAt,
+        };
+        plain = readAuthPlain(session);
+      }
+    } catch (err) {
+      console.error('[live-store] getAuthorizationFor mongo lookup failed', err.message);
+    }
+  }
+  if (!plain?.apiKey || !plain?.accessToken) {
+    return null;
+  }
+  return `token ${plain.apiKey}:${plain.accessToken}`;
+}
+
 module.exports = {
   attachMongo,
   statusFor,
@@ -318,4 +348,5 @@ module.exports = {
   stop,
   putAuth,
   getSession,
+  getAuthorizationFor,
 };

@@ -69,12 +69,17 @@ async function putAuth(req, res) {
  * historical data only — no orders are placed).
  */
 async function backtest(req, res) {
+  // Prefer the browser's Kite session header; fall back to the server-stored
+  // token (pushed via Push Kite token) so Paper works like Live.
   const authorization =
-    req.headers['x-kite-authorization'] || req.headers['x-kite-authorisation'] || null;
+    req.headers['x-kite-authorization'] ||
+    req.headers['x-kite-authorisation'] ||
+    (await store.getAuthorizationFor(userId(req)));
   if (!authorization) {
-    res
-      .status(400)
-      .json({ status: 'error', message: 'Kite session required — Get Token, then retry Paper.' });
+    res.status(400).json({
+      status: 'error',
+      message: 'Kite session required — Get Token (or Push Kite token to server), then retry Paper.',
+    });
     return;
   }
   const body = req.body || {};
