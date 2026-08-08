@@ -1,5 +1,7 @@
 /**
- * Server Live strategy worker — Daily desk DNA: Trap + Selective Crude.
+ * Server Live strategy worker — Trade Desk parity:
+ * Trap pierce20/B40 · peak₹100 · max3 · 3.5R · lock ₹3k · strict stop.
+ * Crude Selective only when enabled (OFF by default).
  * Places orders via live-broker → kite.service (does NOT touch kiteOrders.controller).
  */
 const {
