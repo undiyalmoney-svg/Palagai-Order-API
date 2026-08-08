@@ -1,0 +1,13 @@
+{
+  "name": "Palagai Order API",
+  "user": "ubuntu",
+  "install": "bash .cursor/install.sh",
+  "start": "bash .cursor/start.sh",
+  "terminals": [
+    {
+      "name": "order-api",
+      "command": "npm run dev"
+    }
+  ],
+  "ports": [{ "name": "order-api", "port": 3000 }]
+}
