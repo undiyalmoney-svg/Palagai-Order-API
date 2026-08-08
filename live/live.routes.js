@@ -25,6 +25,7 @@ router.get('/status', asyncHandler(ctrl.status));
 router.get('/events', asyncHandler(ctrl.events));
 router.post('/start', asyncHandler(ctrl.start));
 router.post('/stop', asyncHandler(ctrl.stop));
+router.post('/backtest', asyncHandler(ctrl.backtest));
 router.put('/auth', asyncHandler(ctrl.putAuth));
 
 module.exports = router;

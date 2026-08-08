@@ -1,10 +1,13 @@
 /**
- * Daily ₹1k–₹3k desk DNA — must match Trade Desk Local Live (palagai.app).
+ * Daily desk DNA — must match Trade Desk Local Live (palagai.app) + Autobot.
  * Point thresholds use the 1-lot ₹ band; money at stop ≈ band × lots (do not multiply points by lots).
+ *
+ * Trap: pierce20 · Bank40 · peak₹100 · max3 · 3.5R · lock ₹3k · strict stop on.
+ * Index only by default (Crude OFF — fee protection).
  */
 
-const APP_VERSION = '1.3.0';
-const APP_BUILD = '2026.08.04-autobot-daily-3k';
+const APP_VERSION = '1.3.105';
+const APP_BUILD = '2026.08.08-autobot-desk-parity';
 
 /** Base ₹ bands at 1 lot (combined index books). */
 const DAY_PROFIT_LOCK_RS = 3000;
@@ -17,13 +20,14 @@ const CRUDE_RS_PER_POINT = 10;
 
 const DAILY_3K_PRESET = {
   id: 'daily-3k',
-  label: 'Daily ₹1k–₹3k',
+  label: 'Option ₹ · ₹40k',
   niftyLots: 1,
   bankLots: 1,
   crudeLots: 1,
   enableNifty: true,
   enableBank: true,
-  enableCrude: true,
+  /** Off by default — fee protection (same as Auto Trader UI). */
+  enableCrude: false,
   enableNatGas: false,
   enableKutty: false,
   kuttyAlone: false,
@@ -31,9 +35,10 @@ const DAILY_3K_PRESET = {
   bankStrategy: 'trap',
   crudeStrategy: 'selective',
   dayProfitLock: true,
-  strictDayStop: false,
+  /** On for hands-off — capital must not drain (Trade Desk parity). */
+  strictDayStop: true,
   researchNote:
-    '1-lot · Trap + Crude Selective · profit lock ₹3k · Trap needs confirm',
+    '₹40k · Trap pierce20/B40 · peak₹100 · max3 · 3.5R · lock ₹3k · option-₹ hunt',
 };
 
 function rsPerPointForInstrument(instrumentId) {
@@ -61,7 +66,7 @@ function strictStopMoneyRs(lots) {
 }
 
 /**
- * Index point overrides for Trap day risk — mirrors Trade Desk `lu` / `E0`.
+ * Index point overrides for Trap day risk — mirrors Trade Desk.
  * Share 50/50 when both Nifty + Bank are on. Points are NOT lot-multiplied.
  */
 function indexDayRiskOverrides({
@@ -114,9 +119,9 @@ function normalizeStartConfig(config = {}) {
     bankStrategy: config.bankStrategy === 'genie' ? 'genie' : 'trap',
     niftyStrategy: 'trap',
     crudeStrategy: config.crudeStrategy === 'all-green' ? 'all-green' : 'selective',
-    // Desk risk: profit lock ON unless client opts out; strict OFF unless opts in.
+    // Desk risk: profit lock ON unless client opts out; strict ON unless client opts out.
     dayProfitLock: config.dayProfitLock !== false,
-    strictDayStop: !!config.strictDayStop,
+    strictDayStop: config.strictDayStop !== false,
     enableKutty: !!config.enableKutty,
     kuttyAlone: !!config.kuttyAlone,
     realOrders: !!config.realOrders,

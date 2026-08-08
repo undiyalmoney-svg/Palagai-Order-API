@@ -110,11 +110,24 @@ function extractTradeDate(timestamp) {
 
 // src/app/core/strategy-engine/utils/market-session.util.ts
 var SESSION_CLOSE_CANDLE = NSE_SESSION.sessionCloseCandle;
+function hasExplicitOffset(dateTime) {
+  return /(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(dateTime.trim());
+}
 function parseMarketTimestamp(dateTime) {
   const normalized = dateTime.includes("T") ? dateTime : dateTime.replace(" ", "T");
+  if (!hasExplicitOffset(normalized)) {
+    return (/* @__PURE__ */ new Date(`${normalized}+05:30`)).getTime();
+  }
   return new Date(normalized).getTime();
 }
 function extractHhMm(dateTime, timezone = NSE_SESSION.timezone) {
+  if (!hasExplicitOffset(dateTime)) {
+    const normalized = dateTime.includes("T") ? dateTime.replace("T", " ") : dateTime;
+    const part = (normalized.split(/\s+/)[1] ?? "").slice(0, 5);
+    if (/^\d{2}:\d{2}$/.test(part)) {
+      return part;
+    }
+  }
   const ts = parseMarketTimestamp(dateTime);
   if (Number.isNaN(ts)) {
     const normalized = dateTime.includes("T") ? dateTime.replace("T", " ") : dateTime;
@@ -251,6 +264,9 @@ function isBankPdhlInstrument(instrumentId) {
 }
 function rupeesPerPointForInstrument(instrumentId) {
   const id = (instrumentId ?? "").toLowerCase();
+  if (id === "natgas-mini" || id.includes("natgas") || id.includes("naturalgas")) {
+    return 50;
+  }
   if (id === "crude-oil-mini" || id === "crude-oil" || id.includes("crude")) {
     return 10;
   }
@@ -651,7 +667,8 @@ function nextWeeklyExpiryDate(asOf, rollSameDay, kind = "nifty") {
 }
 function isCurrentWeeklyExpiryDay(asOfDay, instruments, kind) {
   const day = asOfCalendarDay(asOfDay);
-  const expiresToday = instruments.some((item) => {
+  const chain = instruments ?? [];
+  const expiresToday = chain.some((item) => {
     if (!isIndexOption(item, kind)) {
       return false;
     }
@@ -837,6 +854,39 @@ function zeroCharges() {
     sttRs: 0,
     totalRs: 0
   };
+}
+
+// src/app/core/paper-desk/option-delta.util.ts
+var ATM_OPTION_DELTA = {
+  nifty: 0.41,
+  bank: 0.3,
+  crude: 0.55,
+  natgas: 0.55
+};
+var BOOK_LOT_SIZE = {
+  nifty: 65,
+  bank: 30,
+  crude: 10,
+  natgas: 250
+};
+function bookForInstrumentId(instrumentId) {
+  const id = (instrumentId ?? "").toLowerCase();
+  if (id.includes("bank")) {
+    return "bank";
+  }
+  if (id.includes("natgas") || id.includes("naturalgas")) {
+    return "natgas";
+  }
+  if (id.includes("crude")) {
+    return "crude";
+  }
+  return "nifty";
+}
+function atmDeltaForInstrumentId(instrumentId) {
+  return ATM_OPTION_DELTA[bookForInstrumentId(instrumentId)];
+}
+function estimatedPremiumMove(tradePoints, instrumentId) {
+  return tradePoints * atmDeltaForInstrumentId(instrumentId);
 }
 
 // stub:angular-core-stub
@@ -1147,6 +1197,9 @@ function armPeakTrailFloor(candle, open, settings, instrumentId) {
   const peak = Math.max(open.peakMfePts ?? 0, Math.max(0, barMfe));
   open.peakMfePts = peak;
   if (peak < armPts) {
+    return false;
+  }
+  if (typeof open.optionPeakMfeRs === "number") {
     return false;
   }
   const peakRs = peak * rs;
@@ -1659,6 +1712,46 @@ function lookupPremium(optionCandles, when, edge = "close") {
   }
   return edge === "open" ? best.open : best.close;
 }
+function lookupOptionBarLow(optionCandles, when) {
+  if (!optionCandles?.length) {
+    return null;
+  }
+  const target = normalizeMinute(when);
+  const targetDay = target.slice(0, 10);
+  let best = null;
+  for (const c of optionCandles) {
+    const norm = normalizeMinute(c.date);
+    if (norm.slice(0, 10) !== targetDay) {
+      continue;
+    }
+    if (norm <= target) {
+      best = c;
+    }
+  }
+  return best ? best.low : null;
+}
+function computeOptionPeakMfeRs(params) {
+  const entry = params.entryPremium;
+  if (!(entry != null && entry > 0) || !params.optionCandles?.length) {
+    return null;
+  }
+  const lot = Math.max(1, Math.floor(params.lotSize) || 1);
+  const lots = Math.max(1, Math.floor(params.lotsMultiplier ?? 1) || 1);
+  const from = normalizeMinute(params.entryTime);
+  const to = normalizeMinute(params.asOfTime);
+  let peakPrem = 0;
+  for (const c of params.optionCandles) {
+    const t = normalizeMinute(c.date);
+    if (t < from || t > to) {
+      continue;
+    }
+    peakPrem = Math.max(peakPrem, c.high - entry);
+  }
+  if (!(peakPrem > 0)) {
+    return 0;
+  }
+  return Math.round(peakPrem * lot * lots * 100) / 100;
+}
 function entryPremiumEdge(entryPrice, candle) {
   const dOpen = Math.abs(entryPrice - candle.open);
   const dClose = Math.abs(entryPrice - candle.close);
@@ -1670,13 +1763,11 @@ function isLevelExitReason(reason) {
 }
 function applyEstimatedOptionPnl(params) {
   const lots = Math.max(1, Math.floor(params.lots) || 1);
-  const rpp = rupeesPerPointForInstrument(params.instrumentId);
-  const moneyPerPt = params.instrumentId != null && String(params.instrumentId).length > 0 ? rpp : params.lotSize > 0 ? params.lotSize : rpp;
-  const pnl = params.indexPoints * moneyPerPt * lots;
-  const estMove = moneyPerPt !== 0 ? pnl / (moneyPerPt * lots) : 0;
-  const premiumMove = estMove * 0.5;
+  const premiumMove = estimatedPremiumMove(params.indexPoints, params.instrumentId);
+  const lotSize = params.lotSize > 0 ? params.lotSize : BOOK_LOT_SIZE[bookForInstrumentId(params.instrumentId)];
   const entry = params.entryPremium ?? Math.max(10, Math.abs(premiumMove) + 20);
   const exit = entry + premiumMove;
+  const pnl = premiumMove * lotSize * lots;
   return { entry, exit, pnl };
 }
 function computeOptionPnl(params) {
@@ -1694,8 +1785,12 @@ function closePaperTrade(params) {
   let premiumEstimated = open.premiumEstimated;
   let optionEntryPremium = open.optionEntryPremium;
   if (open.option) {
-    const useEstimate = open.option.source === "synthetic" || open.option.instrumentToken <= 0 || open.premiumEstimated || isLevelExitReason(params.exitReason);
-    if (!useEstimate) {
+    const restingOpt = params.optionExitPremium != null && params.optionExitPremium > 0 ? params.optionExitPremium : null;
+    const useEstimate = restingOpt == null && (open.option.source === "synthetic" || open.option.instrumentToken <= 0 || open.premiumEstimated || isLevelExitReason(params.exitReason));
+    if (restingOpt != null) {
+      optionExitPremium = restingOpt;
+      premiumEstimated = false;
+    } else if (!useEstimate) {
       optionExitPremium = lookupPremium(
         params.optionCandlesByToken.get(open.option.instrumentToken),
         params.exitTime,
@@ -1797,6 +1892,9 @@ function replayPaperOnIndex(params) {
   const enableKutty = kuttyAlone || params.enableKutty !== false;
   const kuttyMargin = params.kuttyMargin ?? { usedRs: 0, trapOpenLegs: 0 };
   const kuttyState = createKuttyDayState();
+  const liveHook = params.liveHook;
+  const afterBar = liveHook?.afterBarTime ?? null;
+  const hookActive = (barTime) => !!liveHook && (!afterBar || barTime > afterBar);
   const strategy = params.strategy ?? (() => {
     const fallback = new ChampionPdhlManagedStrategy();
     fallback.initialize();
@@ -1841,6 +1939,20 @@ function replayPaperOnIndex(params) {
         if (isKutty) {
           exit = kuttyExitLogic(candle, open);
         } else {
+          const optBars = open.option ? optionCandlesByToken.get(open.option.instrumentToken) : void 0;
+          const optMfe = computeOptionPeakMfeRs({
+            entryPremium: open.optionEntryPremium,
+            entryTime: open.entryTime,
+            asOfTime: candle.date,
+            optionCandles: optBars,
+            lotSize: open.option?.lotSize ?? 0,
+            lotsMultiplier
+          });
+          if (optMfe != null) {
+            open.optionPeakMfeRs = Math.max(open.optionPeakMfeRs ?? 0, optMfe);
+          }
+          const optBarLow = lookupOptionBarLow(optBars, candle.date);
+          const lotUnits = open.option && open.option.lotSize > 0 ? open.option.lotSize * Math.max(1, Math.floor(lotsMultiplier) || 1) : null;
           const managedOpen = {
             direction: open.direction,
             entry: open.entry,
@@ -1849,7 +1961,12 @@ function replayPaperOnIndex(params) {
             entryTime: open.entryTime,
             trail: open.trail ?? null,
             peakMfePts: open.mfeIndexPts ?? 0,
-            initialRiskPts: open.initialRiskPts ?? Math.abs(open.entry - open.stop)
+            initialRiskPts: open.initialRiskPts ?? Math.abs(open.entry - open.stop),
+            optionPeakMfeRs: open.optionPeakMfeRs ?? optMfe,
+            optionEntryPremium: open.optionEntryPremium,
+            optionBarLow: optBarLow,
+            optionLotUnits: lotUnits,
+            lotsMultiplier
           };
           exit = strategy.exitLogic(candle, managedOpen, closes, ctx);
           if (managedOpen.stop !== open.stop) {
@@ -1882,9 +1999,13 @@ function replayPaperOnIndex(params) {
           optionCandlesByToken,
           lotsMultiplier,
           strategyId: isKutty ? KUTTY_ID : strategy.id,
-          strategyName: isKutty ? KUTTY_NAME : strategy.name
+          strategyName: isKutty ? KUTTY_NAME : strategy.name,
+          optionExitPremium: exit.optionExitPremium ?? null
         });
         trades.push(closed);
+        if (hookActive(candle.date)) {
+          liveHook?.onClose?.(closed.entryTime, closed.exitReason);
+        }
         if (isKutty) {
           recordKuttyClosed(kuttyState);
           kuttyMargin.usedRs = Math.max(0, kuttyMargin.usedRs - KUTTY_MARGIN_PER_TRADE_RS);
@@ -2000,6 +2121,16 @@ function replayPaperOnIndex(params) {
         }
       ]
     };
+    if (hookActive(candle.date)) {
+      liveHook?.onOpen?.({
+        direction: entryAction,
+        entryTime: candle.date,
+        indexEntry: entryPrice,
+        indexStop: entryStop,
+        option,
+        optionEntryPremium
+      });
+    }
     if (entrySource === "kutty") {
       kuttyMargin.usedRs += KUTTY_MARGIN_PER_TRADE_RS;
     } else {
@@ -2037,6 +2168,9 @@ function replayPaperOnIndex(params) {
         strategyName: isKutty ? KUTTY_NAME : strategy.name
       });
       trades.push(closed);
+      if (hookActive(candle.date)) {
+        liveHook?.onClose?.(closed.entryTime, closed.exitReason);
+      }
       if (isKutty) {
         recordKuttyClosed(kuttyState);
         kuttyMargin.usedRs = Math.max(0, kuttyMargin.usedRs - KUTTY_MARGIN_PER_TRADE_RS);
@@ -2517,6 +2651,12 @@ function runCrudeTrapConfirm(params) {
   const entryStart = params.entryStart ?? CRUDE_TRAP_ENTRY_START;
   const entryEnd = params.entryEnd ?? CRUDE_TRAP_ENTRY_END;
   const maxDay = params.maxTradesDay ?? CRUDE_TRAP_MAX_TRADES_DAY;
+  const pierce = params.pierce ?? CRUDE_TRAP_PIERCE;
+  const style = params.trapEntryStyle ?? "both";
+  const firstWinLock = params.firstWinLock === true;
+  const fixedStop = (params.stopPts ?? 0) > 0 && (params.targetPts ?? 0) > 0 && !(params.targetRMultiple != null && params.targetRMultiple > 0);
+  const stopPts = params.stopPts ?? 0;
+  const targetPts = params.targetPts ?? 0;
   const tradingDate = extractTradeDate(candle.date);
   const month = tradingDate.slice(0, 7);
   const time = extractHhMm(candle.date);
@@ -2546,6 +2686,9 @@ function runCrudeTrapConfirm(params) {
     state.dayStoppedReason = `Day max loss ${state.dayNetPts.toFixed(1)} pts`;
     return wait4(candle, state.dayStoppedReason);
   }
+  if (firstWinLock && state.wonToday) {
+    return wait4(candle, "First-win lock \u2014 done for day");
+  }
   if (crudeTradeCapActive(maxDay) && state.tradesToday >= maxDay) {
     return wait4(candle, `Max ${maxDay} trap trades/day`);
   }
@@ -2569,12 +2712,32 @@ function runCrudeTrapConfirm(params) {
       return wait4(candle, "Crude trap confirm failed");
     }
     const fill = candle.open;
-    const stop2 = p.dir === 1 ? Math.min(p.stop, fill - 1) : Math.max(p.stop, fill + 1);
-    const risk2 = Math.abs(fill - stop2);
-    if (risk2 < CRUDE_TRAP_MIN_RISK || risk2 > CRUDE_TRAP_MAX_RISK) {
-      return wait4(candle, `Risk ${risk2.toFixed(1)} outside ${CRUDE_TRAP_MIN_RISK}\u2013${CRUDE_TRAP_MAX_RISK}`);
+    if (fixedStop) {
+      const stop3 = p.dir === 1 ? fill - stopPts : fill + stopPts;
+      const target2 = p.dir === 1 ? fill + targetPts : fill - targetPts;
+      if (crudeDayLossActive(dayLossStopPts) && state.dayNetPts - stopPts < -dayLossStopPts) {
+        return {
+          action: "NO_TRADE",
+          entryPrice: fill,
+          stopLoss: fill,
+          target: fill,
+          reason: "Next SL would breach day max loss"
+        };
+      }
+      return {
+        action: p.dir === 1 ? "BUY" : "SELL",
+        entryPrice: fill,
+        stopLoss: stop3,
+        target: target2,
+        reason: `NG trap confirm ${p.dir === 1 ? "BUY" : "SELL"} \xB7 SL${stopPts}/TP${targetPts} \xB7 day ${state.dayNetPts.toFixed(1)}`
+      };
     }
-    if (crudeDayLossActive(dayLossStopPts) && state.dayNetPts - risk2 < -dayLossStopPts) {
+    const stop2 = p.dir === 1 ? Math.min(p.stop, fill - 1) : Math.max(p.stop, fill + 1);
+    const risk = Math.abs(fill - stop2);
+    if (risk < CRUDE_TRAP_MIN_RISK || risk > CRUDE_TRAP_MAX_RISK) {
+      return wait4(candle, `Risk ${risk.toFixed(1)} outside ${CRUDE_TRAP_MIN_RISK}\u2013${CRUDE_TRAP_MAX_RISK}`);
+    }
+    if (crudeDayLossActive(dayLossStopPts) && state.dayNetPts - risk < -dayLossStopPts) {
       return {
         action: "NO_TRADE",
         entryPrice: fill,
@@ -2583,7 +2746,7 @@ function runCrudeTrapConfirm(params) {
         reason: "Next SL would breach day max loss"
       };
     }
-    const target = p.dir === 1 ? fill + risk2 * rr : fill - risk2 * rr;
+    const target = p.dir === 1 ? fill + risk * rr : fill - risk * rr;
     return {
       action: p.dir === 1 ? "BUY" : "SELL",
       entryPrice: fill,
@@ -2608,33 +2771,36 @@ function runCrudeTrapConfirm(params) {
   const oo = candle.open;
   const hh = candle.high;
   const ll = candle.low;
-  const pierce = CRUDE_TRAP_PIERCE;
   const pad = CRUDE_TRAP_SL_PAD;
   const rng = Math.max(hh - ll, 1e-9);
-  const trapBuy = ll < sl - pierce && cc > sl && cc > oo;
-  const trapSell = hh > sh + pierce && cc < sh && cc < oo;
-  const bounceBuy = ll <= sl + pierce && ll >= sl - pierce * 2 && cc > oo && cc >= sl && (hh - cc) / rng < 0.35;
-  const bounceSell = hh >= sh - pierce && hh <= sh + pierce * 2 && cc < oo && cc <= sh && (cc - ll) / rng < 0.35;
+  const allowTrap = style === "trap" || style === "both";
+  const allowBounce = style === "bounce" || style === "both";
+  const trapBuy = allowTrap && ll < sl - pierce && cc > sl && cc > oo;
+  const trapSell = allowTrap && hh > sh + pierce && cc < sh && cc < oo;
+  const bounceBuy = allowBounce && ll <= sl + pierce && ll >= sl - pierce * 2 && cc > oo && cc >= sl && (hh - cc) / rng < 0.35;
+  const bounceSell = allowBounce && hh >= sh - pierce && hh <= sh + pierce * 2 && cc < oo && cc <= sh && (cc - ll) / rng < 0.35;
   let dir = 0;
   let stop = 0;
   if ((trapBuy || bounceBuy) && cc > ema) {
     dir = 1;
-    stop = ll - pad;
+    stop = fixedStop ? cc - stopPts : ll - pad;
   } else if ((trapSell || bounceSell) && cc < ema) {
     dir = -1;
-    stop = hh + pad;
+    stop = fixedStop ? cc + stopPts : hh + pad;
   }
   if (!dir) {
-    return wait4(candle, "No crude S/R trap / bounce");
+    return wait4(candle, style === "trap" ? "No S/R trap" : "No crude S/R trap / bounce");
   }
-  const risk = Math.abs(cc - stop);
-  if (risk < CRUDE_TRAP_MIN_RISK || risk > CRUDE_TRAP_MAX_RISK) {
-    return wait4(candle, `Arm risk ${risk.toFixed(1)} outside band`);
+  if (!fixedStop) {
+    const risk = Math.abs(cc - stop);
+    if (risk < CRUDE_TRAP_MIN_RISK || risk > CRUDE_TRAP_MAX_RISK) {
+      return wait4(candle, `Arm risk ${risk.toFixed(1)} outside band`);
+    }
   }
   state.pending = { dir, stop, signalClose: cc };
   return wait4(
     candle,
-    dir === 1 ? "Crude trap BUY armed \u2014 wait confirm" : "Crude trap SELL armed \u2014 wait confirm"
+    dir === 1 ? "Trap BUY armed \u2014 wait confirm" : "Trap SELL armed \u2014 wait confirm"
   );
 }
 
@@ -2844,6 +3010,32 @@ var CRUDE_ALL_GREEN_PARAMS = {
   dailyBandLabel: "OR 09:00\u201309:30 \xB7 SL\u20B9150 \xB7 trail \u20B9500\u2192\u20B9240 \xB7 no OR skip",
   ...PROTECT_TRADE_CUTOFF
 };
+var CRUDE_SELECTIVE_PARAMS = {
+  profileId: "selective",
+  label: "Selective (Trap SL50/TP200 \xB7 unlimited)",
+  stopPts: 50,
+  morningTargetPts: 200,
+  eveningTargetPts: 200,
+  targetRMultiple: 0,
+  dayLossStopPts: 0,
+  strictDayLossPts: 0,
+  dayProfitLockPts: 0,
+  entryMode: "trap-confirm",
+  requireConfirm: true,
+  firstWinLock: false,
+  eveningEntryStart: "10:00",
+  eveningEntryEnd: CRUDE_SOR_ENTRY_END,
+  sessionOrStart: CRUDE_SOR_OR_START,
+  sessionOrEnd: CRUDE_SOR_OR_END,
+  maxOrWidth: 0,
+  maxEveningTradesDay: 0,
+  defaultEnableMorning: false,
+  defaultEnableEvening: true,
+  dailyBandLabel: "10:00\u201323:00 \xB7 Trap SL50/TP200 \xB7 confirm \xB7 unlimited",
+  piercePts: 0,
+  trapEntryStyle: "both",
+  ...PROTECT_OFF
+};
 var CRUDE_DAILY_PROFIT_PARAMS = {
   profileId: "daily-profit",
   label: "Daily Profit (Trap-style)",
@@ -2940,35 +3132,37 @@ var CRUDE_TRAP_CONFIRM_PARAMS = {
   dailyBandLabel: "S/R trap + confirm \xB7 3.5R \xB7 unlimited \xB7 no day stop",
   ...PROTECT_OFF
 };
-/** Daily desk Crude DNA — match Trade Desk Selective (not unlimited All-Green). */
-var CRUDE_SELECTIVE_PARAMS = {
-  profileId: "selective",
-  label: "Selective (\u22642/day \xB7 SL30/TP60)",
-  stopPts: 30,
-  morningTargetPts: 60,
-  eveningTargetPts: 60,
+var NATGAS_DAILY_PROFIT_PARAMS = {
+  profileId: "daily-profit-ng",
+  label: "Daily Profit (NG)",
+  stopPts: 1.5,
+  morningTargetPts: 3,
+  eveningTargetPts: 3,
   targetRMultiple: 0,
-  dayLossStopPts: 40,
-  strictDayLossPts: 40,
+  dayLossStopPts: 3,
+  strictDayLossPts: 3,
   dayProfitLockPts: 0,
-  entryMode: "session-or",
+  entryMode: "trap-confirm",
   requireConfirm: true,
-  firstWinLock: false,
+  firstWinLock: true,
   eveningEntryStart: "10:00",
   eveningEntryEnd: "22:00",
   sessionOrStart: CRUDE_SOR_OR_START,
   sessionOrEnd: CRUDE_SOR_OR_END,
-  maxOrWidth: 0,
-  maxEveningTradesDay: 2,
+  maxOrWidth: CRUDE_SOR_MAX_OR_WIDTH,
+  maxEveningTradesDay: 1,
   defaultEnableMorning: false,
   defaultEnableEvening: true,
-  dailyBandLabel: "10:00\u201322:00 \xB7 SL30/TP60 \xB7 confirm \xB7 max 2/day \xB7 no OR skip",
+  dailyBandLabel: "NG trap \xB7 pierce 0.2 \xB7 SL1.5/TP3 \xB7 confirm \xB7 first-win \xB7 max 1/day",
+  piercePts: 0.2,
+  trapEntryStyle: "trap",
   ...PROTECT_OFF
 };
 var CRUDE_STRATEGY_PROFILES = {
-  selective: CRUDE_SELECTIVE_PARAMS,
   "all-green": CRUDE_ALL_GREEN_PARAMS,
+  selective: CRUDE_SELECTIVE_PARAMS,
   "daily-profit": CRUDE_DAILY_PROFIT_PARAMS,
+  "daily-profit-ng": NATGAS_DAILY_PROFIT_PARAMS,
   champion: CRUDE_CHAMPION_PARAMS,
   "daily-income": CRUDE_DAILY_INCOME_PARAMS,
   "trap-confirm": CRUDE_TRAP_CONFIRM_PARAMS
@@ -2977,7 +3171,7 @@ function resolveCrudeStrategyProfile(profileId) {
   if (profileId && CRUDE_STRATEGY_PROFILES[profileId]) {
     return CRUDE_STRATEGY_PROFILES[profileId];
   }
-  return CRUDE_SELECTIVE_PARAMS;
+  return CRUDE_ALL_GREEN_PARAMS;
 }
 function resolveCrudeProfileDayLossPts(params, strictDayStop) {
   return strictDayStop ? params.strictDayLossPts : params.dayLossStopPts;
@@ -2987,8 +3181,7 @@ function resolveCrudeProfileDayLossPts(params, strictDayStop) {
 function crudeStrikeStep() {
   return 50;
 }
-function roundCrudeStrike(spot) {
-  const step = crudeStrikeStep();
+function roundCrudeStrike(spot, step = crudeStrikeStep()) {
   return Math.round(spot / step) * step;
 }
 function startOfDay2(date) {
@@ -3023,7 +3216,7 @@ function formatExpiryIso2(d) {
   const pad = (n) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
-function isCrudeMiniOption(item) {
+function isMcxMiniOption(item, prefixes) {
   if (item.exchange !== "MCX") {
     return false;
   }
@@ -3031,7 +3224,8 @@ function isCrudeMiniOption(item) {
   if (type !== "CE" && type !== "PE") {
     return false;
   }
-  return item.tradingSymbol.toUpperCase().startsWith("CRUDEOILM");
+  const sym = item.tradingSymbol.toUpperCase();
+  return prefixes.some((p) => sym.startsWith(p.toUpperCase()));
 }
 function isAnyCrudeOption(item) {
   if (item.exchange !== "MCX") {
@@ -3044,12 +3238,12 @@ function isAnyCrudeOption(item) {
   const sym = item.tradingSymbol.toUpperCase();
   return sym.startsWith("CRUDEOIL");
 }
-function listCrudeLiveExpiries(instruments, asOfDay) {
+function listCrudeLiveExpiries(instruments, asOfDay, prefixes = ["CRUDEOILM"]) {
   const day = crudeIstCalendarDay(asOfDay);
   const seen = /* @__PURE__ */ new Set();
   const out = [];
   for (const item of instruments) {
-    if (!isCrudeMiniOption(item) && !isAnyCrudeOption(item)) {
+    if (!isMcxMiniOption(item, prefixes) && !(prefixes.includes("CRUDEOILM") && isAnyCrudeOption(item))) {
       continue;
     }
     const exp = parseExpiry2(item.expiry);
@@ -3073,18 +3267,25 @@ function resolveCrudeFrontExpiry(asOfDay, liveExpiries) {
   return liveExpiries[0];
 }
 function resolveAtmCrudeMiniOption(params) {
+  const prefixes = (params.prefixes?.length ? params.prefixes : ["CRUDEOILM"]).map(
+    (p) => p.toUpperCase()
+  );
+  const strikeStep2 = params.strikeStep && params.strikeStep > 0 ? params.strikeStep : crudeStrikeStep();
+  const syntheticName = params.syntheticName || prefixes[0] || "CRUDEOILM";
   const optType = params.direction === "BUY" ? "CE" : "PE";
-  const strike = roundCrudeStrike(params.spot);
+  const strike = roundCrudeStrike(params.spot, strikeStep2);
   const asOf = new Date(
     params.asOfDateTime.includes("T") ? params.asOfDateTime : params.asOfDateTime.replace(" ", "T")
   );
   const asOfDay = Number.isNaN(asOf.getTime()) ? crudeIstCalendarDay(/* @__PURE__ */ new Date()) : crudeIstCalendarDay(asOf);
-  const pool = params.instruments.filter((item) => isCrudeMiniOption(item) || isAnyCrudeOption(item)).filter((item) => item.instrumentType.toUpperCase() === optType).sort((a, b) => {
-    const aMini = a.tradingSymbol.startsWith("CRUDEOILM") ? 0 : 1;
-    const bMini = b.tradingSymbol.startsWith("CRUDEOILM") ? 0 : 1;
+  const pool = params.instruments.filter(
+    (item) => isMcxMiniOption(item, prefixes) || prefixes.some((p) => p.startsWith("CRUDE")) && isAnyCrudeOption(item)
+  ).filter((item) => item.instrumentType.toUpperCase() === optType).sort((a, b) => {
+    const aMini = prefixes.some((p) => a.tradingSymbol.toUpperCase().startsWith(p)) ? 0 : 1;
+    const bMini = prefixes.some((p) => b.tradingSymbol.toUpperCase().startsWith(p)) ? 0 : 1;
     return aMini - bMini;
   });
-  const liveExpiries = listCrudeLiveExpiries(params.instruments, asOfDay);
+  const liveExpiries = listCrudeLiveExpiries(params.instruments, asOfDay, prefixes);
   const front = resolveCrudeFrontExpiry(asOfDay, liveExpiries);
   const withExpiry = pool.map((item) => ({ item, exp: parseExpiry2(item.expiry) })).filter((row) => row.exp != null).filter((row) => {
     if (row.exp.getTime() <= asOfDay.getTime()) {
@@ -3099,7 +3300,7 @@ function resolveAtmCrudeMiniOption(params) {
   if (exact[0]) {
     return { instrument: exact[0].item, source: "chain" };
   }
-  const near = withExpiry.filter((row) => Math.abs(row.item.strike - strike) <= crudeStrikeStep()).sort(
+  const near = withExpiry.filter((row) => Math.abs(row.item.strike - strike) <= strikeStep2).sort(
     (a, b) => Math.abs(a.item.strike - strike) - Math.abs(b.item.strike - strike) || a.exp.getTime() - b.exp.getTime()
   );
   if (near[0]) {
@@ -3110,10 +3311,15 @@ function resolveAtmCrudeMiniOption(params) {
       params.direction,
       params.spot,
       asOfDay,
-      front ?? void 0
+      front ?? void 0,
+      { strikeStep: strikeStep2, name: syntheticName }
     ),
     source: "synthetic"
   };
+}
+function crudeMiniLotSize(lotSize) {
+  const n = Math.floor(Number(lotSize) || 0);
+  return Math.max(10, n > 0 ? n : 10);
 }
 function toCrudePaperOption(instrument, source) {
   return {
@@ -3122,15 +3328,17 @@ function toCrudePaperOption(instrument, source) {
     strike: instrument.strike,
     expiry: instrument.expiry,
     optionType: instrument.instrumentType === "PE" ? "PE" : "CE",
-    lotSize: instrument.lotSize > 0 ? instrument.lotSize : 10,
+    lotSize: crudeMiniLotSize(instrument.lotSize),
     source,
     exchange: "MCX",
     product: "MIS"
   };
 }
-function buildSyntheticCrudeOption(direction, spot, asOfDay, frontExpiry) {
+function buildSyntheticCrudeOption(direction, spot, asOfDay, frontExpiry, opts) {
   const optType = direction === "BUY" ? "CE" : "PE";
-  const strike = roundCrudeStrike(spot);
+  const step = opts?.strikeStep && opts.strikeStep > 0 ? opts.strikeStep : crudeStrikeStep();
+  const name = opts?.name || "CRUDEOILM";
+  const strike = roundCrudeStrike(spot, step);
   const day = crudeIstCalendarDay(asOfDay);
   let exp = frontExpiry ? crudeIstCalendarDay(frontExpiry) : day;
   if (exp.getTime() <= day.getTime()) {
@@ -3141,8 +3349,8 @@ function buildSyntheticCrudeOption(direction, spot, asOfDay, frontExpiry) {
   return {
     instrumentToken: 0,
     exchangeToken: 0,
-    tradingSymbol: `CRUDEOILM ATM ${strike} ${optType}`,
-    name: "CRUDEOILM",
+    tradingSymbol: `${name} ATM ${strike} ${optType}`,
+    name,
     exchange: "MCX",
     segment: "MCX-OPT",
     instrumentType: optType,
@@ -3270,7 +3478,7 @@ function lookupPremium2(optionCandles, when, edge = "exit") {
   return edge === "entry" ? best.open : best.close;
 }
 function estimatePremiumMove(points) {
-  return points * 0.5;
+  return estimatedPremiumMove(points, "crude-oil-mini");
 }
 var tradeSeq2 = 0;
 function closePaperTrade2(params) {
@@ -3286,7 +3494,7 @@ function closePaperTrade2(params) {
       params.exitTime,
       "exit"
     );
-    if (open.optionEntryPremium != null && optionExitPremium != null) {
+    if (open.optionEntryPremium != null && optionExitPremium != null && !premiumEstimated) {
       optionPnlRs = (optionExitPremium - open.optionEntryPremium) * open.option.lotSize * lots;
       premiumEstimated = false;
     } else {
@@ -3316,7 +3524,7 @@ function closePaperTrade2(params) {
     optionExitPremium,
     optionPnlRs,
     premiumEstimated,
-    outcome: indexPoints > 0 ? "WIN" : indexPoints < 0 ? "LOSS" : "FLAT"
+    outcome: optionPnlRs != null ? optionPnlRs > 0 ? "WIN" : optionPnlRs < 0 ? "LOSS" : "FLAT" : indexPoints > 0 ? "WIN" : indexPoints < 0 ? "LOSS" : "FLAT"
   };
 }
 function replayPaperOnCrude(params) {
@@ -3335,6 +3543,14 @@ function replayPaperOnCrude(params) {
   const tradeParams = params.tradeParams ?? resolveCrudeStrategyProfile("selective");
   const dayLossStopPts = params.dayLossStopPts ?? tradeParams.dayLossStopPts;
   const dayProfitLockPts = tradeParams.dayProfitLockPts;
+  const liveHook = params.liveHook;
+  const afterBar = liveHook?.afterBarTime ?? null;
+  const hookActive = (barTime) => !!liveHook && (!afterBar || barTime > afterBar);
+  const optionResolve = {
+    prefixes: params.optionPrefixes,
+    strikeStep: params.strikeStep,
+    syntheticName: params.syntheticName
+  };
   const enableMorning = params.enableMorning !== false;
   const enableEvening = params.enableEvening !== false;
   const trapMode = tradeParams.entryMode === "trap-confirm";
@@ -3358,17 +3574,22 @@ function replayPaperOnCrude(params) {
       const exit = checkFuturesExit(candle, open, tradeParams);
       if (exit) {
         const bookLabel = open.book === "morning" ? "Morning" : sessionOrMode ? "Afternoon" : open.book === "evening" ? "Evening" : "Trap";
+        const futPts = open.direction === "BUY" ? exit.exitPrice - open.entry : open.entry - exit.exitPrice;
+        const futLabel = `fut ${futPts >= 0 ? "+" : ""}${futPts.toFixed(1)}`;
         const closed = closePaperTrade2({
           instrumentId,
           instrumentName,
           open,
           exitPrice: exit.exitPrice,
           exitTime: candle.date,
-          exitReason: `${exit.reason} \xB7 ${bookLabel}`,
+          exitReason: `${exit.reason} \xB7 ${futLabel} \xB7 ${bookLabel}`,
           optionCandlesByToken,
           lotsMultiplier
         });
         trades.push(closed);
+        if (hookActive(candle.date)) {
+          liveHook?.onClose?.(closed.entryTime, closed.exitReason);
+        }
         recordCrudeTradeClosed(
           state,
           closed.indexPoints,
@@ -3386,13 +3607,22 @@ function replayPaperOnCrude(params) {
     let signal = null;
     let book = "morning";
     if (trapMode) {
+      const fixedTrap = tradeParams.targetRMultiple <= 0 && tradeParams.stopPts > 0 && (tradeParams.eveningTargetPts > 0 || tradeParams.morningTargetPts > 0);
       const trap = runCrudeTrapConfirm({
         candle,
         series: candles,
         state,
         dayLossStopPts,
         dayProfitLockPts,
-        targetRMultiple: tradeParams.targetRMultiple || void 0
+        targetRMultiple: fixedTrap ? 0 : tradeParams.targetRMultiple || void 0,
+        stopPts: fixedTrap ? tradeParams.stopPts : void 0,
+        targetPts: fixedTrap ? tradeParams.eveningTargetPts || tradeParams.morningTargetPts : void 0,
+        pierce: tradeParams.piercePts,
+        trapEntryStyle: tradeParams.trapEntryStyle,
+        entryStart: tradeParams.eveningEntryStart,
+        entryEnd: tradeParams.eveningEntryEnd,
+        maxTradesDay: tradeParams.maxEveningTradesDay,
+        firstWinLock: tradeParams.firstWinLock
       });
       if (trap.action === "BUY" || trap.action === "SELL") {
         signal = trap;
@@ -3477,7 +3707,8 @@ function replayPaperOnCrude(params) {
       instruments,
       direction: signal.action,
       spot: candle.close,
-      asOfDateTime: candle.date
+      asOfDateTime: candle.date,
+      ...optionResolve
     });
     const option = toCrudePaperOption(resolved.instrument, resolved.source);
     chosenOption = option;
@@ -3505,21 +3736,37 @@ function replayPaperOnCrude(params) {
       peakMfePts: 0,
       riskPts: Math.abs(signal.entryPrice - signal.stopLoss)
     };
+    if (hookActive(candle.date)) {
+      liveHook?.onOpen?.({
+        direction: signal.action,
+        entryTime: candle.date,
+        indexEntry: signal.entryPrice,
+        indexStop: signal.stopLoss,
+        option,
+        optionEntryPremium: entryPremium
+      });
+    }
     lastSignal = `${signal.action} @ ${signal.entryPrice.toFixed(1)} \xB7 ${option.tradingSymbol}`;
   }
   if (open && forceCloseOpen) {
     const last = candles.at(-1);
+    const futPts = open.direction === "BUY" ? last.close - open.entry : open.entry - last.close;
+    const futLabel = `fut ${futPts >= 0 ? "+" : ""}${futPts.toFixed(1)}`;
+    const bookWindow = open.book === "morning" ? "Morning" : `${tradeParams.eveningEntryStart}\u2013${tradeParams.eveningEntryEnd}`;
     const closed = closePaperTrade2({
       instrumentId,
       instrumentName,
       open,
       exitPrice: last.close,
       exitTime: last.date,
-      exitReason: `${MCX_CRUDE_SESSION.sessionCloseLabel} \xB7 ${open.book === "morning" ? "Morning 10:00\u201312:00" : sessionOrMode ? `${tradeParams.eveningEntryStart}\u2013${tradeParams.eveningEntryEnd}` : "Evening 18:30\u201320:30"}`,
+      exitReason: `${MCX_CRUDE_SESSION.sessionCloseLabel} \xB7 ${futLabel} \xB7 ${bookWindow}`,
       optionCandlesByToken,
       lotsMultiplier
     });
     trades.push(closed);
+    if (hookActive(last.date)) {
+      liveHook?.onClose?.(closed.entryTime, closed.exitReason);
+    }
     recordCrudeTradeClosed(
       state,
       closed.indexPoints,
@@ -3556,7 +3803,8 @@ function replayPaperOnCrude(params) {
         instruments,
         direction: bias,
         spot: candle.close,
-        asOfDateTime: candle.date
+        asOfDateTime: candle.date,
+        ...optionResolve
       });
       chosenOption = toCrudePaperOption(resolved.instrument, resolved.source);
       chosenBias = bias;
@@ -3588,6 +3836,50 @@ function replayPaperOnCrude(params) {
     indexSpot,
     chosenAsOf
   };
+}
+
+// src/app/core/strategy-manager/config/strategy-dna-caps.ts
+var TRAP_1LOT_DAILY_DNA_EXTRAS = {
+  piercePts: 20,
+  bankPiercePts: 40,
+  /** 1-lot bands — Paper/Live multiply by lotsMultiplier. */
+  profitLockArmRs: 100,
+  profitLockLockRs: 50,
+  profitLockGivebackRs: 50,
+  slConfirmCutoffEnabled: false,
+  slConfirmCutoffFracR: 0,
+  slConfirmCutoffMaxMfeR: 0,
+  slConfirmSoftRs: 0,
+  trapMode: "both",
+  /** Must stay 0 — bounce-OR widen drifts DNA and hurts option money. */
+  bounceOrPierceMult: 0,
+  bounceOrPierceCap: 0
+};
+function dnaCapsForStrategy(strategyId, channel) {
+  switch (strategyId) {
+    case MANAGED_STRATEGY_IDS.SR_TRAP_CONFIRM:
+      return { maxTradesPerDay: 3, targetRMultiple: 3.5 };
+    case MANAGED_STRATEGY_IDS.ALIGN_COMBO_GENIE:
+      return channel === "bank" ? { maxTradesPerDay: 0, targetRMultiple: 1.5 } : { maxTradesPerDay: 0, targetRMultiple: 3 };
+    case MANAGED_STRATEGY_IDS.SMART_PULLBACK_PRO:
+      return { maxTradesPerDay: 0, targetRMultiple: 1.5 };
+    case MANAGED_STRATEGY_IDS.DONCH_RETEST_OR_MID_2R:
+      return { maxTradesPerDay: 0, targetRMultiple: 2 };
+    case MANAGED_STRATEGY_IDS.GAP_FADE_500:
+      return { maxTradesPerDay: 0 };
+    case MANAGED_STRATEGY_IDS.INSIDE_BREAK:
+      return { maxTradesPerDay: 0 };
+    case MANAGED_STRATEGY_IDS.CHAMPION_PDHL:
+      return { maxTradesPerDay: 0 };
+    case MANAGED_STRATEGY_IDS.SWING_RETEST_EMA50_2R:
+    case MANAGED_STRATEGY_IDS.VOL_EXPAND_DONCH15:
+    case MANAGED_STRATEGY_IDS.SWING5_PREV_DAY:
+    case MANAGED_STRATEGY_IDS.DONCHIAN_20:
+    case MANAGED_STRATEGY_IDS.DONCHIAN_55_TURTLE:
+      return { maxTradesPerDay: 0, targetRMultiple: 2 };
+    default:
+      return { maxTradesPerDay: 0 };
+  }
 }
 
 // src/app/core/strategy-manager/engines/smart-pullback-pro.engine.ts
@@ -4143,6 +4435,89 @@ function recordSmartPbTradeClosed(state, points, dayStopPts) {
   recordRuleTradeClosed(state, points, dayStopPts);
 }
 
+// src/app/core/live-desk/option-sl-premium.util.ts
+function isMcxOptionContext(exchange, tradingSymbol) {
+  if ((exchange ?? "").toUpperCase() === "MCX") {
+    return true;
+  }
+  const sym = (tradingSymbol ?? "").toUpperCase();
+  return sym.startsWith("CRUDEOIL") || sym.startsWith("NATURALGAS") || sym.startsWith("NATGAS");
+}
+function roundOptionPremiumTick(price) {
+  return Math.max(0.05, Math.round(price / 0.05) * 0.05);
+}
+function mcxMinSlGapPts(fillPremium) {
+  return Math.max(25, fillPremium * 0.05);
+}
+function computeProtectiveSlTrigger(params) {
+  const fill = Math.max(0, params.fillPremium);
+  const risk = Math.max(0, params.indexRiskPts);
+  const mcx = isMcxOptionContext(params.exchange, params.tradingSymbol);
+  const delta = mcx ? 1 : 0.5;
+  const fromRisk = fill - risk * delta;
+  const nfoMinGap = Math.max(3, fill * 0.03);
+  const fromMinGap = mcx ? fill - mcxMinSlGapPts(fill) : fill - nfoMinGap;
+  let trigger = roundOptionPremiumTick(Math.max(0.05, Math.min(fromRisk, fromMinGap)));
+  const ltp = params.ltp;
+  if (ltp != null && ltp > 0 && trigger >= ltp - 0.049) {
+    const cushion = Math.max(
+      risk * delta,
+      mcx ? mcxMinSlGapPts(ltp) : Math.max(nfoMinGap, ltp * 0.03),
+      mcx ? 25 : 3
+    );
+    trigger = roundOptionPremiumTick(Math.max(0.05, ltp - cushion));
+  }
+  return trigger;
+}
+
+// src/app/core/paper-desk/option-peak-trail.util.ts
+function clampTrailLots(lots) {
+  return Math.max(1, Math.floor(Number(lots) || 1) || 1);
+}
+function scaleOptionPeakTrailSettings(base, lots) {
+  const n = clampTrailLots(lots);
+  return {
+    armRs: base.armRs * n,
+    lockRs: base.lockRs * n,
+    givebackRs: base.givebackRs * n
+  };
+}
+function optionPeakTrailSettingsFromExtras(extras, lots = 1) {
+  const x = extras ?? {};
+  const base = {
+    armRs: typeof x["profitLockArmRs"] === "number" ? x["profitLockArmRs"] : 600,
+    lockRs: typeof x["profitLockLockRs"] === "number" ? x["profitLockLockRs"] : 300,
+    givebackRs: typeof x["profitLockGivebackRs"] === "number" ? x["profitLockGivebackRs"] : 300
+  };
+  return scaleOptionPeakTrailSettings(base, lots);
+}
+function evaluateOptionPeakTrail(params) {
+  const entry = params.entryPremium;
+  const units = params.lotUnits;
+  if (!(entry > 0) || !(units > 0) || !(params.armRs > 0)) {
+    return null;
+  }
+  if (!(params.optionPeakMfeRs >= params.armRs)) {
+    return {
+      armed: false,
+      floorRs: 0,
+      floorPremium: entry,
+      hit: false
+    };
+  }
+  const floorRs = Math.max(
+    params.lockRs,
+    params.optionPeakMfeRs - Math.max(0, params.givebackRs)
+  );
+  const floorPremium = roundOptionPremiumTick(entry + floorRs / units);
+  return {
+    armed: true,
+    floorRs,
+    floorPremium,
+    hit: params.optionBarLow <= floorPremium + 1e-9
+  };
+}
+
 // src/app/core/strategy-manager/engines/sr-trap-confirm.engine.ts
 function createSrTrapDayState() {
   return {
@@ -4162,13 +4537,32 @@ function readTrapExtras(settings) {
   const mode = x["trapMode"] === "trap" ? "trap" : "both";
   return {
     swingLb: Math.max(3, Math.floor(num2(x["swingLb"], 5))),
-    piercePts: num2(x["piercePts"], 3),
+    piercePts: num2(x["piercePts"], 15),
+    bankPiercePts: Math.max(0, num2(x["bankPiercePts"], 0)),
     mode,
     minRisk: num2(x["minRiskPts"], 4),
     maxRisk: num2(x["maxRiskPts"], 28),
     slPad: num2(x["slPadPts"], 2),
-    minConfirmBody: num2(x["minConfirmBody"], 0)
+    minConfirmBody: num2(x["minConfirmBody"], 0),
+    bounceOrPierceMult: Math.max(0, num2(x["bounceOrPierceMult"], 0)),
+    bounceOrPierceCap: Math.max(0, num2(x["bounceOrPierceCap"], 0))
   };
+}
+function morningOrWidth(dayBars, orEnd) {
+  let hi = -Infinity;
+  let lo = Infinity;
+  for (const b of dayBars) {
+    const t = extractHhMm(b.date);
+    if (t < "09:15" || t > orEnd) {
+      continue;
+    }
+    hi = Math.max(hi, b.high);
+    lo = Math.min(lo, b.low);
+  }
+  if (!Number.isFinite(hi) || !Number.isFinite(lo) || hi < lo) {
+    return 0;
+  }
+  return hi - lo;
 }
 function swingHL3(dayBars, i, lb) {
   const start = Math.max(0, i - lb);
@@ -4279,16 +4673,27 @@ function runSrTrapConfirm(ctx, state, settings) {
     return wait6(`EMA-${settings.emaLength} warming up`);
   }
   const { sh, sl } = swingHL3(dayBars, i, extras.swingLb);
-  const pierce = extras.piercePts;
+  const isBank = /bank/i.test(ctx.instrumentId ?? "");
+  const trapPierce = isBank && extras.bankPiercePts > 0 ? extras.bankPiercePts : extras.piercePts;
+  let bouncePierce = trapPierce;
+  if (extras.bounceOrPierceMult > 0) {
+    const orW = morningOrWidth(dayBars, settings.orEnd || "09:45");
+    if (orW > 0) {
+      bouncePierce = Math.max(trapPierce, orW * extras.bounceOrPierceMult);
+      if (extras.bounceOrPierceCap > 0) {
+        bouncePierce = Math.min(bouncePierce, extras.bounceOrPierceCap);
+      }
+    }
+  }
   const cc = candle.close;
   const oo = candle.open;
   const hh = candle.high;
   const ll = candle.low;
-  const trapBuy = ll < sl - pierce && cc > sl && cc > oo;
-  const trapSell = hh > sh + pierce && cc < sh && cc < oo;
+  const trapBuy = ll < sl - trapPierce && cc > sl && cc > oo;
+  const trapSell = hh > sh + trapPierce && cc < sh && cc < oo;
   const rng = Math.max(hh - ll, 1e-9);
-  const bounceBuy = ll <= sl + pierce && ll >= sl - pierce * 2 && cc > oo && cc >= sl && (hh - cc) / rng < 0.35;
-  const bounceSell = hh >= sh - pierce && hh <= sh + pierce * 2 && cc < oo && cc <= sh && (cc - ll) / rng < 0.35;
+  const bounceBuy = ll <= sl + bouncePierce && ll >= sl - bouncePierce * 2 && cc > oo && cc >= sl && (hh - cc) / rng < 0.35;
+  const bounceSell = hh >= sh - bouncePierce && hh <= sh + bouncePierce * 2 && cc < oo && cc <= sh && (cc - ll) / rng < 0.35;
   let dir = 0;
   let stop = 0;
   if (trapBuy || extras.mode === "both" && bounceBuy) {
@@ -4326,7 +4731,12 @@ function runSrTrapConfirm(ctx, state, settings) {
   });
 }
 function srTrapExitLogic(candle, open, closes, settings, ctx) {
-  const armed = armPeakTrailFloor(candle, open, settings, ctx.instrumentId ?? "");
+  const { armRs, lockRs, givebackRs } = optionPeakTrailSettingsFromExtras(
+    settings.extras,
+    open.lotsMultiplier
+  );
+  const optionMarksKnown = typeof open.optionPeakMfeRs === "number" && open.optionEntryPremium != null && open.optionEntryPremium > 0 && open.optionBarLow != null && open.optionLotUnits != null && open.optionLotUnits > 0;
+  const armedIndex = armPeakTrailFloor(candle, open, settings, ctx.instrumentId ?? "");
   const cutoff = applySlConfirmCutoff(candle, open, settings, ctx.instrumentId ?? "");
   if (cutoff) {
     return cutoff;
@@ -4340,12 +4750,31 @@ function srTrapExitLogic(candle, open, closes, settings, ctx) {
     seriesAt(ctx)
   );
   if (exit) {
-    if (armed && exit.reason === "Stop loss hit") {
+    if (!optionMarksKnown && armedIndex && exit.reason === "Stop loss hit") {
       return { ...exit, reason: "Profit drained \u2014 cut & rehunt" };
     }
     return exit;
   }
-  if (!armed) {
+  if (optionMarksKnown) {
+    const trail = evaluateOptionPeakTrail({
+      entryPremium: open.optionEntryPremium,
+      optionPeakMfeRs: open.optionPeakMfeRs,
+      optionBarLow: open.optionBarLow,
+      lotUnits: open.optionLotUnits,
+      armRs,
+      lockRs,
+      givebackRs
+    });
+    if (trail?.hit) {
+      return {
+        exitPrice: candle.close,
+        reason: "Profit drained \u2014 cut & rehunt",
+        optionExitPremium: trail.floorPremium
+      };
+    }
+    return null;
+  }
+  if (!armedIndex) {
     return null;
   }
   const closePts = open.direction === "BUY" ? candle.close - open.entry : open.entry - candle.close;
@@ -4359,46 +4788,15 @@ function srTrapExitLogic(candle, open, closes, settings, ctx) {
   return null;
 }
 
-// src/app/core/live-desk/option-sl-premium.util.ts
-function isMcxOptionContext(exchange, tradingSymbol) {
-  if ((exchange ?? "").toUpperCase() === "MCX") {
-    return true;
-  }
-  const sym = (tradingSymbol ?? "").toUpperCase();
-  return sym.startsWith("CRUDEOIL") || sym.startsWith("NATURALGAS") || sym.startsWith("NATGAS");
-}
-function roundOptionPremiumTick(price) {
-  return Math.max(0.05, Math.round(price / 0.05) * 0.05);
-}
-function mcxMinSlGapPts(fillPremium) {
-  return Math.max(25, fillPremium * 0.05);
-}
-function computeProtectiveSlTrigger(params) {
-  const fill = Math.max(0, params.fillPremium);
-  const risk = Math.max(0, params.indexRiskPts);
-  const mcx = isMcxOptionContext(params.exchange, params.tradingSymbol);
-  const delta = mcx ? 1 : 0.5;
-  const fromRisk = fill - risk * delta;
-  const fromMinGap = mcx ? fill - mcxMinSlGapPts(fill) : fromRisk;
-  let trigger = roundOptionPremiumTick(Math.max(0.05, Math.min(fromRisk, fromMinGap)));
-  const ltp = params.ltp;
-  if (ltp != null && ltp > 0 && trigger >= ltp - 0.049) {
-    const cushion = Math.max(
-      risk * delta,
-      mcx ? mcxMinSlGapPts(ltp) : ltp * 0.02,
-      mcx ? 25 : 2
-    );
-    trigger = roundOptionPremiumTick(Math.max(0.05, ltp - cushion));
-  }
-  return trigger;
-}
-
 // src/app/core/utils/instrument-resolver.util.ts
-/** Prefer next contract on expiry day (same as Trade Desk Eu resolver). Options already roll via liveExpiries. */
 function resolveCrudeOilMiniFuturesToken(instruments) {
+  return resolveMcxMiniFuturesToken(instruments, ["CRUDEOILM"]);
+}
+function resolveMcxMiniFuturesToken(instruments, prefixes) {
   const today = startOfDay3(/* @__PURE__ */ new Date());
+  const prefs = prefixes.map((p) => p.toUpperCase());
   const pool = instruments.filter(
-    (item) => item.exchange === "MCX" && item.instrumentType === "FUT" && item.tradingSymbol.startsWith("CRUDEOILM")
+    (item) => item.exchange === "MCX" && item.instrumentType === "FUT" && prefs.some((p) => item.tradingSymbol.toUpperCase().startsWith(p))
   ).sort((left, right) => expiryTime(left) - expiryTime(right));
   const next = pool.find((item) => {
     if (!item.expiry) {
@@ -4430,7 +4828,7 @@ function startOfDay3(date) {
 }
 
 // scripts/server-live/bundle-entry.ts
-/** Daily ₹1k–₹3k Trap DNA — must match Trade Desk SR Trap Confirm. Next-bar confirm stays ON. */
+var trapCaps = dnaCapsForStrategy(MANAGED_STRATEGY_IDS.SR_TRAP_CONFIRM, "nifty");
 var TRAP_DEFAULTS = defaultStrategySettings({
   entryTimeStart: "09:45",
   entryTimeEnd: "14:45",
@@ -4439,11 +4837,11 @@ var TRAP_DEFAULTS = defaultStrategySettings({
   stopLossPts: 30,
   bankStopLossPts: 50,
   emaLength: 50,
-  maxTradesPerDay: 0,
+  maxTradesPerDay: trapCaps.maxTradesPerDay,
   instrumentType: "futures",
-  dayStopPts: 80,
+  dayStopPts: 60,
   dayProfitLockPts: 0,
-  targetRMultiple: 2,
+  targetRMultiple: trapCaps.targetRMultiple ?? 3.5,
   profitProtectEnabled: true,
   profitProtectArmR: 1,
   profitProtectLockR: 0,
@@ -4452,18 +4850,11 @@ var TRAP_DEFAULTS = defaultStrategySettings({
   extras: {
     trapMode: "both",
     swingLb: 5,
-    piercePts: 10,
     minRiskPts: 4,
     maxRiskPts: 28,
     slPadPts: 2,
     minConfirmBody: 0,
-    profitLockArmRs: 150,
-    profitLockLockRs: 75,
-    profitLockGivebackRs: 75,
-    slConfirmCutoffEnabled: false,
-    slConfirmCutoffFracR: 0,
-    slConfirmCutoffMaxMfeR: 0,
-    slConfirmSoftRs: 0
+    ...TRAP_1LOT_DAILY_DNA_EXTRAS
   }
 });
 var GENIE_DEFAULTS = defaultStrategySettings({
@@ -4499,8 +4890,8 @@ function createTrapStrategy() {
   const api = {
     id: MANAGED_STRATEGY_IDS.SR_TRAP_CONFIRM,
     name: "Trap",
-    version: "1.0.0",
-    description: "Server Live Trap",
+    version: "1.2.0",
+    description: "Server Live Trap \xB7 pierce20 \xB7 Bank40 \xB7 peak\u20B9100 \xB7 max3 \xB7 3.5R \xB7 Paper\u2261Live",
     supports: ["nifty", "bank"],
     defaultSettings: TRAP_DEFAULTS,
     initialize(partial) {
