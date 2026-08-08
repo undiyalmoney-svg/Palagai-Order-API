@@ -1,4 +1,5 @@
 const store = require('./live.store');
+const { runBacktest } = require('./backtest');
 const {
   APP_BUILD,
   APP_VERSION,
@@ -62,4 +63,28 @@ async function putAuth(req, res) {
   res.json(out);
 }
 
-module.exports = { health, status, events, defaults, start, stop, putAuth };
+/**
+ * Paper backtest — replays a From→To range server-side and returns trades + P&L.
+ * The browser supplies its Kite session via X-Kite-Authorization (read-only,
+ * historical data only — no orders are placed).
+ */
+async function backtest(req, res) {
+  const authorization =
+    req.headers['x-kite-authorization'] || req.headers['x-kite-authorisation'] || null;
+  if (!authorization) {
+    res
+      .status(400)
+      .json({ status: 'error', message: 'Kite session required — Get Token, then retry Paper.' });
+    return;
+  }
+  const body = req.body || {};
+  const out = await runBacktest({
+    authorization,
+    fromDate: body.fromDate,
+    toDate: body.toDate,
+    config: body,
+  });
+  res.json(out);
+}
+
+module.exports = { health, status, events, defaults, start, stop, putAuth, backtest };
