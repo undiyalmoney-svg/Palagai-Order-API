@@ -1,12 +1,12 @@
 {
   "name": "Palagai Order API",
   "user": "ubuntu",
-  "install": "bash .cursor/install.sh",
-  "start": "bash .cursor/start.sh",
+  "install": "if [ -f .cursor/install.sh ]; then bash .cursor/install.sh; else bash /agent/repos/Palagai-Order-API/.cursor/install.sh; fi",
+  "start": "if [ -f .cursor/start.sh ]; then bash .cursor/start.sh; else bash /agent/repos/Palagai-Order-API/.cursor/start.sh; fi",
   "terminals": [
     {
       "name": "order-api",
-      "command": "npm run dev"
+      "command": "cd /agent/repos/Palagai-Order-API 2>/dev/null; npm run dev"
     }
   ],
   "ports": [{ "name": "order-api", "port": 3000 }]
