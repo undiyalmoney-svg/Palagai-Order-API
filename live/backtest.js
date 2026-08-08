@@ -114,6 +114,75 @@ function trapInitOverrides(cfg, instrumentId) {
   );
 }
 
+/** Fetch 5m option candles for the resolved ATM tokens (Trade Desk parity). */
+async function fetchOptionHistories(market, authorization, tokens, from, to) {
+  const map = new Map();
+  for (const token of tokens) {
+    if (!token || map.has(token)) continue;
+    try {
+      map.set(token, await market.fetchHistorical5m(authorization, token, from, to));
+    } catch (err) {
+      // Missing/illiquid option history → that trade falls back to estimate.
+      map.set(token, []);
+    }
+  }
+  return map;
+}
+
+/**
+ * Two-pass index replay, exactly like the browser Trade Desk:
+ *  1) discover pass with empty option candles to collect the ATM option tokens
+ *  2) fetch those CE/PE 5m candles
+ *  3) real pass fed the option candles, so the option-₹ peak-lock exits fire
+ *     and premiums come from real bars (not estimates).
+ */
+async function replayIndexBook({
+  market,
+  authorization,
+  fromDate,
+  toDate,
+  warmFrom,
+  instruments,
+  instrument,
+  kind,
+  lots,
+  makeStrategy,
+}) {
+  const candles = await market.fetchHistorical5m(
+    authorization,
+    instrument.instrumentToken,
+    warmFrom,
+    toDate,
+  );
+  const base = {
+    instrumentId: instrument.id,
+    instrumentName: instrument.name,
+    kind,
+    candles,
+    fromDate,
+    toDate,
+    instruments,
+    forceCloseOpen: true,
+    lotsMultiplier: lots,
+    enableKutty: false,
+    kuttyAlone: false,
+  };
+  const needed = new Set();
+  replayPaperOnIndex({
+    ...base,
+    optionCandlesByToken: new Map(),
+    neededOptionTokens: needed,
+    strategy: makeStrategy(),
+  });
+  const optionCandles = await fetchOptionHistories(market, authorization, needed, fromDate, toDate);
+  return replayPaperOnIndex({
+    ...base,
+    optionCandlesByToken: optionCandles,
+    neededOptionTokens: new Set(),
+    strategy: makeStrategy(),
+  });
+}
+
 /**
  * Run a Paper backtest for [fromDate, toDate] with the given desk config.
  * @param {{authorization:string, fromDate:string, toDate:string, config:object}} args
@@ -129,67 +198,49 @@ async function runBacktest({ authorization, fromDate, toDate, config }, deps = {
   const cfg = normalizeStartConfig(config);
   const warmFrom = addDaysIso(fromDate, -LOOKBACK_DAYS);
   const instruments = deps.instruments || (await market.fetchInstruments(authorization));
-  const emptyOpt = new Map();
-  const needed = new Set();
 
   const books = [];
   const allTrades = [];
 
   if (cfg.enableNifty) {
-    const candles = await market.fetchHistorical5m(
+    const replay = await replayIndexBook({
+      market,
       authorization,
-      NIFTY_50_INSTRUMENT.instrumentToken,
-      warmFrom,
-      toDate,
-    );
-    const strategy = createTrapStrategy();
-    strategy.initialize(trapInitOverrides(cfg, NIFTY_50_INSTRUMENT.id));
-    const replay = replayPaperOnIndex({
-      instrumentId: NIFTY_50_INSTRUMENT.id,
-      instrumentName: NIFTY_50_INSTRUMENT.name,
-      kind: 'nifty',
-      candles,
       fromDate,
       toDate,
+      warmFrom,
       instruments,
-      optionCandlesByToken: emptyOpt,
-      neededOptionTokens: needed,
-      forceCloseOpen: true,
-      lotsMultiplier: cfg.niftyLots || 1,
-      strategy,
-      enableKutty: false,
-      kuttyAlone: false,
+      instrument: NIFTY_50_INSTRUMENT,
+      kind: 'nifty',
+      lots: cfg.niftyLots || 1,
+      makeStrategy: () => {
+        const s = createTrapStrategy();
+        s.initialize(trapInitOverrides(cfg, NIFTY_50_INSTRUMENT.id));
+        return s;
+      },
     });
     allTrades.push(...(replay.trades || []));
     books.push(bookSummary('Nifty Trap', replay));
   }
 
   if (cfg.enableBank) {
-    const candles = await market.fetchHistorical5m(
-      authorization,
-      BANK_NIFTY_INSTRUMENT.instrumentToken,
-      warmFrom,
-      toDate,
-    );
     const genie = cfg.bankStrategy === 'genie';
-    const strategy = genie ? createGenieStrategy() : createTrapStrategy();
-    if (genie) strategy.initialize();
-    else strategy.initialize(trapInitOverrides(cfg, BANK_NIFTY_INSTRUMENT.id));
-    const replay = replayPaperOnIndex({
-      instrumentId: BANK_NIFTY_INSTRUMENT.id,
-      instrumentName: BANK_NIFTY_INSTRUMENT.name,
-      kind: 'banknifty',
-      candles,
+    const replay = await replayIndexBook({
+      market,
+      authorization,
       fromDate,
       toDate,
+      warmFrom,
       instruments,
-      optionCandlesByToken: emptyOpt,
-      neededOptionTokens: needed,
-      forceCloseOpen: true,
-      lotsMultiplier: cfg.bankLots || 1,
-      strategy,
-      enableKutty: false,
-      kuttyAlone: false,
+      instrument: BANK_NIFTY_INSTRUMENT,
+      kind: 'banknifty',
+      lots: cfg.bankLots || 1,
+      makeStrategy: () => {
+        const s = genie ? createGenieStrategy() : createTrapStrategy();
+        if (genie) s.initialize();
+        else s.initialize(trapInitOverrides(cfg, BANK_NIFTY_INSTRUMENT.id));
+        return s;
+      },
     });
     allTrades.push(...(replay.trades || []));
     books.push(bookSummary(`Bank ${genie ? 'Genie' : 'Trap'}`, replay));
@@ -207,21 +258,27 @@ async function runBacktest({ authorization, fromDate, toDate, config }, deps = {
       const profile = cfg.crudeStrategy === 'all-green' ? 'all-green' : 'selective';
       const tradeParams = resolveCrudeStrategyProfile(profile);
       const dayLossStopPts = resolveCrudeProfileDayLossPts(tradeParams, !!cfg.strictDayStop);
-      const replay = replayPaperOnCrude({
+      const crudeBase = {
         instrumentId: CRUDE_OIL_MINI_INSTRUMENT.id,
         instrumentName: `Crude Mini (${crudeFuture.tradingSymbol || 'CRUDEOILM'})`,
         candles,
         fromDate,
         toDate,
         instruments,
-        optionCandlesByToken: emptyOpt,
-        neededOptionTokens: needed,
         forceCloseOpen: true,
         lotsMultiplier: cfg.crudeLots || 1,
         dayLossStopPts,
         enableMorning: tradeParams.defaultEnableMorning,
         enableEvening: tradeParams.defaultEnableEvening,
         tradeParams,
+      };
+      const crudeNeeded = new Set();
+      replayPaperOnCrude({ ...crudeBase, optionCandlesByToken: new Map(), neededOptionTokens: crudeNeeded });
+      const crudeOpt = await fetchOptionHistories(market, authorization, crudeNeeded, fromDate, toDate);
+      const replay = replayPaperOnCrude({
+        ...crudeBase,
+        optionCandlesByToken: crudeOpt,
+        neededOptionTokens: new Set(),
       });
       allTrades.push(...(replay.trades || []));
       books.push(bookSummary(tradeParams.profileId === 'selective' ? 'Crude Selective' : `Crude ${tradeParams.label}`, replay));
