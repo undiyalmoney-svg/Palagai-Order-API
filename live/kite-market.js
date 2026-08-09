@@ -20,6 +20,39 @@ const client = axios.create({
   httpAgent: ipv4HttpAgent,
 });
 
+function delay(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/**
+ * GET with retry for transient failures (connect timeouts / resets / 5xx / 429).
+ * READ endpoints only — order placement is never retried (double-order risk).
+ * Auth (401/403) and other 4xx are returned immediately (no retry).
+ */
+async function getWithRetry(url, opts, label = 'kite', retries = 3) {
+  let lastErr;
+  for (let attempt = 1; attempt <= retries; attempt += 1) {
+    try {
+      const res = await client.get(url, opts);
+      if (res.status >= 500 || res.status === 429) {
+        lastErr = new Error(`${label} HTTP ${res.status}`);
+      } else {
+        return res;
+      }
+    } catch (err) {
+      lastErr = err;
+      const code = String(err.code || '');
+      const transient =
+        /ETIMEDOUT|ECONNRESET|ECONNREFUSED|ECONNABORTED|EAI_AGAIN|ENETUNREACH|ENOTFOUND/.test(
+          code,
+        ) || /timeout/i.test(err.message || '');
+      if (!transient) throw err;
+    }
+    if (attempt < retries) await delay(500 * attempt);
+  }
+  throw lastErr;
+}
+
 function headers(authorization) {
   return {
     'X-Kite-Version': '3',
@@ -99,11 +132,15 @@ function parseInstrumentsCsv(csv) {
 }
 
 async function fetchInstruments(authorization) {
-  const res = await client.get('/instruments', {
-    headers: headers(authorization),
-    responseType: 'text',
-    transformResponse: [(d) => d],
-  });
+  const res = await getWithRetry(
+    '/instruments',
+    {
+      headers: headers(authorization),
+      responseType: 'text',
+      transformResponse: [(d) => d],
+    },
+    'instruments',
+  );
   if (res.status >= 400) {
     throw new Error(`instruments HTTP ${res.status}`);
   }
@@ -111,10 +148,14 @@ async function fetchInstruments(authorization) {
 }
 
 async function fetchHistorical5m(authorization, instrumentToken, fromDate, toDate) {
-  const res = await client.get(`/instruments/historical/${instrumentToken}/5minute`, {
-    headers: headers(authorization),
-    params: { from: fromDate, to: toDate },
-  });
+  const res = await getWithRetry(
+    `/instruments/historical/${instrumentToken}/5minute`,
+    {
+      headers: headers(authorization),
+      params: { from: fromDate, to: toDate },
+    },
+    'historical',
+  );
   if (res.status >= 400 || res.data?.status === 'error') {
     throw new Error(
       res.data?.message || `historical HTTP ${res.status} token=${instrumentToken}`,
@@ -133,12 +174,16 @@ async function fetchHistorical5m(authorization, instrumentToken, fromDate, toDat
 
 async function fetchQuotes(authorization, keys) {
   if (!keys.length) return {};
-  const res = await client.get('/quote', {
-    headers: headers(authorization),
-    params: { i: keys },
-    paramsSerializer: (params) =>
-      (params.i || []).map((k) => `i=${encodeURIComponent(k)}`).join('&'),
-  });
+  const res = await getWithRetry(
+    '/quote',
+    {
+      headers: headers(authorization),
+      params: { i: keys },
+      paramsSerializer: (params) =>
+        (params.i || []).map((k) => `i=${encodeURIComponent(k)}`).join('&'),
+    },
+    'quote',
+  );
   if (res.status >= 400 || res.data?.status === 'error') {
     throw new Error(res.data?.message || `quote HTTP ${res.status}`);
   }
