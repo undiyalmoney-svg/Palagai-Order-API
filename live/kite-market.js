@@ -3,12 +3,21 @@
  * Does not change /api/kite order controllers.
  */
 const axios = require('axios');
+const https = require('https');
+const http = require('http');
 const { config } = require('../config/env');
+
+// Force IPv4: the droplet's IPv6 egress to api.kite.trade is broken, and Node's
+// dual-stack (happy-eyeballs) can stall on the dead AAAA route (ETIMEDOUT).
+const ipv4HttpsAgent = new https.Agent({ family: 4, keepAlive: true });
+const ipv4HttpAgent = new http.Agent({ family: 4, keepAlive: true });
 
 const client = axios.create({
   baseURL: config.kiteApiBaseUrl || 'https://api.kite.trade',
   timeout: 45_000,
   validateStatus: () => true,
+  httpsAgent: ipv4HttpsAgent,
+  httpAgent: ipv4HttpAgent,
 });
 
 function headers(authorization) {

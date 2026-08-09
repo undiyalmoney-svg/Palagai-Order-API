@@ -1,5 +1,12 @@
 const axios = require('axios');
+const https = require('https');
+const http = require('http');
 const { config } = require('../config/env');
+
+// Force IPv4: the droplet's IPv6 egress to api.kite.trade is broken; dual-stack
+// can stall on the dead AAAA route (ETIMEDOUT).
+const ipv4HttpsAgent = new https.Agent({ family: 4, keepAlive: true });
+const ipv4HttpAgent = new http.Agent({ family: 4, keepAlive: true });
 
 /**
  * Thin Kite Connect client for order-related endpoints only.
@@ -11,6 +18,8 @@ class KiteService {
       baseURL: config.kiteApiBaseUrl,
       timeout: 30_000,
       validateStatus: () => true,
+      httpsAgent: ipv4HttpsAgent,
+      httpAgent: ipv4HttpAgent,
     });
   }
 
