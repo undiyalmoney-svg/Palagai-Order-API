@@ -3,8 +3,22 @@
  * Mirrors Trade Desk LiveOrderExecutor entry / SL-M / exit behaviour.
  */
 const { kiteService } = require('../services/kite.service');
-const { computeProtectiveSlTrigger } = require('./strategy-core.cjs');
+const {
+  computeProtectiveSlTrigger,
+  NIFTY_50_INSTRUMENT,
+  BANK_NIFTY_INSTRUMENT,
+  CRUDE_OIL_MINI_INSTRUMENT,
+} = require('./strategy-core.cjs');
 const { fetchQuotes } = require('./kite-market');
+
+/** Map a broker option symbol back to the desk instrument id. */
+function instrumentIdForSymbol(sym) {
+  const s = String(sym || '').toUpperCase();
+  if (s.startsWith('BANKNIFTY')) return BANK_NIFTY_INSTRUMENT.id;
+  if (s.startsWith('CRUDEOIL')) return CRUDE_OIL_MINI_INSTRUMENT.id;
+  if (s.startsWith('NIFTY')) return NIFTY_50_INSTRUMENT.id;
+  return null;
+}
 
 function delay(ms) {
   return new Promise((r) => setTimeout(r, ms));
@@ -52,6 +66,108 @@ class LiveBroker {
     this.positions.clear();
   }
 
+  /**
+   * Restart safety: adopt any PALAGAI positions already open at the broker so a
+   * restart mid-trade does NOT place a duplicate entry. Matches each held long
+   * option to its resting SL-M order. Best-effort; never throws.
+   */
+  async reconcileFromBroker(authorization) {
+    if (!this.realOrders) return;
+    try {
+      const posRes = await kiteService.getPositions(authorization);
+      const rows = [
+        ...(posRes.data?.data?.net || []),
+        ...(posRes.data?.data?.day || []),
+      ];
+      const orders = await this.getOrders(authorization);
+      let adopted = 0;
+      for (const row of rows) {
+        const qty = Number(row.quantity || 0);
+        if (qty <= 0) continue; // only long option positions we hold
+        const sym = row.tradingsymbol || '';
+        const instrumentId = instrumentIdForSymbol(sym);
+        if (!instrumentId) continue;
+        if (this.positions.get(instrumentId)?.status === 'open') continue;
+        const sl = orders.find(
+          (o) =>
+            (o.tradingsymbol || '').toUpperCase() === sym.toUpperCase() &&
+            String(o.order_type || '').toUpperCase() === 'SL-M' &&
+            isPendingSl(o.status),
+        );
+        const exchange =
+          row.exchange || (sym.toUpperCase().startsWith('CRUDEOIL') ? 'MCX' : 'NFO');
+        this.positions.set(instrumentId, {
+          status: 'open',
+          instrumentId,
+          tradingSymbol: sym,
+          instrumentToken: Number(row.instrument_token || 0) || null,
+          quantity: Math.abs(qty),
+          direction: 'BUY',
+          entryOrderId: null,
+          slOrderId: sl?.order_id || null,
+          exitOrderId: null,
+          entryPremium: Number(row.average_price || row.buy_price || 0) || null,
+          slTrigger: sl?.trigger_price != null ? Number(sl.trigger_price) : null,
+          entryTime: null,
+          exchange,
+          product: row.product || 'MIS',
+          indexEntry: null,
+          indexStop: null,
+          lastError: null,
+        });
+        adopted += 1;
+        this.pushEvent(
+          'RECONCILE',
+          `Adopted open ${sym} qty ${Math.abs(qty)}${sl ? ` · SL ${sl.order_id}` : ' · NO resting SL'}`,
+        );
+      }
+      if (adopted === 0) {
+        this.pushEvent('RECONCILE', 'No open PALAGAI positions at broker — clean start');
+      }
+    } catch (err) {
+      this.pushEvent('ERROR', `reconcile failed: ${err.message}`);
+    }
+  }
+
+  /** Ensure an open position has a resting protective SL-M; (re)place if missing. */
+  async ensureProtectiveSl(authorization, pos, open) {
+    if (pos.slOrderId || !(pos.entryPremium > 0)) return;
+    const indexRisk = open
+      ? Math.abs(open.indexEntry - open.indexStop)
+      : Math.abs(Number(pos.indexEntry || 0) - Number(pos.indexStop || 0));
+    const ltp = await this.resolveOptionLtp(authorization, pos.tradingSymbol, pos.exchange);
+    const trigger = computeProtectiveSlTrigger({
+      fillPremium: pos.entryPremium,
+      indexRiskPts: indexRisk,
+      exchange: pos.exchange,
+      tradingSymbol: pos.tradingSymbol,
+      ltp,
+    });
+    if (!(trigger > 0)) return;
+    const res = await kiteService.placeOrder(authorization, 'regular', {
+      exchange: pos.exchange,
+      tradingsymbol: pos.tradingSymbol,
+      transaction_type: 'SELL',
+      order_type: 'SL-M',
+      quantity: String(pos.quantity),
+      product: pos.product || 'MIS',
+      validity: 'DAY',
+      trigger_price: String(trigger),
+      tag: 'PALAGAISL',
+    });
+    const id = res.data?.data?.order_id || null;
+    if (res.status < 400 && id) {
+      pos.slOrderId = id;
+      pos.slTrigger = trigger;
+      this.pushEvent('SL', `${pos.tradingSymbol}: SL-M (ensured) @ ${trigger} id ${id}`);
+    } else {
+      this.pushEvent(
+        'ERROR',
+        `${pos.tradingSymbol}: SL-M ensure failed — ${res.data?.message || res.status}`,
+      );
+    }
+  }
+
   async syncInstrument({ authorization, instrumentId, instrumentName, open, lots }) {
     if (lots != null) this.setLots(instrumentId, lots);
     if (!this.realOrders) {
@@ -93,8 +209,13 @@ class LiveBroker {
       const same =
         (current.tradingSymbol || '').toUpperCase() ===
           (open.option?.tradingSymbol || '').toUpperCase() &&
-        current.entryTime === open.entryTime;
+        // A reconciled/adopted position has no entryTime — match on symbol only.
+        (!current.entryTime || current.entryTime === open.entryTime);
       if (same) {
+        // Restart/failed-SL safety: (re)place a stop if this open leg has none.
+        if (!current.slOrderId) {
+          await this.ensureProtectiveSl(authorization, current, open);
+        }
         await this.syncProtectiveSl(authorization, current, open);
         return;
       }
@@ -221,6 +342,12 @@ class LiveBroker {
       indexStop: open.indexStop,
       lastError: null,
     });
+
+    // If the protective SL-M failed to place, retry once now so the position
+    // is never left without a resting stop.
+    if (!slOrderId) {
+      await this.ensureProtectiveSl(authorization, this.positions.get(instrumentId), open);
+    }
   }
 
   async syncProtectiveSl(authorization, pos, open) {

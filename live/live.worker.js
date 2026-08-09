@@ -100,6 +100,7 @@ class LiveWorker {
     };
     this.crudeFuture = null;
     this.warmed = false;
+    this.reconciled = false;
     this.tickBusy = false;
     this.lastSignals = { nifty: '', bank: '', crude: '' };
   }
@@ -199,6 +200,13 @@ class LiveWorker {
 
       this.broker.setRealOrders(!!config.realOrders);
 
+      // Restart safety: adopt any positions already open at the broker once,
+      // so a mid-trade restart never places a duplicate entry.
+      if (config.realOrders && !this.reconciled) {
+        await this.broker.reconcileFromBroker(authorization);
+        this.reconciled = true;
+      }
+
       if (!this.warmed) {
         await this.warm(authorization);
       } else {
@@ -214,23 +222,21 @@ class LiveWorker {
       const enableKutty = !!config.enableKutty;
 
       if (config.enableNifty && indexSession) {
-        const strategy = createTrapStrategy();
-        strategy.initialize(trapInitOverrides(config, NIFTY_50_INSTRUMENT.id));
-        const replay = replayPaperOnIndex({
-          instrumentId: NIFTY_50_INSTRUMENT.id,
-          instrumentName: NIFTY_50_INSTRUMENT.name,
+        const replay = await this.replayIndexLive({
+          authorization,
+          instrument: NIFTY_50_INSTRUMENT,
           kind: 'nifty',
           candles: this.candles.nifty,
-          fromDate: today,
-          toDate: today,
-          instruments: this.instruments,
-          optionCandlesByToken: emptyOpt,
-          neededOptionTokens: needed,
-          forceCloseOpen: now >= '15:15',
-          lotsMultiplier: config.niftyLots || 1,
-          strategy,
+          lots: config.niftyLots || 1,
+          forceClose: now >= '15:15',
           enableKutty,
           kuttyAlone: !!config.kuttyAlone,
+          today,
+          makeStrategy: () => {
+            const s = createTrapStrategy();
+            s.initialize(trapInitOverrides(config, NIFTY_50_INSTRUMENT.id));
+            return s;
+          },
         });
         await this.broker.syncInstrument({
           authorization,
@@ -249,38 +255,33 @@ class LiveWorker {
       }
 
       if (config.enableBank && indexSession) {
-        const strategy =
-          config.bankStrategy === 'genie' ? createGenieStrategy() : createTrapStrategy();
-        if (config.bankStrategy !== 'genie') {
-          strategy.initialize(trapInitOverrides(config, BANK_NIFTY_INSTRUMENT.id));
-        } else {
-          strategy.initialize();
-        }
-        const replay = replayPaperOnIndex({
-          instrumentId: BANK_NIFTY_INSTRUMENT.id,
-          instrumentName: BANK_NIFTY_INSTRUMENT.name,
+        const genie = config.bankStrategy === 'genie';
+        const replay = await this.replayIndexLive({
+          authorization,
+          instrument: BANK_NIFTY_INSTRUMENT,
           kind: 'banknifty',
           candles: this.candles.bank,
-          fromDate: today,
-          toDate: today,
-          instruments: this.instruments,
-          optionCandlesByToken: emptyOpt,
-          neededOptionTokens: needed,
-          forceCloseOpen: now >= '15:15',
-          lotsMultiplier: config.bankLots || 1,
-          strategy,
+          lots: config.bankLots || 1,
+          forceClose: now >= '15:15',
           enableKutty,
           kuttyAlone: !!config.kuttyAlone,
+          today,
+          makeStrategy: () => {
+            const s = genie ? createGenieStrategy() : createTrapStrategy();
+            if (genie) s.initialize();
+            else s.initialize(trapInitOverrides(config, BANK_NIFTY_INSTRUMENT.id));
+            return s;
+          },
         });
         await this.broker.syncInstrument({
           authorization,
           instrumentId: BANK_NIFTY_INSTRUMENT.id,
-          instrumentName: `Bank ${config.bankStrategy === 'genie' ? 'Genie' : 'Trap'}`,
+          instrumentName: `Bank ${genie ? 'Genie' : 'Trap'}`,
           open: toLiveOpen(replay.open),
           lots: config.bankLots || 1,
         });
         const bankSig =
-          `Bank ${strategy.name} · ${replay.lastSignal}` +
+          `Bank ${genie ? 'Genie' : 'Trap'} · ${replay.lastSignal}` +
           (replay.open ? ` · OPEN ${replay.open.direction}` : '');
         if (bankSig !== this.lastSignals.bank) {
           this.lastSignals.bank = bankSig;
@@ -346,8 +347,75 @@ class LiveWorker {
     }
   }
 
+  /** Best-effort 5m option candles for the discovered ATM tokens. Never throws. */
+  async fetchOptionCandles(authorization, tokens, fromDate, toDate) {
+    const map = new Map();
+    for (const token of tokens) {
+      if (!token || map.has(token)) continue;
+      try {
+        map.set(token, await fetchHistorical5m(authorization, token, fromDate, toDate));
+      } catch (err) {
+        map.set(token, []);
+      }
+    }
+    return map;
+  }
+
+  /**
+   * Two-pass index replay (Trade Desk parity): discover the ATM option tokens,
+   * fetch their 5m candles, then replay WITH them so the option-₹ peak-lock
+   * exits fire exactly like Paper. Fail-safe: on any option-fetch error it
+   * replays without option candles (current behaviour), so a tick never hangs.
+   */
+  async replayIndexLive({
+    authorization,
+    instrument,
+    kind,
+    candles,
+    lots,
+    makeStrategy,
+    forceClose,
+    enableKutty,
+    kuttyAlone,
+    today,
+  }) {
+    const base = {
+      instrumentId: instrument.id,
+      instrumentName: instrument.name,
+      kind,
+      candles,
+      fromDate: today,
+      toDate: today,
+      instruments: this.instruments,
+      forceCloseOpen: forceClose,
+      lotsMultiplier: lots,
+      enableKutty,
+      kuttyAlone,
+    };
+    const needed = new Set();
+    replayPaperOnIndex({
+      ...base,
+      optionCandlesByToken: new Map(),
+      neededOptionTokens: needed,
+      strategy: makeStrategy(),
+    });
+    let optionCandles = new Map();
+    try {
+      optionCandles = await this.fetchOptionCandles(authorization, needed, today, today);
+    } catch (err) {
+      optionCandles = new Map();
+    }
+    return replayPaperOnIndex({
+      ...base,
+      optionCandlesByToken: optionCandles,
+      neededOptionTokens: new Set(),
+      strategy: makeStrategy(),
+    });
+  }
+
   resetWarm() {
     this.warmed = false;
+    this.reconciled = false;
     this.broker.clear();
     this.lastSignals = { nifty: '', bank: '', crude: '' };
   }
