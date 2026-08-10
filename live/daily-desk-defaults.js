@@ -6,10 +6,16 @@
  * Index only by default (Crude OFF — fee protection).
  */
 
-const APP_VERSION = '1.3.110';
-const APP_BUILD = '2026.08.10-crude-after-nse';
+const APP_VERSION = '1.3.111';
+const APP_BUILD = '2026.08.10-autobot-crude-off';
 const { LIVE_GREEN_DNA } = require('./dna-live-green');
 const { LIVE_CRUDE_GREEN_DNA } = require('./dna-live-crude-green');
+
+/**
+ * Hard off for Autobot / Server Live Start.
+ * DNA stays on disk for later; client cannot enable Crude until this flips true.
+ */
+const AUTOBOT_ALLOW_CRUDE = false;
 
 /** Allowed crudeStrategy ids for Autobot / backtest normalize. */
 const CRUDE_STRATEGY_IDS = new Set([
@@ -45,7 +51,7 @@ const DAILY_3K_PRESET = {
   crudeLots: 1,
   enableNifty: true,
   enableBank: true,
-  /** Off by default — fee protection (same as Auto Trader UI). */
+  /** Hard-off for Autobot — gather index P&L first; flip AUTOBOT_ALLOW_CRUDE later. */
   enableCrude: false,
   enableNatGas: false,
   enableKutty: false,
@@ -131,10 +137,12 @@ function normalizeStartConfig(config = {}) {
     config.enableBank != null ||
     config.enableCrude != null;
 
+  const wantCrude = hasBookFlag ? !!config.enableCrude : preset.enableCrude;
   return {
     enableNifty: hasBookFlag ? !!config.enableNifty : preset.enableNifty,
     enableBank: hasBookFlag ? !!config.enableBank : preset.enableBank,
-    enableCrude: hasBookFlag ? !!config.enableCrude : preset.enableCrude,
+    /** Autobot: ignore client Crude toggle while AUTOBOT_ALLOW_CRUDE is false. */
+    enableCrude: AUTOBOT_ALLOW_CRUDE ? wantCrude : false,
     niftyLots: Math.max(1, Math.floor(Number(config.niftyLots)) || preset.niftyLots),
     bankLots: Math.max(1, Math.floor(Number(config.bankLots)) || preset.bankLots),
     crudeLots: Math.max(1, Math.floor(Number(config.crudeLots)) || preset.crudeLots),
@@ -167,6 +175,7 @@ function normalizeStartConfig(config = {}) {
 module.exports = {
   APP_VERSION,
   APP_BUILD,
+  AUTOBOT_ALLOW_CRUDE,
   DAY_PROFIT_LOCK_RS,
   STRICT_DAY_STOP_RS,
   NIFTY_RS_PER_POINT,

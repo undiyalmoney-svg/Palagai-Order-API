@@ -3,6 +3,7 @@ const { runBacktest } = require('./backtest');
 const {
   APP_BUILD,
   APP_VERSION,
+  AUTOBOT_ALLOW_CRUDE,
   DAILY_3K_PRESET,
   DAY_PROFIT_LOCK_RS,
   STRICT_DAY_STOP_RS,
@@ -17,13 +18,18 @@ async function health(_req, res) {
   res.json({
     status: 'ok',
     service: 'palagai-live-control',
-    note: 'Server Live — LIVE_GREEN index + LIVE_CRUDE_GREEN Crude desk',
+    note: AUTOBOT_ALLOW_CRUDE
+      ? 'Server Live — LIVE_GREEN index + LIVE_CRUDE_GREEN Crude desk'
+      : 'Server Live — LIVE_GREEN index only (Autobot Crude hard-off)',
     version: APP_VERSION,
     appBuild: APP_BUILD,
     dnaId: LIVE_GREEN_DNA.id,
     crudeDnaId: LIVE_CRUDE_GREEN_DNA.id,
     crudeDefault: 'live-crude-green',
-    crudeDna: `after NSE · OR${c.minOrWidth}–${c.maxOrWidth} · ${c.entryStart}–${c.entryEnd} · SL${c.stopPts}/TP${c.targetPts} · trail ₹${c.profitLockArmRs}→₹${c.profitLockLockRs} · max${c.maxTradesDay} · first-win · no index-session overlap`,
+    crudeAllowed: AUTOBOT_ALLOW_CRUDE,
+    crudeDna: AUTOBOT_ALLOW_CRUDE
+      ? `after NSE · OR${c.minOrWidth}–${c.maxOrWidth} · ${c.entryStart}–${c.entryEnd} · SL${c.stopPts}/TP${c.targetPts} · trail ₹${c.profitLockArmRs}→₹${c.profitLockLockRs} · max${c.maxTradesDay} · first-win · no index-session overlap`
+      : 'OFF — Autobot will not trade Crude (DNA parked for later)',
     trapDna: `SR Trap · pierce ${t.piercePts}/B${t.bankPiercePts} · peak ₹${t.profitLockArmRs}/${t.profitLockLockRs}/${t.profitLockGivebackRs} · max${t.maxTradesPerDay} · ${t.targetRMultiple}R · stand-down ₹${ops.optionStandDownRs} · one-leg`,
     dayProfitLockRsBase: DAY_PROFIT_LOCK_RS,
     strictDayStopRsBase: STRICT_DAY_STOP_RS,

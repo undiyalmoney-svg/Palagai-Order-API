@@ -14,7 +14,8 @@ Matches **Trade Desk Daily ₹1k–₹3k** DNA (palagai.app `appBuild: 2026.08.0
 - piercePts 20 · Bank 40 · peak trail ₹100/50/50 · max3 · 3.5R · stand-down ₹350
 
 ### Crude LIVE_CRUDE_GREEN (v3 · after NSE only)
-- **No entries during Nifty/Bank session** — window **16:00–21:00**, worker gate **15:30** when index on
+- **Autobot hard-off for now** (`AUTOBOT_ALLOW_CRUDE=false`) — Start ignores Crude toggle; index only
+- When re-enabled: **no entries during Nifty/Bank session** — window **16:00–21:00**, worker gate **15:30**
 - Session-OR · width **40–60** · SL30 / TP80 · trail ₹350→₹180 · max **1**/day · first-win
 - Engine-validated May–Aug 2026: **13/14 green (92.9%)**, 0 entries before 15:30
 - Shares capital with index via `maxOpenLegs: 1`

@@ -6,6 +6,7 @@ const crypto = require('crypto');
 const {
   APP_BUILD,
   APP_VERSION,
+  AUTOBOT_ALLOW_CRUDE,
   DAILY_3K_PRESET,
   deskRiskLots,
   profitLockMoneyRs,
@@ -251,6 +252,7 @@ async function start(userId, config) {
     session.message = 'Already running. Stop first to change config.';
     return statusPayload(session);
   }
+  const askedCrude = !!config?.enableCrude;
   session.config = normalizeStartConfig(config);
   if (session.config.realOrders && !session.auth) {
     const err = new Error('Push Kite token first before real money Start');
@@ -266,6 +268,13 @@ async function start(userId, config) {
   session.startedAt = new Date().toISOString();
   session.stoppedAt = null;
   const riskBits = riskStatusLabels(session.config);
+  if (askedCrude && !AUTOBOT_ALLOW_CRUDE) {
+    pushEvent(
+      session,
+      'CRUDE_OFF',
+      'Autobot Crude hard-off — index only (enable later via AUTOBOT_ALLOW_CRUDE)',
+    );
+  }
   pushEvent(
     session,
     'START',
