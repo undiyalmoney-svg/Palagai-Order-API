@@ -94,6 +94,14 @@ class LiveBroker {
     this.positions.clear();
   }
 
+  /** Open (or exiting) broker leg for an instrument, if any. */
+  getOpenPosition(instrumentId) {
+    const p = this.positions.get(instrumentId);
+    if (!p) return null;
+    if (p.status === 'open' || p.status === 'exiting') return p;
+    return null;
+  }
+
   /**
    * Restart safety: adopt any PALAGAI positions already open at the broker so a
    * restart mid-trade does NOT place a duplicate entry. Matches each held long

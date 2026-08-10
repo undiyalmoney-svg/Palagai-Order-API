@@ -6,6 +6,7 @@ const {
   DAILY_3K_PRESET,
   DAY_PROFIT_LOCK_RS,
   STRICT_DAY_STOP_RS,
+  OPTION_DAY_LOSS_RS,
 } = require('./daily-desk-defaults');
 
 async function health(_req, res) {
@@ -17,9 +18,11 @@ async function health(_req, res) {
     appBuild: APP_BUILD,
     crudeDefault: 'selective',
     crudeDna: 'session-or · 10:00–22:00 · SL30/TP60 · confirm · max 2/day · no OR skip',
-    trapDna: 'SR Trap Confirm · pierce20/B40 · peak₹100/50/50 · max3 · 3.5R · SL-limit + flatten if SL fails',
+    trapDna:
+      'SR Trap Confirm · pierce20/B40 · peak₹100 · max3 · 3.5R · dayStop 60 · option −₹350 stand-down · SL-limit + flatten if SL fails',
     dayProfitLockRsBase: DAY_PROFIT_LOCK_RS,
     strictDayStopRsBase: STRICT_DAY_STOP_RS,
+    optionDayLossRsBase: OPTION_DAY_LOSS_RS,
     defaults: DAILY_3K_PRESET,
   });
 }
@@ -44,6 +47,7 @@ async function defaults(_req, res) {
     preset: DAILY_3K_PRESET,
     dayProfitLockRsBase: DAY_PROFIT_LOCK_RS,
     strictDayStopRsBase: STRICT_DAY_STOP_RS,
+    optionDayLossRsBase: OPTION_DAY_LOSS_RS,
     checkboxHint: `₹${DAY_PROFIT_LOCK_RS.toLocaleString('en-IN')} × lots (1→₹3k · 3→₹9k)`,
   });
 }
