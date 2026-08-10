@@ -68,6 +68,21 @@ function isPendingSl(status) {
   return s === 'TRIGGER PENDING' || s === 'OPEN' || s === 'AMO REQ RECEIVED';
 }
 
+function isTerminalOrderStatus(status) {
+  const s = String(status || '').toUpperCase();
+  return (
+    s === 'COMPLETE' ||
+    s === 'CANCELLED' ||
+    s === 'CANCELED' ||
+    s === 'REJECTED' ||
+    s === 'EXPIRED'
+  );
+}
+
+function orderStatusOf(order) {
+  return String(order?.status || '').toUpperCase();
+}
+
 class LiveBroker {
   constructor({ pushEvent, realOrders }) {
     this.pushEvent = pushEvent;
@@ -410,17 +425,130 @@ class LiveBroker {
     this.pushEvent('MODIFY_SL', `${pos.tradingSymbol}: SL → ${tickStr(next)}`);
   }
 
+  /**
+   * Cancel resting protective SL before EXIT SELL.
+   *
+   * Critical: a pending SL SELL locks the long qty. Placing another MARKET SELL
+   * while locked is treated as a naked short by Zerodha → "Insufficient funds"
+   * with ~full short-option margin (e.g. ₹2L on BankNifty). Never place EXIT
+   * until every pending SL on this symbol is gone (or already filled).
+   *
+   * @returns {{ cleared: boolean, slFilled: boolean }}
+   */
+  async cancelProtectiveSl(authorization, pos, instrumentName) {
+    const label = instrumentName || pos.instrumentId || pos.tradingSymbol;
+    const sym = (pos.tradingSymbol || '').toUpperCase();
+    let slFilled = false;
+
+    const cancelOne = async (orderId) => {
+      if (!orderId) return null;
+      const cancel = await kiteService.cancelOrder(authorization, 'regular', orderId);
+      const msg = cancel.data?.message || cancel.data?.error_type || '';
+      this.pushEvent(
+        'CANCEL_SL',
+        `${label}: cancel SL ${orderId} (${cancel.status}${msg ? ` · ${msg}` : ''})`,
+      );
+      return cancel;
+    };
+
+    // 1) Cancel known SL id (400 is OK if already terminal — check book next).
+    if (pos.slOrderId) {
+      await cancelOne(pos.slOrderId);
+      await delay(500);
+      const hist = await kiteService.getOrderHistory(authorization, pos.slOrderId);
+      const rows = hist.data?.data || [];
+      const latest = rows[rows.length - 1] || rows[0] || null;
+      const st = orderStatusOf(latest);
+      if (st === 'COMPLETE') {
+        slFilled = true;
+        pos.slOrderId = null;
+        return { cleared: true, slFilled: true };
+      }
+      if (isTerminalOrderStatus(st)) {
+        pos.slOrderId = null;
+      }
+    }
+
+    // 2) Sweep any other pending SL / SL-M on this symbol (stale id / restart).
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const orders = await this.getOrders(authorization);
+      const pending = orders.filter((o) => {
+        const ot = String(o.order_type || '').toUpperCase();
+        return (
+          (o.tradingsymbol || '').toUpperCase() === sym &&
+          (ot === 'SL' || ot === 'SL-M') &&
+          String(o.transaction_type || '').toUpperCase() === 'SELL' &&
+          isPendingSl(o.status)
+        );
+      });
+
+      if (pending.length === 0) {
+        // Confirm known id is not still pending under a laggy book.
+        if (pos.slOrderId) {
+          const still = orders.find((o) => o.order_id === pos.slOrderId);
+          if (!still || isTerminalOrderStatus(still.status)) {
+            if (orderStatusOf(still) === 'COMPLETE') slFilled = true;
+            pos.slOrderId = null;
+            return { cleared: true, slFilled };
+          }
+          // Known id still live but missed the SL filter — cancel it directly.
+          await cancelOne(pos.slOrderId);
+          await delay(600 + attempt * 400);
+          continue;
+        }
+        return { cleared: true, slFilled };
+      }
+
+      for (const o of pending) {
+        await cancelOne(o.order_id);
+      }
+      await delay(600 + attempt * 400);
+    }
+
+    const orders = await this.getOrders(authorization);
+    const stillPending = orders.some((o) => {
+      const ot = String(o.order_type || '').toUpperCase();
+      return (
+        (o.tradingsymbol || '').toUpperCase() === sym &&
+        (ot === 'SL' || ot === 'SL-M') &&
+        String(o.transaction_type || '').toUpperCase() === 'SELL' &&
+        isPendingSl(o.status)
+      );
+    });
+    if (!stillPending) {
+      pos.slOrderId = null;
+      return { cleared: true, slFilled };
+    }
+
+    this.pushEvent(
+      'ERROR',
+      `${label}: SL still pending — skip EXIT SELL (avoids naked-short margin)`,
+    );
+    return { cleared: false, slFilled: false };
+  }
+
   async placeExit(authorization, pos, instrumentName) {
     if (pos.status !== 'open') return;
     pos.status = 'exiting';
 
-    if (pos.slOrderId) {
-      const cancel = await kiteService.cancelOrder(authorization, 'regular', pos.slOrderId);
-      this.pushEvent(
-        'CANCEL_SL',
-        `${instrumentName || pos.instrumentId}: cancel SL ${pos.slOrderId} (${cancel.status})`,
-      );
-      await delay(400);
+    const { cleared, slFilled } = await this.cancelProtectiveSl(
+      authorization,
+      pos,
+      instrumentName,
+    );
+
+    if (slFilled) {
+      this.pushEvent('EXIT', `${pos.tradingSymbol}: SL already filled — flat`);
+      pos.status = 'flat';
+      pos.slOrderId = null;
+      return;
+    }
+
+    if (!cleared) {
+      // Keep open so the next tick retries cancel → exit. Do NOT place SELL
+      // while qty is locked by a resting SL (causes Insufficient funds / short margin).
+      pos.status = 'open';
+      return;
     }
 
     // Still long?
@@ -431,29 +559,33 @@ class LiveBroker {
       return;
     }
 
+    const product = pos.product || 'MIS';
     const res = await kiteService.placeOrder(authorization, 'regular', {
       exchange: pos.exchange,
       tradingsymbol: pos.tradingSymbol,
       transaction_type: 'SELL',
       order_type: 'MARKET',
       quantity: String(qty),
-      product: pos.product || 'MIS',
+      product,
       validity: 'DAY',
       market_protection: '-1',
       tag: 'PALAGAI',
     });
     const exitId = res.data?.data?.order_id;
     if (res.status >= 400 || !exitId) {
-      this.pushEvent(
-        'ERROR',
-        `EXIT failed ${pos.tradingSymbol}: ${res.data?.message || res.status}`,
-      );
+      const msg = res.data?.message || String(res.status);
+      this.pushEvent('ERROR', `EXIT failed ${pos.tradingSymbol}: ${msg}`);
+      // If broker still sees a lock / short-margin demand, re-check SL sweep next tick.
       pos.status = 'open';
       return;
     }
     pos.exitOrderId = exitId;
     pos.status = 'flat';
-    this.pushEvent('EXIT', `${instrumentName || ''}: SELL ${qty} ${pos.tradingSymbol} MARKET`.trim());
+    pos.slOrderId = null;
+    this.pushEvent(
+      'EXIT',
+      `${instrumentName || ''}: SELL ${qty} ${pos.tradingSymbol} ${product} MARKET`.trim(),
+    );
   }
 
   async getOrders(authorization) {
@@ -464,17 +596,25 @@ class LiveBroker {
 
   async resolveExitQty(authorization, pos) {
     const res = await kiteService.getPositions(authorization);
-    const rows = [
-      ...(res.data?.data?.net || []),
-      ...(res.data?.data?.day || []),
-    ];
+    const net = res.data?.data?.net || [];
+    const day = res.data?.data?.day || [];
     const sym = (pos.tradingSymbol || '').toUpperCase();
-    for (const row of rows) {
-      if ((row.tradingsymbol || '').toUpperCase() !== sym) continue;
-      const q = Number(row.quantity || 0);
-      if (q) return Math.abs(q);
-    }
-    return 0;
+    const product = String(pos.product || '').toUpperCase();
+
+    const pickLong = (rows) => {
+      for (const row of rows) {
+        if ((row.tradingsymbol || '').toUpperCase() !== sym) continue;
+        if (product && row.product && String(row.product).toUpperCase() !== product) {
+          continue;
+        }
+        const q = Number(row.quantity || 0);
+        // Long options only — never abs(short) or we would sell into a larger short.
+        if (q > 0) return q;
+      }
+      return 0;
+    };
+
+    return pickLong(net) || pickLong(day) || 0;
   }
 
   async resolveEntryPremium(authorization, orderId, symbol, fallback, exchange) {
@@ -503,4 +643,9 @@ class LiveBroker {
   }
 }
 
-module.exports = { LiveBroker, isFilledOrWorking, isPendingSl };
+module.exports = {
+  LiveBroker,
+  isFilledOrWorking,
+  isPendingSl,
+  isTerminalOrderStatus,
+};
