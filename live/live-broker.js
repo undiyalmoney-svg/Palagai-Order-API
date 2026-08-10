@@ -5,16 +5,22 @@
 const { kiteService } = require('../services/kite.service');
 const {
   computeProtectiveSlTrigger,
+  evaluateOptionPeakTrail,
+  optionPeakTrailSettingsFromExtras,
   NIFTY_50_INSTRUMENT,
   BANK_NIFTY_INSTRUMENT,
   CRUDE_OIL_MINI_INSTRUMENT,
 } = require('./strategy-core.cjs');
+const { liveGreenTrapExtras } = require('./dna-live-green');
 const { fetchQuotes } = require('./kite-market');
 
 const TICK = 0.05;
 function tickStr(p) {
   const v = Math.max(TICK, Math.round((Number(p) || 0) / TICK) * TICK);
   return v.toFixed(2);
+}
+function roundOptionTick(p) {
+  return Math.max(TICK, Math.round((Number(p) || 0) / TICK) * TICK);
 }
 
 /**
@@ -327,7 +333,7 @@ class LiveBroker {
         if (!current.slOrderId) {
           await this.ensureProtectiveSl(authorization, current, open);
         }
-        await this.syncProtectiveSl(authorization, current, open);
+        await this.syncProtectiveSl(authorization, current, open, instrumentName);
         return;
       }
       this.pushEvent(
@@ -495,22 +501,106 @@ class LiveBroker {
     }
   }
 
-  async syncProtectiveSl(authorization, pos, open) {
-    if (!pos.slOrderId || !(pos.entryPremium > 0)) return;
-    const indexRisk = Math.abs(open.indexEntry - open.indexStop);
-    const ltp = await this.resolveOptionLtp(authorization, pos.tradingSymbol, pos.exchange);
-    const next = computeProtectiveSlTrigger({
+  /**
+   * Live Green: protective SL must RATCHET UP with option peak-trail floor.
+   * Old bug: only allowed lowering the trigger, so winners never locked and
+   * exchange SL dumped at the initial wide stop (paper +473 → live −777).
+   *
+   * @returns {{ trigger: number, forceExit: boolean, floorPremium: number|null }}
+   */
+  computeTrailingSlTrigger(pos, open, ltp) {
+    const indexRisk = Math.abs(
+      Number(open?.indexEntry || pos.indexEntry || 0) -
+        Number(open?.indexStop || pos.indexStop || 0),
+    );
+    const base = computeProtectiveSlTrigger({
       fillPremium: pos.entryPremium,
       indexRiskPts: indexRisk,
       exchange: pos.exchange,
       tradingSymbol: pos.tradingSymbol,
       ltp,
     });
+
+    const units = Math.max(1, Number(pos.quantity) || 0);
+    const liveMfeRs =
+      ltp > 0 && pos.entryPremium > 0
+        ? Math.max(0, (ltp - pos.entryPremium) * units)
+        : 0;
+    pos.livePeakMfeRs = Math.max(
+      Number(pos.livePeakMfeRs) || 0,
+      Number(open?.optionPeakMfeRs) || 0,
+      liveMfeRs,
+    );
+
+    const trailSettings = optionPeakTrailSettingsFromExtras(
+      open?.trailExtras || liveGreenTrapExtras(),
+      open?.lotsMultiplier || this.lotsFor(pos.instrumentId) || 1,
+    );
+    const trail = evaluateOptionPeakTrail({
+      entryPremium: pos.entryPremium,
+      optionPeakMfeRs: pos.livePeakMfeRs,
+      optionBarLow: ltp > 0 ? ltp : open?.optionBarLow || pos.entryPremium,
+      lotUnits: units,
+      armRs: trailSettings.armRs,
+      lockRs: trailSettings.lockRs,
+      givebackRs: trailSettings.givebackRs,
+    });
+
+    let desired = base;
+    if (trail?.armed && trail.floorPremium > 0) {
+      desired = Math.max(desired, trail.floorPremium);
+    }
+    // Ratchet: never aim below a stop that already moved up.
+    if (pos.slTrigger != null && pos.slTrigger > 0) {
+      desired = Math.max(desired, pos.slTrigger);
+    }
+
+    const floorPremium = trail?.armed ? trail.floorPremium : null;
+    // If LTP has fallen through the paper trail floor → market exit now
+    // (same as paper "Profit drained"), do not loosen the exchange SL.
+    if (trail?.armed && ltp > 0 && floorPremium != null && ltp <= floorPremium + 0.051) {
+      return {
+        trigger: roundOptionTick(Math.min(desired, ltp - TICK)),
+        forceExit: true,
+        floorPremium,
+      };
+    }
+
+    let next = desired;
+    if (ltp > 0) {
+      const maxTrig = roundOptionTick(ltp - Math.max(TICK, ltp * 0.03, 3));
+      if (maxTrig > 0) next = Math.min(next, maxTrig);
+    }
+    return {
+      trigger: roundOptionTick(next),
+      forceExit: false,
+      floorPremium,
+    };
+  }
+
+  async syncProtectiveSl(authorization, pos, open, instrumentName) {
+    if (!pos.slOrderId || !(pos.entryPremium > 0)) return;
+    const ltp = await this.resolveOptionLtp(authorization, pos.tradingSymbol, pos.exchange);
+    const { trigger: next, forceExit, floorPremium } = this.computeTrailingSlTrigger(
+      pos,
+      open,
+      ltp,
+    );
+
+    if (forceExit) {
+      this.pushEvent(
+        'EXIT',
+        `${instrumentName || pos.instrumentId}: live trail drain LTP ${tickStr(ltp)} ≤ floor ${tickStr(floorPremium)}`,
+      );
+      await this.placeExit(authorization, pos, instrumentName);
+      return;
+    }
+
     if (!(next > 0) || (pos.slTrigger != null && Math.abs(next - pos.slTrigger) < 0.049)) {
       return;
     }
-    // Only tighten (lower trigger for long option)
-    if (pos.slTrigger != null && next >= pos.slTrigger - 0.001) return;
+    // Long option SELL-stop: higher trigger = tighter (locks paper trail).
+    if (pos.slTrigger != null && next < pos.slTrigger - 0.001) return;
 
     const res = await kiteService.modifyOrder(authorization, 'regular', pos.slOrderId, {
       order_type: 'SL',
@@ -528,7 +618,11 @@ class LiveBroker {
     }
     pos.slTrigger = next;
     pos.indexStop = open.indexStop;
-    this.pushEvent('MODIFY_SL', `${pos.tradingSymbol}: SL → ${tickStr(next)}`);
+    this.pushEvent(
+      'MODIFY_SL',
+      `${pos.tradingSymbol}: SL → ${tickStr(next)}` +
+        (pos.livePeakMfeRs ? ` · peak₹${Math.round(pos.livePeakMfeRs)}` : ''),
+    );
   }
 
   /**

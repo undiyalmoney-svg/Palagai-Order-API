@@ -77,6 +77,11 @@ function toLiveOpen(replayOpen) {
     option: replayOpen.option,
     optionEntryPremium: replayOpen.optionEntryPremium ?? null,
     premiumEstimated: !!replayOpen.premiumEstimated,
+    optionPeakMfeRs: replayOpen.optionPeakMfeRs ?? null,
+    optionBarLow: replayOpen.optionBarLow ?? null,
+    optionLotUnits: replayOpen.optionLotUnits ?? null,
+    lotsMultiplier: replayOpen.lotsMultiplier ?? 1,
+    trailExtras: liveGreenTrapExtras(),
   };
 }
 

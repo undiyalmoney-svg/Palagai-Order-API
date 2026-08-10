@@ -60,6 +60,8 @@ const LIVE_GREEN_DNA = {
     rejectEstimatedPremium: true,
     cancelSlBeforeExit: true,
     fillLedger: true,
+    /** Ratchet exchange SL up to paper peak-trail floor each tick (LTP). */
+    trailProtectiveSl: true,
   },
 
   research: {

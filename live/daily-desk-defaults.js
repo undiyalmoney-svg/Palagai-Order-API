@@ -6,8 +6,8 @@
  * Index only by default (Crude OFF — fee protection).
  */
 
-const APP_VERSION = '1.3.106';
-const APP_BUILD = '2026.08.10-live-green-dna';
+const APP_VERSION = '1.3.107';
+const APP_BUILD = '2026.08.10-live-trail-sl';
 const { LIVE_GREEN_DNA } = require('./dna-live-green');
 
 /** Base ₹ bands at 1 lot (combined index books). */

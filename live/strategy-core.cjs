@@ -37,6 +37,8 @@ __export(bundle_entry_exports, {
   createGenieStrategy: () => createGenieStrategy,
   createTrapStrategy: () => createTrapStrategy,
   effectiveProtectiveStop: () => effectiveProtectiveStop,
+  evaluateOptionPeakTrail: () => evaluateOptionPeakTrail,
+  optionPeakTrailSettingsFromExtras: () => optionPeakTrailSettingsFromExtras,
   replayPaperOnCrude: () => replayPaperOnCrude,
   replayPaperOnIndex: () => replayPaperOnIndex,
   resolveAtmCrudeMiniOption: () => resolveAtmCrudeMiniOption,
