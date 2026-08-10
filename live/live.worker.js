@@ -1,6 +1,6 @@
 /**
  * Server Live strategy worker — Trade Desk parity:
- * Trap pierce20/B40 · peak₹100 · max3 · 3.5R · lock ₹3k · strict stop.
+ * Trap pierce20/B40 · peak₹100 · max3 · 3.5R · dayStop 60 · option −₹350 stand-down.
  * Crude Selective only when enabled (OFF by default).
  * Places orders via live-broker → kite.service (does NOT touch kiteOrders.controller).
  */
@@ -19,7 +19,14 @@ const {
 } = require('./strategy-core.cjs');
 const { fetchInstruments, fetchHistorical5m } = require('./kite-market');
 const { LiveBroker } = require('./live-broker');
-const { indexDayRiskOverrides, riskStatusLabels } = require('./daily-desk-defaults');
+const {
+  indexDayRiskOverrides,
+  riskStatusLabels,
+  deskRiskLots,
+  isOptionDayLossBreached,
+  optionDayLossMoneyRs,
+  OPTION_DAY_LOSS_RS,
+} = require('./daily-desk-defaults');
 
 const CRUDE_EXIT_BY = '23:10';
 const LOOKBACK_DAYS = 12;
@@ -84,6 +91,17 @@ function trapInitOverrides(config, instrumentId) {
   );
 }
 
+/** Sum real option-₹ P&L from closed replay trades (charges deducted when present). */
+function optionNetRsFromReplay(replay) {
+  let net = 0;
+  for (const t of replay?.trades || []) {
+    if (typeof t.optionPnlRs !== 'number' || !Number.isFinite(t.optionPnlRs)) continue;
+    const charges = typeof t.chargesRs === 'number' && Number.isFinite(t.chargesRs) ? t.chargesRs : 0;
+    net += t.optionPnlRs - charges;
+  }
+  return net;
+}
+
 class LiveWorker {
   constructor({ readAuth, pushEvent, heartbeat, getConfig }) {
     this.readAuth = readAuth;
@@ -103,6 +121,8 @@ class LiveWorker {
     this.reconciled = false;
     this.tickBusy = false;
     this.lastSignals = { nifty: '', bank: '', crude: '' };
+    this.optionStandDownDate = null;
+    this.optionStandDownAnnounced = false;
   }
 
   authHeader() {
@@ -182,6 +202,27 @@ class LiveWorker {
     }
   }
 
+  /**
+   * Under option day-loss stand-down: never place a *new* entry.
+   * Keep an already-synced open leg (same symbol) so SL/exit management continues.
+   */
+  openForSync(instrumentId, replayOpen, optionStandDown) {
+    const desired = toLiveOpen(replayOpen);
+    if (!optionStandDown) return desired;
+
+    const existing = this.broker.getOpenPosition(instrumentId);
+    if (!existing) return null; // flat → skip new entries
+
+    if (!desired) return null; // strategy exited → allow flatten
+
+    const same =
+      (desired.option?.tradingSymbol || '').toUpperCase() ===
+        (existing.tradingSymbol || '').toUpperCase() &&
+      (!existing.entryTime || !desired.entryTime || existing.entryTime === desired.entryTime);
+    // Same leg → keep managing; different leg → flatten only (no handoff entry).
+    return same ? desired : null;
+  }
+
   async onTick() {
     if (this.tickBusy) return;
     this.tickBusy = true;
@@ -215,14 +256,24 @@ class LiveWorker {
       }
 
       const { date: today, hhmm: now } = istParts();
+      if (this.optionStandDownDate !== today) {
+        this.optionStandDownDate = today;
+        this.optionStandDownAnnounced = false;
+      }
+
       const emptyOpt = new Map();
       const needed = new Set();
       const indexSession = now >= '09:15' && now <= '15:30';
       const crudeSession = now >= '09:00' && now <= '23:15';
       const enableKutty = !!config.enableKutty;
+      const riskLots = deskRiskLots(config);
 
+      let niftyReplay = null;
+      let bankReplay = null;
+
+      // --- Index books: two-pass replay first (real option 5m OHLC), then risk gate ---
       if (config.enableNifty && indexSession) {
-        const replay = await this.replayIndexLive({
+        niftyReplay = await this.replayIndexLive({
           authorization,
           instrument: NIFTY_50_INSTRUMENT,
           kind: 'nifty',
@@ -238,25 +289,11 @@ class LiveWorker {
             return s;
           },
         });
-        await this.broker.syncInstrument({
-          authorization,
-          instrumentId: NIFTY_50_INSTRUMENT.id,
-          instrumentName: 'Nifty Trap',
-          open: toLiveOpen(replay.open),
-          lots: config.niftyLots || 1,
-        });
-        const niftySig =
-          `Nifty Trap · ${replay.lastSignal}` +
-          (replay.open ? ` · OPEN ${replay.open.direction}` : '');
-        if (niftySig !== this.lastSignals.nifty) {
-          this.lastSignals.nifty = niftySig;
-          this.pushEvent('SIGNAL', niftySig);
-        }
       }
 
       if (config.enableBank && indexSession) {
         const genie = config.bankStrategy === 'genie';
-        const replay = await this.replayIndexLive({
+        bankReplay = await this.replayIndexLive({
           authorization,
           instrument: BANK_NIFTY_INSTRUMENT,
           kind: 'banknifty',
@@ -273,16 +310,51 @@ class LiveWorker {
             return s;
           },
         });
+      }
+
+      const combinedOptionNetRs =
+        optionNetRsFromReplay(niftyReplay) + optionNetRsFromReplay(bankReplay);
+      const optionStandDown = isOptionDayLossBreached(combinedOptionNetRs, riskLots);
+      if (optionStandDown && !this.optionStandDownAnnounced) {
+        this.optionStandDownAnnounced = true;
+        const floor = optionDayLossMoneyRs(riskLots);
+        this.pushEvent(
+          'SKIP',
+          `Option day-loss stand-down · net ₹${combinedOptionNetRs.toFixed(0)} ≤ −₹${floor} (DNA −₹${OPTION_DAY_LOSS_RS}/lot)`,
+        );
+      }
+
+      if (niftyReplay) {
+        await this.broker.syncInstrument({
+          authorization,
+          instrumentId: NIFTY_50_INSTRUMENT.id,
+          instrumentName: 'Nifty Trap',
+          open: this.openForSync(NIFTY_50_INSTRUMENT.id, niftyReplay.open, optionStandDown),
+          lots: config.niftyLots || 1,
+        });
+        const niftySig =
+          `Nifty Trap · ${niftyReplay.lastSignal}` +
+          (niftyReplay.open ? ` · OPEN ${niftyReplay.open.direction}` : '') +
+          (optionStandDown ? ' · STAND-DOWN' : '');
+        if (niftySig !== this.lastSignals.nifty) {
+          this.lastSignals.nifty = niftySig;
+          this.pushEvent('SIGNAL', niftySig);
+        }
+      }
+
+      if (bankReplay) {
+        const genie = config.bankStrategy === 'genie';
         await this.broker.syncInstrument({
           authorization,
           instrumentId: BANK_NIFTY_INSTRUMENT.id,
           instrumentName: `Bank ${genie ? 'Genie' : 'Trap'}`,
-          open: toLiveOpen(replay.open),
+          open: this.openForSync(BANK_NIFTY_INSTRUMENT.id, bankReplay.open, optionStandDown),
           lots: config.bankLots || 1,
         });
         const bankSig =
-          `Bank ${genie ? 'Genie' : 'Trap'} · ${replay.lastSignal}` +
-          (replay.open ? ` · OPEN ${replay.open.direction}` : '');
+          `Bank ${genie ? 'Genie' : 'Trap'} · ${bankReplay.lastSignal}` +
+          (bankReplay.open ? ` · OPEN ${bankReplay.open.direction}` : '') +
+          (optionStandDown ? ' · STAND-DOWN' : '');
         if (bankSig !== this.lastSignals.bank) {
           this.lastSignals.bank = bankSig;
           this.pushEvent('SIGNAL', bankSig);
@@ -334,8 +406,9 @@ class LiveWorker {
 
       const riskBits = riskStatusLabels(config);
       const riskTxt = riskBits.length ? ` · ${riskBits.join(' · ')}` : '';
+      const standTxt = optionStandDown ? ' · OPTION STAND-DOWN' : '';
       this.heartbeat(
-        `Live tick · ${now} IST · real=${!!config.realOrders} · N${config.enableNifty ? 1 : 0}/B${config.enableBank ? 1 : 0}/C${config.enableCrude ? 1 : 0}${riskTxt}`,
+        `Live tick · ${now} IST · real=${!!config.realOrders} · N${config.enableNifty ? 1 : 0}/B${config.enableBank ? 1 : 0}/C${config.enableCrude ? 1 : 0}${riskTxt}${standTxt}`,
       );
     } catch (err) {
       const msg = err?.message || String(err);
@@ -418,6 +491,8 @@ class LiveWorker {
     this.reconciled = false;
     this.broker.clear();
     this.lastSignals = { nifty: '', bank: '', crude: '' };
+    this.optionStandDownDate = null;
+    this.optionStandDownAnnounced = false;
   }
 }
 

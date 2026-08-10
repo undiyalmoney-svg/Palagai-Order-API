@@ -202,9 +202,10 @@ function startTickLoop(session) {
       .catch((err) => console.error('[live-store]', session.userId, err.message));
   };
   run();
-  session.tickTimer = setInterval(run, 60_000);
+  // 15s ticks — cut live lag vs Paper on 5m bar closes / peak-lock exits.
+  session.tickTimer = setInterval(run, 15_000);
   heartbeat(session, 'Server Live running — strategy worker active');
-  pushEvent(session, 'WORKER', `User ${session.userId} · 60s ticks · multi-user OK`);
+  pushEvent(session, 'WORKER', `User ${session.userId} · 15s ticks · multi-user OK`);
 }
 
 async function attachMongo(db) {

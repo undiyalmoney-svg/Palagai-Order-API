@@ -1,6 +1,6 @@
 /**
  * Broker bridge for Server Live — calls kite.service directly (not /api/kite HTTP).
- * Mirrors Trade Desk LiveOrderExecutor entry / SL-M / exit behaviour.
+ * Mirrors Trade Desk LiveOrderExecutor entry / protective SL / exit behaviour.
  */
 const { kiteService } = require('../services/kite.service');
 const {
@@ -94,10 +94,18 @@ class LiveBroker {
     this.positions.clear();
   }
 
+  /** Open (or exiting) broker leg for an instrument, if any. */
+  getOpenPosition(instrumentId) {
+    const p = this.positions.get(instrumentId);
+    if (!p) return null;
+    if (p.status === 'open' || p.status === 'exiting') return p;
+    return null;
+  }
+
   /**
    * Restart safety: adopt any PALAGAI positions already open at the broker so a
    * restart mid-trade does NOT place a duplicate entry. Matches each held long
-   * option to its resting SL-M order. Best-effort; never throws.
+   * option to its resting SL / SL-M order. Best-effort; never throws.
    */
   async reconcileFromBroker(authorization) {
     if (!this.realOrders) return;
@@ -159,9 +167,9 @@ class LiveBroker {
     }
   }
 
-  /** Ensure an open position has a resting protective SL-M; (re)place if missing. */
+  /** Ensure an open position has a resting protective SL; (re)place if missing. */
   async ensureProtectiveSl(authorization, pos, open) {
-    if (pos.slOrderId || !(pos.entryPremium > 0)) return;
+    if (pos.slOrderId || !(pos.entryPremium > 0)) return false;
     const indexRisk = open
       ? Math.abs(open.indexEntry - open.indexStop)
       : Math.abs(Number(pos.indexEntry || 0) - Number(pos.indexStop || 0));
@@ -173,7 +181,7 @@ class LiveBroker {
       tradingSymbol: pos.tradingSymbol,
       ltp,
     });
-    if (!(trigger > 0)) return;
+    if (!(trigger > 0)) return false;
     const res = await kiteService.placeOrder(
       authorization,
       'regular',
@@ -190,12 +198,13 @@ class LiveBroker {
       pos.slOrderId = id;
       pos.slTrigger = trigger;
       this.pushEvent('SL', `${pos.tradingSymbol}: SL (ensured) @ ${tickStr(trigger)} id ${id}`);
-    } else {
-      this.pushEvent(
-        'ERROR',
-        `${pos.tradingSymbol}: SL ensure failed — ${res.data?.message || res.status}`,
-      );
+      return true;
     }
+    this.pushEvent(
+      'ERROR',
+      `${pos.tradingSymbol}: SL ensure failed — ${res.data?.message || res.status}`,
+    );
+    return false;
   }
 
   async syncInstrument({ authorization, instrumentId, instrumentName, open, lots }) {
@@ -219,7 +228,7 @@ class LiveBroker {
       if (sl && String(sl.status || '').toUpperCase() === 'COMPLETE') {
         this.pushEvent(
           'SL',
-          `${instrumentName}: SL-M filled ${current.tradingSymbol}`,
+          `${instrumentName}: SL filled ${current.tradingSymbol}`,
         );
         current.status = 'flat';
         this.positions.set(instrumentId, current);
@@ -243,8 +252,17 @@ class LiveBroker {
         (!current.entryTime || current.entryTime === open.entryTime);
       if (same) {
         // Restart/failed-SL safety: (re)place a stop if this open leg has none.
+        // If still naked after ensure → flatten immediately (never hold without SL).
         if (!current.slOrderId) {
-          await this.ensureProtectiveSl(authorization, current, open);
+          const ok = await this.ensureProtectiveSl(authorization, current, open);
+          if (!ok && !current.slOrderId) {
+            this.pushEvent(
+              'ERROR',
+              `${instrumentName}: NO resting SL on ${current.tradingSymbol} — emergency flatten`,
+            );
+            await this.placeExit(authorization, current, instrumentName);
+            return;
+          }
         }
         await this.syncProtectiveSl(authorization, current, open);
         return;
@@ -367,10 +385,19 @@ class LiveBroker {
       lastError: null,
     });
 
-    // If the protective SL-M failed to place, retry once now so the position
-    // is never left without a resting stop.
+    // If the protective SL failed to place, retry once. Still naked → flatten
+    // immediately so we never hold a live option without a resting stop
+    // (exchange discontinued SL-M; a wrong order_type used to leave legs open).
     if (!slOrderId) {
-      await this.ensureProtectiveSl(authorization, this.positions.get(instrumentId), open);
+      const pos = this.positions.get(instrumentId);
+      const ok = await this.ensureProtectiveSl(authorization, pos, open);
+      if (!ok && pos && !pos.slOrderId) {
+        this.pushEvent(
+          'ERROR',
+          `${instrumentName}: SL unavailable after retry — emergency flatten ${sym}`,
+        );
+        await this.placeExit(authorization, pos, instrumentName);
+      }
     }
   }
 
