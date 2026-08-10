@@ -255,7 +255,7 @@ async function runBacktest({ authorization, fromDate, toDate, config }, deps = {
         warmFrom,
         toDate,
       );
-      const profile = cfg.crudeStrategy === 'all-green' ? 'all-green' : 'selective';
+      const profile = cfg.crudeStrategy || 'live-crude-green';
       const tradeParams = resolveCrudeStrategyProfile(profile);
       const dayLossStopPts = resolveCrudeProfileDayLossPts(tradeParams, !!cfg.strictDayStop);
       const crudeBase = {

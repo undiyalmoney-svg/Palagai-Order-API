@@ -6,9 +6,27 @@
  * Index only by default (Crude OFF — fee protection).
  */
 
-const APP_VERSION = '1.3.107';
-const APP_BUILD = '2026.08.10-live-trail-sl';
+const APP_VERSION = '1.3.108';
+const APP_BUILD = '2026.08.10-live-crude-green';
 const { LIVE_GREEN_DNA } = require('./dna-live-green');
+const { LIVE_CRUDE_GREEN_DNA } = require('./dna-live-crude-green');
+
+/** Allowed crudeStrategy ids for Autobot / backtest normalize. */
+const CRUDE_STRATEGY_IDS = new Set([
+  'selective',
+  'all-green',
+  'live-crude-green',
+  'trap-confirm',
+  'daily-profit',
+  'champion',
+  'daily-income',
+]);
+
+function normalizeCrudeStrategy(raw) {
+  const id = String(raw || '').trim();
+  if (CRUDE_STRATEGY_IDS.has(id)) return id;
+  return 'selective';
+}
 
 /** Base ₹ bands at 1 lot (combined index books). */
 const DAY_PROFIT_LOCK_RS = 3000;
@@ -34,12 +52,15 @@ const DAILY_3K_PRESET = {
   kuttyAlone: false,
   niftyStrategy: 'trap',
   bankStrategy: 'trap',
-  crudeStrategy: 'selective',
+  /** Prefer fee-capped LIVE_CRUDE_GREEN when Crude is enabled. */
+  crudeStrategy: 'live-crude-green',
   dayProfitLock: true,
   /** On for hands-off — capital must not drain (Trade Desk parity). */
   strictDayStop: true,
+  /** With index on, Crude waits until 15:30 for the one-leg capital slot. */
+  crudeAfterIndexClose: true,
   researchNote:
-    'LIVE_GREEN · pierce20/B40 · peak₹100 · max3 · 3.5R · lock ₹3k · option stand-down ₹350 · one-leg live',
+    'LIVE_GREEN index + LIVE_CRUDE_GREEN (SOR SL20/TP120 max2) · lock ₹3k · one-leg · Crude after 15:30',
   dnaId: LIVE_GREEN_DNA.id,
 };
 
@@ -120,7 +141,7 @@ function normalizeStartConfig(config = {}) {
     // Daily path: Trap only (Genie only if client explicitly asks).
     bankStrategy: config.bankStrategy === 'genie' ? 'genie' : 'trap',
     niftyStrategy: 'trap',
-    crudeStrategy: config.crudeStrategy === 'all-green' ? 'all-green' : 'selective',
+    crudeStrategy: normalizeCrudeStrategy(config.crudeStrategy ?? preset.crudeStrategy),
     // Desk risk: profit lock ON unless client opts out; strict ON unless client opts out.
     dayProfitLock: config.dayProfitLock !== false,
     strictDayStop: config.strictDayStop !== false,
@@ -136,6 +157,10 @@ function normalizeStartConfig(config = {}) {
       config.optionStandDownRs != null
         ? Math.max(0, Number(config.optionStandDownRs) || 0)
         : LIVE_GREEN_DNA.liveOps.optionStandDownRs,
+    crudeAfterIndexClose:
+      config.crudeAfterIndexClose != null
+        ? !!config.crudeAfterIndexClose
+        : preset.crudeAfterIndexClose !== false,
   };
 }
 
@@ -146,8 +171,12 @@ module.exports = {
   STRICT_DAY_STOP_RS,
   NIFTY_RS_PER_POINT,
   BANK_RS_PER_POINT,
+  CRUDE_RS_PER_POINT,
   DAILY_3K_PRESET,
   LIVE_GREEN_DNA,
+  LIVE_CRUDE_GREEN_DNA,
+  CRUDE_STRATEGY_IDS,
+  normalizeCrudeStrategy,
   rsPerPointForInstrument,
   deskRiskLots,
   profitLockMoneyRs,

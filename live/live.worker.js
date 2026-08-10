@@ -1,7 +1,8 @@
 /**
  * Server Live strategy worker — Trade Desk parity:
  * Trap pierce20/B40 · peak₹100 · max3 · 3.5R · lock ₹3k · strict stop.
- * Crude Selective only when enabled (OFF by default).
+ * Crude LIVE_CRUDE_GREEN when enabled (OFF by default) — SOR SL20/TP120 max2.
+ * With index on, Crude entries gate until 15:30 (one-leg capital).
  * Places orders via live-broker → kite.service (does NOT touch kiteOrders.controller).
  */
 const {
@@ -27,6 +28,7 @@ const {
   publicTrades,
 } = require('./live-trades');
 const { LIVE_GREEN_DNA, liveGreenTrapExtras } = require('./dna-live-green');
+const { LIVE_CRUDE_GREEN_DNA } = require('./dna-live-crude-green');
 
 const CRUDE_EXIT_BY = '23:10';
 const LOOKBACK_DAYS = 12;
@@ -349,46 +351,60 @@ class LiveWorker {
       }
 
       if (config.enableCrude && crudeSession && this.candles.crude.length) {
-        const crudeProfile =
-          config.crudeStrategy === 'all-green' ? 'all-green' : 'selective';
-        const tradeParams = resolveCrudeStrategyProfile(crudeProfile);
-        const dayLossStopPts = resolveCrudeProfileDayLossPts(
-          tradeParams,
-          !!config.strictDayStop,
-        );
-        const futSym = this.crudeFuture?.tradingSymbol || 'CRUDEOILM';
-        const crudeLabel =
-          tradeParams.profileId === 'selective' ? 'Crude Selective' : `Crude ${tradeParams.label}`;
-        const replay = replayPaperOnCrude({
-          instrumentId: CRUDE_OIL_MINI_INSTRUMENT.id,
-          instrumentName: `Crude Mini (${futSym})`,
-          candles: this.candles.crude,
-          fromDate: today,
-          toDate: today,
-          instruments: this.instruments,
-          optionCandlesByToken: emptyOpt,
-          neededOptionTokens: needed,
-          forceCloseOpen: now >= CRUDE_EXIT_BY,
-          lotsMultiplier: config.crudeLots || 1,
-          dayLossStopPts,
-          enableMorning: tradeParams.defaultEnableMorning,
-          enableEvening: tradeParams.defaultEnableEvening,
-          tradeParams,
-        });
-        ingestReplayTrades(this.liveTrades, replay.trades);
-        await this.broker.syncInstrument({
-          authorization,
-          instrumentId: CRUDE_OIL_MINI_INSTRUMENT.id,
-          instrumentName: crudeLabel,
-          open: toLiveOpen(replay.open),
-          lots: config.crudeLots || 1,
-        });
-        const crudeSig =
-          `${crudeLabel} · ${replay.lastSignal}` +
-          (replay.open ? ` · OPEN ${replay.open.direction}` : '');
-        if (crudeSig !== this.lastSignals.crude) {
-          this.lastSignals.crude = crudeSig;
-          this.pushEvent('SIGNAL', crudeSig);
+        // Shared capital with index (maxOpenLegs:1): new Crude entries only after NSE close.
+        const indexOn = !!(config.enableNifty || config.enableBank);
+        const gateAfterClose = config.crudeAfterIndexClose !== false;
+        const gateTime =
+          LIVE_CRUDE_GREEN_DNA.liveOps.crudeAfterIndexCloseTime || '15:30';
+        const crudeEntryOk = !indexOn || !gateAfterClose || now >= gateTime;
+        const crudeOpen = this.broker?.positions?.get(CRUDE_OIL_MINI_INSTRUMENT.id);
+        const crudeOpenLive = crudeOpen?.status === 'open';
+
+        if (crudeEntryOk || crudeOpenLive) {
+          const crudeProfile = config.crudeStrategy || 'live-crude-green';
+          const tradeParams = resolveCrudeStrategyProfile(crudeProfile);
+          const dayLossStopPts = resolveCrudeProfileDayLossPts(
+            tradeParams,
+            !!config.strictDayStop,
+          );
+          const futSym = this.crudeFuture?.tradingSymbol || 'CRUDEOILM';
+          const crudeLabel =
+            tradeParams.profileId === 'selective'
+              ? 'Crude Selective'
+              : `Crude ${tradeParams.label}`;
+          const replay = replayPaperOnCrude({
+            instrumentId: CRUDE_OIL_MINI_INSTRUMENT.id,
+            instrumentName: `Crude Mini (${futSym})`,
+            candles: this.candles.crude,
+            fromDate: today,
+            toDate: today,
+            instruments: this.instruments,
+            optionCandlesByToken: emptyOpt,
+            neededOptionTokens: needed,
+            forceCloseOpen: now >= CRUDE_EXIT_BY,
+            lotsMultiplier: config.crudeLots || 1,
+            dayLossStopPts,
+            // Before gate: manage exits only (no new session entries).
+            enableMorning: crudeEntryOk && tradeParams.defaultEnableMorning,
+            enableEvening: crudeEntryOk && tradeParams.defaultEnableEvening,
+            tradeParams,
+          });
+          ingestReplayTrades(this.liveTrades, replay.trades);
+          await this.broker.syncInstrument({
+            authorization,
+            instrumentId: CRUDE_OIL_MINI_INSTRUMENT.id,
+            instrumentName: crudeLabel,
+            open: toLiveOpen(replay.open),
+            lots: config.crudeLots || 1,
+          });
+          const crudeSig =
+            `${crudeLabel} · ${replay.lastSignal}` +
+            (replay.open ? ` · OPEN ${replay.open.direction}` : '') +
+            (!crudeEntryOk ? ' · gated until 15:30' : '');
+          if (crudeSig !== this.lastSignals.crude) {
+            this.lastSignals.crude = crudeSig;
+            this.pushEvent('SIGNAL', crudeSig);
+          }
         }
       }
 

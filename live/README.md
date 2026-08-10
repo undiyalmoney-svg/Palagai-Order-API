@@ -7,16 +7,16 @@ Matches **Trade Desk Daily ₹1k–₹3k** DNA (palagai.app `appBuild: 2026.08.0
 ## DNA
 - Nifty = **Trap** (SR Trap Confirm — next-bar confirm ON)
 - Bank = Trap by default (Genie only if client sends `bankStrategy: 'genie'`)
-- Crude = **Selective** (default)
+- Crude = **LIVE_CRUDE_GREEN** when enabled (OFF by default — fee protection)
 - Nat Gas / Kutty = off unless client enables
 
-### Index Trap
-- piercePts 10 · peak trail arm ₹150 / lock ₹75 / giveback ₹75
-- soft / SL-confirm cutoff OFF
-- targetRMultiple 2 · maxTradesPerDay 0 · dayStopPts 80
+### Index Trap (LIVE_GREEN)
+- piercePts 20 · Bank 40 · peak trail ₹100/50/50 · max3 · 3.5R · stand-down ₹350
 
-### Crude Selective
-- SL 30 / TP 60 · session 10:00–22:00 · max 2/day · confirm ON · no OR-width skip
+### Crude LIVE_CRUDE_GREEN
+- Session-OR 09:00–09:30 · SL20 / TP120 · protect trail ₹500→₹240
+- max 2/day · first-win · desk lock ₹3k / stop ₹2950 @ 1 lot
+- With index on: new entries only after **15:30** (shared one-leg capital)
 
 ## Desk risk defaults
 - **Day profit lock ON** — base ₹3,000 at 1 lot (50/50 Nifty/Bank when both on)

@@ -3012,6 +3012,31 @@ var CRUDE_ALL_GREEN_PARAMS = {
   dailyBandLabel: "OR 09:00\u201309:30 \xB7 SL\u20B9150 \xB7 trail \u20B9500\u2192\u20B9240 \xB7 no OR skip",
   ...PROTECT_TRADE_CUTOFF
 };
+/** Live fee-capped All-Green — research 2026-08-10 (74.4% green May–Aug @ 1 lot). */
+var CRUDE_LIVE_GREEN_PARAMS = {
+  profileId: "live-crude-green",
+  label: "Live Crude Green (SOR SL20/TP120 max2)",
+  stopPts: 20,
+  morningTargetPts: 120,
+  eveningTargetPts: 120,
+  targetRMultiple: 0,
+  dayLossStopPts: 295,
+  strictDayLossPts: 295,
+  dayProfitLockPts: 300,
+  entryMode: "session-or",
+  requireConfirm: true,
+  firstWinLock: true,
+  eveningEntryStart: CRUDE_SOR_ENTRY_START,
+  eveningEntryEnd: CRUDE_SOR_ENTRY_END,
+  sessionOrStart: CRUDE_SOR_OR_START,
+  sessionOrEnd: CRUDE_SOR_OR_END,
+  maxOrWidth: 0,
+  maxEveningTradesDay: 2,
+  defaultEnableMorning: false,
+  defaultEnableEvening: true,
+  dailyBandLabel: "OR 09:00\u201309:30 \xB7 SL20/TP120 \xB7 trail \u20B9500\u2192\u20B9240 \xB7 max2 \xB7 first-win \xB7 desk \u20B93k/\u20B92950",
+  ...PROTECT_TRADE_CUTOFF
+};
 var CRUDE_SELECTIVE_PARAMS = {
   profileId: "selective",
   label: "Selective (Trap SL50/TP200 \xB7 unlimited)",
@@ -3162,6 +3187,7 @@ var NATGAS_DAILY_PROFIT_PARAMS = {
 };
 var CRUDE_STRATEGY_PROFILES = {
   "all-green": CRUDE_ALL_GREEN_PARAMS,
+  "live-crude-green": CRUDE_LIVE_GREEN_PARAMS,
   selective: CRUDE_SELECTIVE_PARAMS,
   "daily-profit": CRUDE_DAILY_PROFIT_PARAMS,
   "daily-profit-ng": NATGAS_DAILY_PROFIT_PARAMS,
@@ -3508,7 +3534,7 @@ function closePaperTrade2(params) {
     }
   }
   tradeSeq2 += 1;
-  return {
+  const closed = {
     id: `crude-${tradeSeq2}-${params.exitTime}`,
     instrumentId: params.instrumentId,
     instrumentName: params.instrumentName,
@@ -3528,6 +3554,22 @@ function closePaperTrade2(params) {
     premiumEstimated,
     outcome: optionPnlRs != null ? optionPnlRs > 0 ? "WIN" : optionPnlRs < 0 ? "LOSS" : "FLAT" : indexPoints > 0 ? "WIN" : indexPoints < 0 ? "LOSS" : "FLAT"
   };
+  // Charge-adjust when both premiums are known (live fee parity with index books).
+  if (optionPnlRs != null && open.optionEntryPremium != null && optionExitPremium != null && open.option) {
+    const qty = Math.max(0, Math.floor(open.option.lotSize || 0) * lots);
+    if (qty > 0) {
+      const charged = applyChargesToOptionTrade({
+        segment: "mcx_option",
+        entryPremium: open.optionEntryPremium,
+        exitPremium: optionExitPremium,
+        quantity: qty,
+        grossPnlRs: optionPnlRs
+      });
+      closed.chargesRs = charged.chargesRs;
+      closed.netOptionPnlRs = charged.netPnlRs;
+    }
+  }
+  return closed;
 }
 function replayPaperOnCrude(params) {
   const {
