@@ -13,11 +13,11 @@ Matches **Trade Desk Daily ₹1k–₹3k** DNA (palagai.app `appBuild: 2026.08.0
 ### Index Trap (LIVE_GREEN)
 - piercePts 20 · Bank 40 · peak trail ₹100/50/50 · max3 · 3.5R · stand-down ₹350
 
-### Crude LIVE_CRUDE_GREEN (v2 · 99.5% hunt)
-- Session-OR · width **35–55** · entries **10:00–14:00**
-- SL25 / TP80 · trail ₹250→₹120 · max **1**/day · first-win
-- Engine-validated May–Aug 2026: **18/18 green (100%)** (skips ~75% of sessions)
-- Shares capital with index via `maxOpenLegs: 1` (window overlaps NSE)
+### Crude LIVE_CRUDE_GREEN (v3 · after NSE only)
+- **No entries during Nifty/Bank session** — window **16:00–21:00**, worker gate **15:30** when index on
+- Session-OR · width **40–60** · SL30 / TP80 · trail ₹350→₹180 · max **1**/day · first-win
+- Engine-validated May–Aug 2026: **13/14 green (92.9%)**, 0 entries before 15:30
+- Shares capital with index via `maxOpenLegs: 1`
 
 ## Desk risk defaults
 - **Day profit lock ON** — base ₹3,000 at 1 lot (50/50 Nifty/Bank when both on)

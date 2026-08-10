@@ -1,8 +1,8 @@
 /**
  * Server Live strategy worker — Trade Desk parity:
  * Trap pierce20/B40 · peak₹100 · max3 · 3.5R · lock ₹3k · strict stop.
- * Crude LIVE_CRUDE_GREEN when enabled (OFF by default) — SOR SL20/TP120 max2.
- * With index on, Crude entries gate until 15:30 (one-leg capital).
+ * Crude LIVE_CRUDE_GREEN when enabled (OFF by default) — after NSE only (16:00+).
+ * With index on, Crude entries hard-gate until 15:30 (no overlap with Nifty/Bank).
  * Places orders via live-broker → kite.service (does NOT touch kiteOrders.controller).
  */
 const {
@@ -351,12 +351,15 @@ class LiveWorker {
       }
 
       if (config.enableCrude && crudeSession && this.candles.crude.length) {
-        // Shared capital with index (maxOpenLegs:1): new Crude entries only after NSE close.
+        // Never open new Crude during Nifty/Bank session when index books are on.
         const indexOn = !!(config.enableNifty || config.enableBank);
-        const gateAfterClose = config.crudeAfterIndexClose !== false;
         const gateTime =
           LIVE_CRUDE_GREEN_DNA.liveOps.crudeAfterIndexCloseTime || '15:30';
-        const crudeEntryOk = !indexOn || !gateAfterClose || now >= gateTime;
+        // Default ON: only allow skipping the gate if client explicitly sets false
+        // AND index books are off (Crude-only desk).
+        const gateAfterClose = config.crudeAfterIndexClose !== false;
+        const crudeEntryOk =
+          now >= gateTime || (!indexOn && !gateAfterClose);
         const crudeOpen = this.broker?.positions?.get(CRUDE_OIL_MINI_INSTRUMENT.id);
         const crudeOpenLive = crudeOpen?.status === 'open';
 

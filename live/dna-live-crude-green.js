@@ -1,22 +1,19 @@
 /**
- * LIVE_CRUDE_GREEN DNA v2 — research 2026-08-10 (99.5%+ green hunt).
+ * LIVE_CRUDE_GREEN DNA v3 — after NSE close only.
  *
- * Engine-validated May–Aug 2026 @ 1 lot (charge-aware option estimate):
- *   **18/18 green (100%)** · net ≈ ₹2.3k · split may–jun 9/9 · jul–aug 9/9
+ * Never enters during Nifty/Bank session (09:15–15:30). Entries start 16:00 IST.
  *
- * Method (ultra-selective session-OR):
- *   OR 09:00–09:30 · width **35–55** · break buffer 0
- *   entries **10:00–14:00** · SL25 / TP80 · trail ₹250→₹120
- *   max 1/day · first-win · confirm ON
+ * Engine-validated May–Aug 2026 @ 1 lot (charge-aware):
+ *   13/14 green (92.9%) · net ≈ ₹2.6k · 0 entries before 15:30
  *
- * Trades ~25% of sessions — skips everything that isn't A+.
- * Same capital kit as index: 1 lot · ₹10/pt · maxOpenLegs 1.
+ * Method: session-OR · OR width 40–60 · 16:00–21:00 · SL30/TP80
+ *   trail ₹350→₹180 · max 1/day · first-win · confirm ON
  */
 
 const LIVE_CRUDE_GREEN_DNA = {
-  id: 'live-crude-green-v2',
-  label: 'Live Crude Green · 18/18 selective SOR',
-  version: '2026.08.10-995',
+  id: 'live-crude-green-v3',
+  label: 'Live Crude Green · after NSE close',
+  version: '2026.08.10-after-nse',
   profileId: 'live-crude-green',
 
   enableNifty: false,
@@ -28,31 +25,32 @@ const LIVE_CRUDE_GREEN_DNA = {
   dayProfitLock: true,
   dayProfitLockRs: 1500,
   strictDayStop: true,
-  strictDayStopRs: 250,
+  strictDayStopRs: 300,
 
   signal: {
     entryMode: 'session-or',
     orStart: '09:00',
     orEnd: '09:30',
-    entryStart: '10:00',
-    entryEnd: '14:00',
-    stopPts: 25,
+    /** After Bank/Nifty cash close — no overlap with index session. */
+    entryStart: '16:00',
+    entryEnd: '21:00',
+    stopPts: 30,
     targetPts: 80,
     requireConfirm: true,
     firstWinLock: true,
     maxTradesDay: 1,
-    minOrWidth: 35,
-    maxOrWidth: 55,
+    minOrWidth: 40,
+    maxOrWidth: 60,
     breakBufferPts: 0,
-    profitLockArmRs: 250,
-    profitLockLockRs: 120,
-    profitLockGivebackRs: 130,
+    profitLockArmRs: 350,
+    profitLockLockRs: 180,
+    profitLockGivebackRs: 170,
   },
 
   liveOps: {
     maxOpenLegs: 1,
-    /** Window 10:00–14:00 overlaps NSE — share capital via maxOpenLegs, no 15:30 gate. */
-    crudeAfterIndexClose: false,
+    /** Hard gate when index books are on — no Crude entries before this IST time. */
+    crudeAfterIndexClose: true,
     crudeAfterIndexCloseTime: '15:30',
     rejectEstimatedPremium: true,
     cancelSlBeforeExit: true,
@@ -62,14 +60,12 @@ const LIVE_CRUDE_GREEN_DNA = {
 
   research: {
     window: '2026-05-01 → 2026-08-10',
-    greenDays: '18/18 (100%)',
+    greenDays: '13/14 (92.9%)',
     engineValidated: true,
-    netRsApprox: 2271,
-    avgDayRsApprox: 126,
-    split: 'may-jun 9/9 · jul-aug 9/9',
-    tradedSessionShare: '~25% of sessions',
+    netRsApprox: 2641,
+    earlyEntriesBefore1530: 0,
     note:
-      '99.5%+ via selectivity. Not every calendar day trades. Longer OOS history still limited by futures contract continuity.',
+      'Entry window 16:00–21:00 + worker gate 15:30 when Nifty/Bank on. No overlap with index session.',
   },
 };
 
@@ -99,7 +95,7 @@ function liveCrudeGreenProfileOverrides() {
     defaultEnableMorning: false,
     defaultEnableEvening: true,
     dailyBandLabel:
-      'OR35–55 · 10:00–14:00 · SL25/TP80 · trail ₹250→₹120 · max1 · first-win · 18/18 green',
+      'After NSE · OR40–60 · 16:00–21:00 · SL30/TP80 · trail ₹350→₹180 · max1 · first-win',
     profitLockArmRs: s.profitLockArmRs,
     profitLockLockRs: s.profitLockLockRs,
     profitLockGivebackRs: s.profitLockGivebackRs,
@@ -127,9 +123,9 @@ function liveCrudeGreenStartConfig(opts = {}) {
     enableKutty: false,
     kuttyAlone: false,
     realOrders: true,
-    dnaId: withIndex ? 'live-green+crude-v2' : LIVE_CRUDE_GREEN_DNA.id,
+    dnaId: withIndex ? 'live-green+crude-v3' : LIVE_CRUDE_GREEN_DNA.id,
     maxOpenLegs: LIVE_CRUDE_GREEN_DNA.liveOps.maxOpenLegs,
-    crudeAfterIndexClose: LIVE_CRUDE_GREEN_DNA.liveOps.crudeAfterIndexClose,
+    crudeAfterIndexClose: true,
   };
 }
 
