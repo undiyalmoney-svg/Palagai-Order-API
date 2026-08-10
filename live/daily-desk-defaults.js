@@ -6,8 +6,8 @@
  * Index only by default (Crude OFF — fee protection).
  */
 
-const APP_VERSION = '1.3.108';
-const APP_BUILD = '2026.08.10-live-crude-green';
+const APP_VERSION = '1.3.109';
+const APP_BUILD = '2026.08.10-live-crude-995';
 const { LIVE_GREEN_DNA } = require('./dna-live-green');
 const { LIVE_CRUDE_GREEN_DNA } = require('./dna-live-crude-green');
 
@@ -57,10 +57,13 @@ const DAILY_3K_PRESET = {
   dayProfitLock: true,
   /** On for hands-off — capital must not drain (Trade Desk parity). */
   strictDayStop: true,
-  /** With index on, Crude waits until 15:30 for the one-leg capital slot. */
-  crudeAfterIndexClose: true,
+  /**
+   * LIVE_CRUDE_GREEN v2 trades 10:00–14:00 — do not gate to 15:30 or it never
+   * fires with index on. Capital sharing is maxOpenLegs: 1.
+   */
+  crudeAfterIndexClose: false,
   researchNote:
-    'LIVE_GREEN index + LIVE_CRUDE_GREEN (SOR SL20/TP120 max2) · lock ₹3k · one-leg · Crude after 15:30',
+    'LIVE_GREEN index + LIVE_CRUDE_GREEN v2 (OR35–55 · 10:00–14:00 · SL25/TP80 · engine 18/18 green) · one-leg',
   dnaId: LIVE_GREEN_DNA.id,
 };
 

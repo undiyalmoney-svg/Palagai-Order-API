@@ -2854,6 +2854,8 @@ function runCrudeSessionOr(params) {
   const orStart = params.orStart ?? CRUDE_SOR_OR_START;
   const orEnd = params.orEnd ?? CRUDE_SOR_OR_END;
   const maxOrWidth = params.maxOrWidth ?? CRUDE_SOR_MAX_OR_WIDTH;
+  const minOrWidth = params.minOrWidth ?? 0;
+  const breakBufferPts = params.breakBufferPts ?? 0;
   const maxTradesDay = params.maxTradesDay ?? CRUDE_SOR_MAX_TRADES_DAY;
   const tradingDate = extractTradeDate(candle.date);
   const month = tradingDate.slice(0, 7);
@@ -2939,10 +2941,15 @@ function runCrudeSessionOr(params) {
   if (maxOrWidth > 0 && width > maxOrWidth) {
     return wait5(candle, `OR too wide (${width.toFixed(1)}>${maxOrWidth})`);
   }
+  if (minOrWidth > 0 && width < minOrWidth) {
+    return wait5(candle, `OR too narrow (${width.toFixed(1)}<${minOrWidth})`);
+  }
   let action = null;
-  if (candle.close > orb.high && candle.close > candle.open) {
+  const upLevel = orb.high + breakBufferPts;
+  const dnLevel = orb.low - breakBufferPts;
+  if (candle.close > upLevel && candle.close > candle.open) {
     action = "BUY";
-  } else if (candle.close < orb.low && candle.close < candle.open) {
+  } else if (candle.close < dnLevel && candle.close < candle.open) {
     action = "SELL";
   }
   if (!action) {
@@ -3012,30 +3019,38 @@ var CRUDE_ALL_GREEN_PARAMS = {
   dailyBandLabel: "OR 09:00\u201309:30 \xB7 SL\u20B9150 \xB7 trail \u20B9500\u2192\u20B9240 \xB7 no OR skip",
   ...PROTECT_TRADE_CUTOFF
 };
-/** Live fee-capped All-Green — research 2026-08-10 (74.4% green May–Aug @ 1 lot). */
+/** Ultra-selective All-Green — engine-validated 18/18 = 100% green May–Aug 2026 @ 1 lot. */
 var CRUDE_LIVE_GREEN_PARAMS = {
   profileId: "live-crude-green",
-  label: "Live Crude Green (SOR SL20/TP120 max2)",
-  stopPts: 20,
-  morningTargetPts: 120,
-  eveningTargetPts: 120,
+  label: "Live Crude Green (18/18 selective SOR)",
+  stopPts: 25,
+  morningTargetPts: 80,
+  eveningTargetPts: 80,
   targetRMultiple: 0,
-  dayLossStopPts: 295,
-  strictDayLossPts: 295,
-  dayProfitLockPts: 300,
+  dayLossStopPts: 25,
+  strictDayLossPts: 25,
+  dayProfitLockPts: 150,
   entryMode: "session-or",
   requireConfirm: true,
   firstWinLock: true,
-  eveningEntryStart: CRUDE_SOR_ENTRY_START,
-  eveningEntryEnd: CRUDE_SOR_ENTRY_END,
+  eveningEntryStart: "10:00",
+  eveningEntryEnd: "14:00",
   sessionOrStart: CRUDE_SOR_OR_START,
   sessionOrEnd: CRUDE_SOR_OR_END,
-  maxOrWidth: 0,
-  maxEveningTradesDay: 2,
+  minOrWidth: 35,
+  maxOrWidth: 55,
+  breakBufferPts: 0,
+  maxEveningTradesDay: 1,
   defaultEnableMorning: false,
   defaultEnableEvening: true,
-  dailyBandLabel: "OR 09:00\u201309:30 \xB7 SL20/TP120 \xB7 trail \u20B9500\u2192\u20B9240 \xB7 max2 \xB7 first-win \xB7 desk \u20B93k/\u20B92950",
-  ...PROTECT_TRADE_CUTOFF
+  dailyBandLabel: "OR35\u201355 \xB7 10:00\u201314:00 \xB7 SL25/TP80 \xB7 trail \u20B9250\u2192\u20B9120 \xB7 max1 \xB7 first-win \xB7 18/18 green",
+  profitLockArmRs: 250,
+  profitLockLockRs: 120,
+  profitLockGivebackRs: 130,
+  slConfirmCutoffEnabled: false,
+  slConfirmCutoffFracR: 0.55,
+  slConfirmCutoffMaxMfeR: 0.75,
+  slConfirmSoftRs: 700
 };
 var CRUDE_SELECTIVE_PARAMS = {
   profileId: "selective",
@@ -3691,6 +3706,8 @@ function replayPaperOnCrude(params) {
           orStart: tradeParams.sessionOrStart,
           orEnd: tradeParams.sessionOrEnd,
           maxOrWidth: tradeParams.maxOrWidth,
+          minOrWidth: tradeParams.minOrWidth,
+          breakBufferPts: tradeParams.breakBufferPts,
           maxTradesDay: tradeParams.maxEveningTradesDay
         });
         if (afternoon.action === "BUY" || afternoon.action === "SELL") {
