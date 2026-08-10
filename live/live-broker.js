@@ -11,6 +11,34 @@ const {
 } = require('./strategy-core.cjs');
 const { fetchQuotes } = require('./kite-market');
 
+const TICK = 0.05;
+function tickStr(p) {
+  const v = Math.max(TICK, Math.round((Number(p) || 0) / TICK) * TICK);
+  return v.toFixed(2);
+}
+
+/**
+ * Protective SELL stop for a long option. The exchange discontinued SL-M for
+ * F&O, so we place a Stop-Loss LIMIT (order_type 'SL') with the limit ~10%
+ * below the trigger so it still fills like a stop-market on a normal move.
+ */
+function slOrderFields({ exchange, tradingsymbol, quantity, product, trigger }) {
+  const trig = Math.max(TICK, Math.round((Number(trigger) || 0) / TICK) * TICK);
+  const limit = Math.max(TICK, Math.round((trig * 0.9) / TICK) * TICK);
+  return {
+    exchange,
+    tradingsymbol,
+    transaction_type: 'SELL',
+    order_type: 'SL',
+    quantity: String(quantity),
+    product: product || 'MIS',
+    validity: 'DAY',
+    trigger_price: trig.toFixed(2),
+    price: limit.toFixed(2),
+    tag: 'PALAGAISL',
+  };
+}
+
 /** Map a broker option symbol back to the desk instrument id. */
 function instrumentIdForSymbol(sym) {
   const s = String(sym || '').toUpperCase();
@@ -88,12 +116,14 @@ class LiveBroker {
         const instrumentId = instrumentIdForSymbol(sym);
         if (!instrumentId) continue;
         if (this.positions.get(instrumentId)?.status === 'open') continue;
-        const sl = orders.find(
-          (o) =>
+        const sl = orders.find((o) => {
+          const ot = String(o.order_type || '').toUpperCase();
+          return (
             (o.tradingsymbol || '').toUpperCase() === sym.toUpperCase() &&
-            String(o.order_type || '').toUpperCase() === 'SL-M' &&
-            isPendingSl(o.status),
-        );
+            (ot === 'SL' || ot === 'SL-M') &&
+            isPendingSl(o.status)
+          );
+        });
         const exchange =
           row.exchange || (sym.toUpperCase().startsWith('CRUDEOIL') ? 'MCX' : 'NFO');
         this.positions.set(instrumentId, {
@@ -144,26 +174,26 @@ class LiveBroker {
       ltp,
     });
     if (!(trigger > 0)) return;
-    const res = await kiteService.placeOrder(authorization, 'regular', {
-      exchange: pos.exchange,
-      tradingsymbol: pos.tradingSymbol,
-      transaction_type: 'SELL',
-      order_type: 'SL-M',
-      quantity: String(pos.quantity),
-      product: pos.product || 'MIS',
-      validity: 'DAY',
-      trigger_price: String(trigger),
-      tag: 'PALAGAISL',
-    });
+    const res = await kiteService.placeOrder(
+      authorization,
+      'regular',
+      slOrderFields({
+        exchange: pos.exchange,
+        tradingsymbol: pos.tradingSymbol,
+        quantity: pos.quantity,
+        product: pos.product,
+        trigger,
+      }),
+    );
     const id = res.data?.data?.order_id || null;
     if (res.status < 400 && id) {
       pos.slOrderId = id;
       pos.slTrigger = trigger;
-      this.pushEvent('SL', `${pos.tradingSymbol}: SL-M (ensured) @ ${trigger} id ${id}`);
+      this.pushEvent('SL', `${pos.tradingSymbol}: SL (ensured) @ ${tickStr(trigger)} id ${id}`);
     } else {
       this.pushEvent(
         'ERROR',
-        `${pos.tradingSymbol}: SL-M ensure failed — ${res.data?.message || res.status}`,
+        `${pos.tradingSymbol}: SL ensure failed — ${res.data?.message || res.status}`,
       );
     }
   }
@@ -302,25 +332,19 @@ class LiveBroker {
       ltp,
     });
 
-    const slRes = await kiteService.placeOrder(authorization, 'regular', {
-      exchange,
-      tradingsymbol: sym,
-      transaction_type: 'SELL',
-      order_type: 'SL-M',
-      quantity: String(quantity),
-      product,
-      validity: 'DAY',
-      trigger_price: String(slTrigger),
-      tag: 'PALAGAISL',
-    });
+    const slRes = await kiteService.placeOrder(
+      authorization,
+      'regular',
+      slOrderFields({ exchange, tradingsymbol: sym, quantity, product, trigger: slTrigger }),
+    );
     const slOrderId = slRes.data?.data?.order_id || null;
     if (slRes.status >= 400 || !slOrderId) {
       this.pushEvent(
         'ERROR',
-        `${instrumentName}: SL-M failed — ${slRes.data?.message || slRes.status} (entry live!)`,
+        `${instrumentName}: SL failed — ${slRes.data?.message || slRes.status} (entry live!)`,
       );
     } else {
-      this.pushEvent('SL', `${instrumentName}: SL-M @ ${slTrigger} id ${slOrderId}`);
+      this.pushEvent('SL', `${instrumentName}: SL @ ${tickStr(slTrigger)} id ${slOrderId}`);
     }
 
     this.positions.set(instrumentId, {
@@ -368,9 +392,10 @@ class LiveBroker {
     if (pos.slTrigger != null && next >= pos.slTrigger - 0.001) return;
 
     const res = await kiteService.modifyOrder(authorization, 'regular', pos.slOrderId, {
-      order_type: 'SL-M',
+      order_type: 'SL',
       quantity: String(pos.quantity),
-      trigger_price: String(next),
+      trigger_price: tickStr(next),
+      price: tickStr(Math.max(TICK, next * 0.9)),
       validity: 'DAY',
     });
     if (res.status >= 400) {
@@ -382,7 +407,7 @@ class LiveBroker {
     }
     pos.slTrigger = next;
     pos.indexStop = open.indexStop;
-    this.pushEvent('MODIFY_SL', `${pos.tradingSymbol}: SL-M → ${next}`);
+    this.pushEvent('MODIFY_SL', `${pos.tradingSymbol}: SL → ${tickStr(next)}`);
   }
 
   async placeExit(authorization, pos, instrumentName) {
