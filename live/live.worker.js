@@ -20,6 +20,12 @@ const {
 const { fetchInstruments, fetchHistorical5m } = require('./kite-market');
 const { LiveBroker } = require('./live-broker');
 const { indexDayRiskOverrides, riskStatusLabels } = require('./daily-desk-defaults');
+const {
+  ingestReplayTrades,
+  applyBrokerFill,
+  moneyTotals,
+  publicTrades,
+} = require('./live-trades');
 
 const CRUDE_EXIT_BY = '23:10';
 const LOOKBACK_DAYS = 12;
@@ -90,7 +96,13 @@ class LiveWorker {
     this.pushEvent = pushEvent;
     this.heartbeat = heartbeat;
     this.getConfig = getConfig;
-    this.broker = new LiveBroker({ pushEvent, realOrders: false });
+    /** @type {object[]} strategy closes + broker fill overlays (money ledger) */
+    this.liveTrades = [];
+    this.broker = new LiveBroker({
+      pushEvent,
+      realOrders: false,
+      onFill: (fill) => this.handleBrokerFill(fill),
+    });
     this.instruments = [];
     this.instrumentsAt = 0;
     this.candles = {
@@ -103,6 +115,30 @@ class LiveWorker {
     this.reconciled = false;
     this.tickBusy = false;
     this.lastSignals = { nifty: '', bank: '', crude: '' };
+  }
+
+  handleBrokerFill(fill) {
+    const row = applyBrokerFill(this.liveTrades, fill);
+    if (!row) return;
+    const px = Number(fill.premium);
+    const pnl =
+      row.netOptionPnlRs != null
+        ? ` · net ₹${Math.round(row.netOptionPnlRs)}`
+        : row.optionPnlRs != null
+          ? ` · ₹${Math.round(row.optionPnlRs)}`
+          : '';
+    this.pushEvent(
+      'FILL',
+      `${fill.instrumentName || fill.instrumentId || ''}: ${String(fill.side).toUpperCase()} ${fill.tradingSymbol} @ ${px.toFixed(2)}${pnl}`.trim(),
+    );
+  }
+
+  /** Snapshot for GET /live/status — broker fills when real, else paper marks. */
+  moneySnapshot() {
+    return {
+      trades: publicTrades(this.liveTrades),
+      totals: moneyTotals(this.liveTrades),
+    };
   }
 
   authHeader() {
@@ -238,6 +274,7 @@ class LiveWorker {
             return s;
           },
         });
+        ingestReplayTrades(this.liveTrades, replay.trades);
         await this.broker.syncInstrument({
           authorization,
           instrumentId: NIFTY_50_INSTRUMENT.id,
@@ -273,6 +310,7 @@ class LiveWorker {
             return s;
           },
         });
+        ingestReplayTrades(this.liveTrades, replay.trades);
         await this.broker.syncInstrument({
           authorization,
           instrumentId: BANK_NIFTY_INSTRUMENT.id,
@@ -316,6 +354,7 @@ class LiveWorker {
           enableEvening: tradeParams.defaultEnableEvening,
           tradeParams,
         });
+        ingestReplayTrades(this.liveTrades, replay.trades);
         await this.broker.syncInstrument({
           authorization,
           instrumentId: CRUDE_OIL_MINI_INSTRUMENT.id,
@@ -417,6 +456,7 @@ class LiveWorker {
     this.warmed = false;
     this.reconciled = false;
     this.broker.clear();
+    this.liveTrades = [];
     this.lastSignals = { nifty: '', bank: '', crude: '' };
   }
 }

@@ -84,13 +84,28 @@ function orderStatusOf(order) {
 }
 
 class LiveBroker {
-  constructor({ pushEvent, realOrders }) {
+  constructor({ pushEvent, realOrders, onFill }) {
     this.pushEvent = pushEvent;
     this.realOrders = !!realOrders;
+    /** @type {null|((fill:object)=>void)} */
+    this.onFill = typeof onFill === 'function' ? onFill : null;
     /** @type {Map<string, object>} */
     this.positions = new Map();
     /** @type {Map<string, number>} */
     this.lotsByInstrument = new Map();
+  }
+
+  setOnFill(fn) {
+    this.onFill = typeof fn === 'function' ? fn : null;
+  }
+
+  emitFill(fill) {
+    if (!this.onFill) return;
+    try {
+      this.onFill(fill);
+    } catch (err) {
+      this.pushEvent('ERROR', `onFill failed: ${err.message}`);
+    }
   }
 
   setRealOrders(v) {
@@ -227,18 +242,40 @@ class LiveBroker {
 
     let current = this.positions.get(instrumentId) || null;
 
-    // Detect SL fill → flat
+    // Detect SL fill → flat (and capture fill price for money ledger).
     if (current?.status === 'open' && current.slOrderId) {
       const orders = await this.getOrders(authorization);
       const sl = orders.find((o) => o.order_id === current.slOrderId);
       if (sl && String(sl.status || '').toUpperCase() === 'COMPLETE') {
+        const fillPx =
+          Number(sl.average_price || 0) ||
+          (await this.resolveOrderFillPremium(authorization, current.slOrderId));
         this.pushEvent(
           'SL',
-          `${instrumentName}: SL-M filled ${current.tradingSymbol}`,
+          `${instrumentName}: SL filled ${current.tradingSymbol}` +
+            (fillPx ? ` @ ${tickStr(fillPx)}` : ''),
         );
         current.status = 'flat';
+        current.closedBy = 'sl';
+        current.closedEntryTime = current.entryTime;
+        current.exitPremium = fillPx || null;
+        current.slOrderId = null;
         this.positions.set(instrumentId, current);
-        current = current;
+        if (fillPx > 0) {
+          this.emitFill({
+            side: 'sl',
+            instrumentId,
+            instrumentName,
+            tradingSymbol: current.tradingSymbol,
+            entryTime: current.entryTime,
+            premium: fillPx,
+            quantity: current.quantity,
+            lotSize: current.quantity,
+            reason: 'Protective SL filled',
+            at: new Date().toISOString(),
+          });
+        }
+        // Paper may still show this leg open — do NOT fall through to re-entry.
         const sameLeg =
           open &&
           (open.option?.tradingSymbol || '').toUpperCase() ===
@@ -249,6 +286,20 @@ class LiveBroker {
     }
 
     current = this.positions.get(instrumentId) || null;
+
+    // Broker already flattened this paper leg (SL/exit) — wait for strategy
+    // to drop `open` before allowing a new entry (prevents duplicate BUY).
+    if (
+      open &&
+      current?.status === 'flat' &&
+      current.closedBy &&
+      (current.closedEntryTime === open.entryTime ||
+        (!current.closedEntryTime &&
+          (current.tradingSymbol || '').toUpperCase() ===
+            (open.option?.tradingSymbol || '').toUpperCase()))
+    ) {
+      return;
+    }
 
     if (open && current?.status === 'open') {
       const same =
@@ -269,7 +320,10 @@ class LiveBroker {
         `${instrumentName}: handoff ${current.tradingSymbol} → ${open.option?.tradingSymbol || '?'}`,
       );
       await this.placeExit(authorization, current, instrumentName);
-      await this.placeEntry(authorization, instrumentId, instrumentName, open);
+      // Only enter the new leg if the prior exit actually flattened.
+      if (current.status === 'flat') {
+        await this.placeEntry(authorization, instrumentId, instrumentName, open);
+      }
       return;
     }
 
@@ -373,13 +427,29 @@ class LiveBroker {
       slOrderId,
       exitOrderId: null,
       entryPremium: fillPremium,
+      exitPremium: null,
       slTrigger,
       entryTime: open.entryTime,
       exchange,
       product,
       indexEntry: open.indexEntry,
       indexStop: open.indexStop,
+      closedBy: null,
+      closedEntryTime: null,
       lastError: null,
+    });
+
+    this.emitFill({
+      side: 'entry',
+      instrumentId,
+      instrumentName,
+      tradingSymbol: sym,
+      entryTime: open.entryTime,
+      premium: fillPremium,
+      quantity,
+      lotSize,
+      lots: lotsMult,
+      at: new Date().toISOString(),
     });
 
     // If the protective SL-M failed to place, retry once now so the position
@@ -556,6 +626,27 @@ class LiveBroker {
     if (!(qty > 0)) {
       this.pushEvent('EXIT', `${pos.tradingSymbol}: already flat at broker`);
       pos.status = 'flat';
+      pos.closedBy = pos.closedBy || 'flat';
+      pos.closedEntryTime = pos.closedEntryTime || pos.entryTime;
+      // If SL already filled earlier but fill callback missed, try once more.
+      if (!(pos.exitPremium > 0) && pos.slOrderId) {
+        const px = await this.resolveOrderFillPremium(authorization, pos.slOrderId);
+        if (px > 0) {
+          pos.exitPremium = px;
+          this.emitFill({
+            side: 'sl',
+            instrumentId: pos.instrumentId,
+            instrumentName,
+            tradingSymbol: pos.tradingSymbol,
+            entryTime: pos.entryTime,
+            premium: px,
+            quantity: pos.quantity,
+            reason: 'Already flat (SL fill)',
+            at: new Date().toISOString(),
+          });
+        }
+      }
+      pos.slOrderId = null;
       return;
     }
 
@@ -580,12 +671,31 @@ class LiveBroker {
       return;
     }
     pos.exitOrderId = exitId;
+    const fillPx = await this.resolveOrderFillPremium(authorization, exitId);
+    pos.exitPremium = fillPx || null;
     pos.status = 'flat';
     pos.slOrderId = null;
+    pos.closedBy = 'exit';
+    pos.closedEntryTime = pos.entryTime;
     this.pushEvent(
       'EXIT',
-      `${instrumentName || ''}: SELL ${qty} ${pos.tradingSymbol} ${product} MARKET`.trim(),
+      `${instrumentName || ''}: SELL ${qty} ${pos.tradingSymbol} ${product} MARKET`.trim() +
+        (fillPx ? ` @ ${tickStr(fillPx)}` : ''),
     );
+    if (fillPx > 0) {
+      this.emitFill({
+        side: 'exit',
+        instrumentId: pos.instrumentId,
+        instrumentName,
+        tradingSymbol: pos.tradingSymbol,
+        entryTime: pos.entryTime,
+        premium: fillPx,
+        quantity: qty,
+        lotSize: qty,
+        reason: 'EXIT MARKET',
+        at: new Date().toISOString(),
+      });
+    }
   }
 
   async getOrders(authorization) {
@@ -617,15 +727,22 @@ class LiveBroker {
     return pickLong(net) || pickLong(day) || 0;
   }
 
-  async resolveEntryPremium(authorization, orderId, symbol, fallback, exchange) {
-    for (let i = 0; i < 4; i += 1) {
+  async resolveOrderFillPremium(authorization, orderId) {
+    if (!orderId) return null;
+    for (let i = 0; i < 6; i += 1) {
       const hist = await kiteService.getOrderHistory(authorization, orderId);
       const rows = hist.data?.data || [];
       const done = rows.find((r) => String(r.status || '').toUpperCase() === 'COMPLETE');
       const avg = Number(done?.average_price || 0);
       if (avg > 0) return avg;
-      await delay(500);
+      await delay(400);
     }
+    return null;
+  }
+
+  async resolveEntryPremium(authorization, orderId, symbol, fallback, exchange) {
+    const avg = await this.resolveOrderFillPremium(authorization, orderId);
+    if (avg > 0) return avg;
     if (fallback != null && fallback > 0) return fallback;
     const ltp = await this.resolveOptionLtp(authorization, symbol, exchange);
     return ltp || 1;

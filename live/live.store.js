@@ -109,6 +109,7 @@ function statusPayload(session) {
     : null;
   const cfg = session.config || DAILY_3K_PRESET;
   const lots = deskRiskLots(cfg);
+  const money = session.worker?.moneySnapshot?.() || { trades: [], totals: null };
   return {
     status: session.status,
     message: session.message,
@@ -132,6 +133,9 @@ function statusPayload(session) {
     appBuild: APP_BUILD,
     authPresent: !!session.auth,
     events: session.events.slice(0, 40),
+    /** Money ledger: paper marks overwritten by broker fills when realOrders. */
+    trades: money.trades,
+    totals: money.totals,
     mongo: !!mongoDb,
     userId: session.userId,
   };

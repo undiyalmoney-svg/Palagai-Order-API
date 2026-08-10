@@ -44,3 +44,4 @@ Matches **Trade Desk Daily ₹1k–₹3k** DNA (palagai.app `appBuild: 2026.08.0
 - Do **not** re-enable unlimited All-Green or Nat Gas as defaults
 - Do **not** disable Trap next-bar confirm
 - EXIT always cancels / confirms resting SL is gone before MARKET SELL — a locked SL qty makes Zerodha treat the SELL as a naked short (“Insufficient funds” ~full option margin)
+- Live money ledger on `GET /live/status` → `trades` + `totals`: paper marks kept as `paper*`, overwritten by broker `average_price` fills (`fillSource: "broker"`). Auto UI should show these for real-money P&L, not candle/trail estimates.
