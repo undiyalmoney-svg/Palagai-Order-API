@@ -26,6 +26,7 @@ const {
   moneyTotals,
   publicTrades,
 } = require('./live-trades');
+const { LIVE_GREEN_DNA, liveGreenTrapExtras } = require('./dna-live-green');
 
 const CRUDE_EXIT_BY = '23:10';
 const LOOKBACK_DAYS = 12;
@@ -75,19 +76,29 @@ function toLiveOpen(replayOpen) {
     indexStop: effectiveProtectiveStop(replayOpen),
     option: replayOpen.option,
     optionEntryPremium: replayOpen.optionEntryPremium ?? null,
+    premiumEstimated: !!replayOpen.premiumEstimated,
   };
 }
 
 function trapInitOverrides(config, instrumentId) {
-  return (
+  const risk =
     indexDayRiskOverrides({
       instrumentId,
       enableNifty: !!config.enableNifty,
       enableBank: !!config.enableBank,
       dayProfitLock: !!config.dayProfitLock,
       strictDayStop: !!config.strictDayStop,
-    }) || {}
-  );
+    }) || {};
+  const extras = liveGreenTrapExtras();
+  if (config.optionStandDownRs != null) {
+    extras.optionStandDownRs = Number(config.optionStandDownRs);
+  }
+  return {
+    ...risk,
+    maxTradesPerDay: LIVE_GREEN_DNA.trap.maxTradesPerDay,
+    targetRMultiple: LIVE_GREEN_DNA.trap.targetRMultiple,
+    extras,
+  };
 }
 
 class LiveWorker {
@@ -235,6 +246,11 @@ class LiveWorker {
       }
 
       this.broker.setRealOrders(!!config.realOrders);
+      this.broker.setMaxOpenLegs(
+        config.maxOpenLegs != null
+          ? config.maxOpenLegs
+          : LIVE_GREEN_DNA.liveOps.maxOpenLegs,
+      );
 
       // Restart safety: adopt any positions already open at the broker once,
       // so a mid-trade restart never places a duplicate entry.

@@ -3853,7 +3853,9 @@ var TRAP_1LOT_DAILY_DNA_EXTRAS = {
   trapMode: "both",
   /** Must stay 0 — bounce-OR widen drifts DNA and hurts option money. */
   bounceOrPierceMult: 0,
-  bounceOrPierceCap: 0
+  bounceOrPierceCap: 0,
+  /** Live Green: cut when option ₹ adverse ≥ this (0 = off for pure paper DNA). */
+  optionStandDownRs: 350
 };
 function dnaCapsForStrategy(strategyId, channel) {
   switch (strategyId) {
@@ -4736,6 +4738,18 @@ function srTrapExitLogic(candle, open, closes, settings, ctx) {
     open.lotsMultiplier
   );
   const optionMarksKnown = typeof open.optionPeakMfeRs === "number" && open.optionEntryPremium != null && open.optionEntryPremium > 0 && open.optionBarLow != null && open.optionLotUnits != null && open.optionLotUnits > 0;
+  // Live Green: hard option-₹ stand-down (cuts before index SL / trail lag).
+  const standDownRs = num2(settings.extras?.optionStandDownRs, 0);
+  if (standDownRs > 0 && optionMarksKnown) {
+    const maeRs = Math.max(0, (open.optionEntryPremium - open.optionBarLow) * open.optionLotUnits);
+    if (maeRs >= standDownRs) {
+      return {
+        exitPrice: candle.close,
+        reason: `Option stand-down \u2212\u20B9${Math.round(maeRs)}`,
+        optionExitPremium: open.optionBarLow
+      };
+    }
+  }
   const armedIndex = armPeakTrailFloor(candle, open, settings, ctx.instrumentId ?? "");
   const cutoff = applySlConfirmCutoff(candle, open, settings, ctx.instrumentId ?? "");
   if (cutoff) {

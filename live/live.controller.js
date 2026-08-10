@@ -6,20 +6,26 @@ const {
   DAILY_3K_PRESET,
   DAY_PROFIT_LOCK_RS,
   STRICT_DAY_STOP_RS,
+  LIVE_GREEN_DNA,
 } = require('./daily-desk-defaults');
 
 async function health(_req, res) {
+  const t = LIVE_GREEN_DNA.trap;
+  const ops = LIVE_GREEN_DNA.liveOps;
   res.json({
     status: 'ok',
     service: 'palagai-live-control',
-    note: 'Multi-user Server Live — Daily ₹1k–₹3k desk DNA (matches Trade Desk)',
+    note: 'Server Live — LIVE_GREEN DNA (Trap signals + one-leg ops)',
     version: APP_VERSION,
     appBuild: APP_BUILD,
+    dnaId: LIVE_GREEN_DNA.id,
     crudeDefault: 'selective',
     crudeDna: 'session-or · 10:00–22:00 · SL30/TP60 · confirm · max 2/day · no OR skip',
-    trapDna: 'SR Trap Confirm · pierce 10 · peak 150/75/75 · soft OFF · 2R · dayStop 80',
+    trapDna: `SR Trap · pierce ${t.piercePts}/B${t.bankPiercePts} · peak ₹${t.profitLockArmRs}/${t.profitLockLockRs}/${t.profitLockGivebackRs} · max${t.maxTradesPerDay} · ${t.targetRMultiple}R · stand-down ₹${ops.optionStandDownRs} · one-leg`,
     dayProfitLockRsBase: DAY_PROFIT_LOCK_RS,
     strictDayStopRsBase: STRICT_DAY_STOP_RS,
+    liveOps: ops,
+    research: LIVE_GREEN_DNA.research,
     defaults: DAILY_3K_PRESET,
   });
 }

@@ -6,8 +6,9 @@
  * Index only by default (Crude OFF — fee protection).
  */
 
-const APP_VERSION = '1.3.105';
-const APP_BUILD = '2026.08.08-autobot-desk-parity';
+const APP_VERSION = '1.3.106';
+const APP_BUILD = '2026.08.10-live-green-dna';
+const { LIVE_GREEN_DNA } = require('./dna-live-green');
 
 /** Base ₹ bands at 1 lot (combined index books). */
 const DAY_PROFIT_LOCK_RS = 3000;
@@ -38,7 +39,8 @@ const DAILY_3K_PRESET = {
   /** On for hands-off — capital must not drain (Trade Desk parity). */
   strictDayStop: true,
   researchNote:
-    '₹40k · Trap pierce20/B40 · peak₹100 · max3 · 3.5R · lock ₹3k · option-₹ hunt',
+    'LIVE_GREEN · pierce20/B40 · peak₹100 · max3 · 3.5R · lock ₹3k · option stand-down ₹350 · one-leg live',
+  dnaId: LIVE_GREEN_DNA.id,
 };
 
 function rsPerPointForInstrument(instrumentId) {
@@ -125,6 +127,15 @@ function normalizeStartConfig(config = {}) {
     enableKutty: !!config.enableKutty,
     kuttyAlone: !!config.kuttyAlone,
     realOrders: !!config.realOrders,
+    dnaId: config.dnaId || LIVE_GREEN_DNA.id,
+    maxOpenLegs:
+      config.maxOpenLegs != null
+        ? Math.max(0, Math.floor(Number(config.maxOpenLegs)) || 0)
+        : LIVE_GREEN_DNA.liveOps.maxOpenLegs,
+    optionStandDownRs:
+      config.optionStandDownRs != null
+        ? Math.max(0, Number(config.optionStandDownRs) || 0)
+        : LIVE_GREEN_DNA.liveOps.optionStandDownRs,
   };
 }
 
@@ -136,6 +147,7 @@ module.exports = {
   NIFTY_RS_PER_POINT,
   BANK_RS_PER_POINT,
   DAILY_3K_PRESET,
+  LIVE_GREEN_DNA,
   rsPerPointForInstrument,
   deskRiskLots,
   profitLockMoneyRs,

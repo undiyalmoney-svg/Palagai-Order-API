@@ -89,10 +89,25 @@ class LiveBroker {
     this.realOrders = !!realOrders;
     /** @type {null|((fill:object)=>void)} */
     this.onFill = typeof onFill === 'function' ? onFill : null;
+    /** Live Green: 1 = never overlap Nifty+Bank (margin / EXIT safety). 0 = off. */
+    this.maxOpenLegs = 1;
     /** @type {Map<string, object>} */
     this.positions = new Map();
     /** @type {Map<string, number>} */
     this.lotsByInstrument = new Map();
+  }
+
+  setMaxOpenLegs(n) {
+    const v = Math.floor(Number(n));
+    this.maxOpenLegs = Number.isFinite(v) && v >= 0 ? v : 1;
+  }
+
+  openLegCount() {
+    let n = 0;
+    for (const p of this.positions.values()) {
+      if (p?.status === 'open' || p?.status === 'exiting') n += 1;
+    }
+    return n;
   }
 
   setOnFill(fn) {
@@ -345,6 +360,27 @@ class LiveBroker {
         `${instrumentName}: no tradeable option (synthetic/missing) — refresh instruments`,
       );
       return;
+    }
+    // Live Green: never enter on estimated/synthetic premium marks (paper≠live leak).
+    if (open.premiumEstimated) {
+      this.pushEvent(
+        'SKIP',
+        `${instrumentName}: estimated premium — skip live entry (paper mark only)`,
+      );
+      return;
+    }
+    // Live Green: one open leg at a time — overlapping books caused today's EXIT margin death.
+    if (this.maxOpenLegs > 0 && this.openLegCount() >= this.maxOpenLegs) {
+      const existing = [...this.positions.values()].find(
+        (p) => p?.status === 'open' || p?.status === 'exiting',
+      );
+      if (existing && existing.instrumentId !== instrumentId) {
+        this.pushEvent(
+          'SKIP',
+          `${instrumentName}: maxOpenLegs ${this.maxOpenLegs} — wait for ${existing.tradingSymbol} flat`,
+        );
+        return;
+      }
     }
     const lotSize = Math.max(1, option.lotSize || 1);
     const lotsMult = this.lotsFor(instrumentId);
