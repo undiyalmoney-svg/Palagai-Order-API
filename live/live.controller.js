@@ -17,7 +17,7 @@ async function health(_req, res) {
     appBuild: APP_BUILD,
     crudeDefault: 'selective',
     crudeDna: 'session-or · 10:00–22:00 · SL30/TP60 · confirm · max 2/day · no OR skip',
-    trapDna: 'SR Trap Confirm · pierce 10 · peak 150/75/75 · soft OFF · 2R · dayStop 80',
+    trapDna: 'SR Trap Confirm · pierce20/B40 · peak₹100/50/50 · max3 · 3.5R · SL-limit + flatten if SL fails',
     dayProfitLockRsBase: DAY_PROFIT_LOCK_RS,
     strictDayStopRsBase: STRICT_DAY_STOP_RS,
     defaults: DAILY_3K_PRESET,

@@ -2,18 +2,18 @@
 
 Runs on the Order-API droplet. **Does not change** `/api/kite/*` handlers.
 
-Matches **Trade Desk Daily ₹1k–₹3k** DNA (palagai.app `appBuild: 2026.08.04-desk-one-profit`).
+Matches **Trade Desk Daily ₹1k–₹3k** DNA (palagai.app / Autobot `appBuild: 2026.08.10-sl-limit-failsafe`).
 
 ## DNA
 - Nifty = **Trap** (SR Trap Confirm — next-bar confirm ON)
 - Bank = Trap by default (Genie only if client sends `bankStrategy: 'genie'`)
-- Crude = **Selective** (default)
+- Crude = **Selective** (OFF by default — fee protection)
 - Nat Gas / Kutty = off unless client enables
 
 ### Index Trap
-- piercePts 10 · peak trail arm ₹150 / lock ₹75 / giveback ₹75
+- piercePts 20 · Bank40 · peak trail arm ₹100 / lock ₹50 / giveback ₹50
 - soft / SL-confirm cutoff OFF
-- targetRMultiple 2 · maxTradesPerDay 0 · dayStopPts 80
+- targetRMultiple 3.5 · maxTradesPerDay 3 · day risk via desk ₹ bands
 
 ### Crude Selective
 - SL 30 / TP 60 · session 10:00–22:00 · max 2/day · confirm ON · no OR-width skip
@@ -22,13 +22,14 @@ Matches **Trade Desk Daily ₹1k–₹3k** DNA (palagai.app `appBuild: 2026.08.0
 - **Day profit lock ON** — base ₹3,000 at 1 lot (50/50 Nifty/Bank when both on)
   - Points = ₹3000 × share / ₹-per-point (**not** × lots)
   - Money ≈ ₹3,000 × lots (1→₹3k · 3→₹9k)
-- **Strict day stop OFF** unless client opts in — base −₹2,950 × lots
-- Empty start body → Daily 3k books: Nifty+Bank+Crude on, lots 1/1/1, Trap, Selective
+- **Strict day stop ON** unless client opts out — base −₹2,950 × lots
+- Empty start body → Daily 3k books: Nifty+Bank on, Crude off, lots 1/1/1, Trap, Selective
 
 ## Behaviour
-- `POST /live/start` → 60s ticks
+- `POST /live/start` → 15s ticks
+- Protective stop = exchange **SL** (limit), never SL-M — if SL cannot place, emergency flatten
 - `GET /live/defaults` → Daily preset + checkbox hint
-- `GET /live/health` → `appBuild: 2026.08.04-autobot-daily-3k`
+- `GET /live/health` → `appBuild: 2026.08.10-sl-limit-failsafe`
 - Futures: prefer next CRUDEOILM on expiry day (options already roll)
 - Options long only via broker path (BUY→CE / SELL→PE); per-trade SL does not halt the day
 

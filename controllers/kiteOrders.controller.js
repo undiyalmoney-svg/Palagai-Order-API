@@ -98,11 +98,12 @@ async function getPositions(req, res) {
 }
 
 function health(_req, res) {
+  const { APP_VERSION, APP_BUILD } = require('../live/daily-desk-defaults');
   res.json({
     status: 'ok',
     service: 'palagai-order-api',
-    version: '1.3.0',
-    appBuild: '2026.08.04-autobot-daily-3k',
+    version: APP_VERSION,
+    appBuild: APP_BUILD,
     crudeDefault: 'selective',
     deskPreset: 'daily-3k',
   });
