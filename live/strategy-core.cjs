@@ -3405,9 +3405,18 @@ function resolveAtmCrudeMiniOption(params) {
     source: "synthetic"
   };
 }
+/**
+ * Kite/MCX trading lot_size is 1 (1 order qty = 1 lot). Do NOT inflate to 10 —
+ * that placed 10 lots when Autobot asked for 1 (see kite.trade/forum/14531).
+ */
 function crudeMiniLotSize(lotSize) {
   const n = Math.floor(Number(lotSize) || 0);
-  return Math.max(10, n > 0 ? n : 10);
+  return n > 0 ? n : 1;
+}
+/** Premium is ₹/barrel; 1 Kite qty = 10 bbl mini. Skip if lotSize already 10. */
+function crudeMiniPremiumPnlMult(lotSize) {
+  const n = Math.floor(Number(lotSize) || 0);
+  return n >= 10 ? 1 : 10;
 }
 function toCrudePaperOption(instrument, source) {
   return {
@@ -3445,7 +3454,7 @@ function buildSyntheticCrudeOption(direction, spot, asOfDay, frontExpiry, opts) 
     expiry,
     strike,
     tickSize: 0.05,
-    lotSize: 10,
+    lotSize: 1,
     lastPrice: 0
   };
 }
@@ -3582,14 +3591,15 @@ function closePaperTrade2(params) {
       params.exitTime,
       "exit"
     );
+    const pnlMult = crudeMiniPremiumPnlMult(open.option.lotSize);
     if (open.optionEntryPremium != null && optionExitPremium != null && !premiumEstimated) {
-      optionPnlRs = (optionExitPremium - open.optionEntryPremium) * open.option.lotSize * lots;
+      optionPnlRs = (optionExitPremium - open.optionEntryPremium) * open.option.lotSize * lots * pnlMult;
       premiumEstimated = false;
     } else {
       const estMove = estimatePremiumMove(indexPoints);
       const entryPx = open.optionEntryPremium ?? Math.max(10, Math.abs(estMove) + 20);
       optionExitPremium = entryPx + estMove;
-      optionPnlRs = estMove * open.option.lotSize * lots;
+      optionPnlRs = estMove * open.option.lotSize * lots * pnlMult;
       premiumEstimated = true;
     }
   }

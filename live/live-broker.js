@@ -388,13 +388,18 @@ class LiveBroker {
         return;
       }
     }
-    const lotSize = Math.max(1, option.lotSize || 1);
-    const lotsMult = this.lotsFor(instrumentId);
-    const quantity = lotSize * lotsMult;
     const sym = option.tradingSymbol;
     const exchange =
       option.exchange ||
       (String(sym).toUpperCase().startsWith('CRUDEOIL') ? 'MCX' : 'NFO');
+    // Kite MCX lot_size is 1 (1 qty = 1 lot). Legacy crudeMiniLotSize forced 10 and
+    // bought 10 lots per Autobot lot — clamp CRUDEOILM to trading qty 1.
+    let lotSize = Math.max(1, Number(option.lotSize) || 1);
+    if (exchange === 'MCX' && /CRUDEOILM/i.test(String(sym)) && lotSize > 1) {
+      lotSize = 1;
+    }
+    const lotsMult = this.lotsFor(instrumentId);
+    const quantity = lotSize * lotsMult;
     const product = 'MIS';
 
     const response = await kiteService.placeOrder(authorization, 'regular', {
