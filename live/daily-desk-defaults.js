@@ -159,18 +159,16 @@ function normalizeStartConfig(config = {}) {
   const capitalRaw = config.capitalRs != null ? config.capitalRs : config.capital;
   const fromCap = lotsFromCapitalRs(capitalRaw);
 
-  const niftyLots =
-    Math.max(1, Math.floor(Number(config.niftyLots)) || 0) ||
-    fromCap?.niftyLots ||
-    preset.niftyLots;
-  const bankLots =
-    Math.max(1, Math.floor(Number(config.bankLots)) || 0) ||
-    fromCap?.bankLots ||
-    preset.bankLots;
-  const crudeLots =
-    Math.max(1, Math.floor(Number(config.crudeLots)) || 0) ||
-    fromCap?.crudeLots ||
-    preset.crudeLots;
+  /** Prefer explicit lots; else capital map; else preset. Never Math.max(1,…) before capital. */
+  const pickLots = (raw, capVal, presetVal) => {
+    if (raw != null && raw !== '' && Number.isFinite(Number(raw))) {
+      return Math.max(1, Math.floor(Number(raw)));
+    }
+    return Math.max(1, Math.floor(Number(capVal)) || presetVal || 1);
+  };
+  const niftyLots = pickLots(config.niftyLots, fromCap?.niftyLots, preset.niftyLots);
+  const bankLots = pickLots(config.bankLots, fromCap?.bankLots, preset.bankLots);
+  const crudeLots = pickLots(config.crudeLots, fromCap?.crudeLots, preset.crudeLots);
 
   return {
     enableNifty: true,
