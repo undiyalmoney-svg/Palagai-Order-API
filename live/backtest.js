@@ -323,13 +323,24 @@ async function runBacktest({ authorization, fromDate, toDate, config }, deps = {
       })
     : rawTrades;
 
+  // Book rows from filtered desk trades (not raw overlapping fiction).
+  const booksLive = books.map((b) => {
+    const subset = allTrades.filter((t) => t.instrumentId === b.instrumentId);
+    return {
+      label: b.label,
+      instrumentId: b.instrumentId,
+      strategy: b.strategy,
+      ...summarize(subset),
+    };
+  });
+
   return {
     fromDate,
     toDate,
     config: cfg,
     riskLabels: riskStatusLabels(cfg),
     paperLivePath: useLivePath,
-    books,
+    books: booksLive,
     totals: summarize(allTrades),
     rawTotals: useLivePath ? summarize(rawTrades) : undefined,
     dayStats: dayBreakdown(allTrades),
