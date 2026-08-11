@@ -3921,7 +3921,7 @@ var TRAP_1LOT_DAILY_DNA_EXTRAS = {
 function dnaCapsForStrategy(strategyId, channel) {
   switch (strategyId) {
     case MANAGED_STRATEGY_IDS.SR_TRAP_CONFIRM:
-      return { maxTradesPerDay: 5, targetRMultiple: 3.5 };
+      return { maxTradesPerDay: 3, targetRMultiple: 3.5 };
     case MANAGED_STRATEGY_IDS.ALIGN_COMBO_GENIE:
       return channel === "bank" ? { maxTradesPerDay: 0, targetRMultiple: 1.5 } : { maxTradesPerDay: 0, targetRMultiple: 3 };
     case MANAGED_STRATEGY_IDS.SMART_PULLBACK_PRO:
@@ -4966,7 +4966,7 @@ function createTrapStrategy() {
     id: MANAGED_STRATEGY_IDS.SR_TRAP_CONFIRM,
     name: "Trap",
     version: "1.2.0",
-    description: "Server Live Trap \xB7 pierce20 \xB7 Bank40 \xB7 peak\u20B9100 \xB7 max5 \xB7 3.5R \xB7 Paper\u2261Live",
+    description: "Server Live Trap \xB7 pierce20 \xB7 Nifty-only \xB7 peak\u20B9100 \xB7 max3 \xB7 3.5R \xB7 Paper\u2261Live",
     supports: ["nifty", "bank"],
     defaultSettings: TRAP_DEFAULTS,
     initialize(partial) {

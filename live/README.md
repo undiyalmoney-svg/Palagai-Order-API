@@ -11,8 +11,9 @@ Matches **Trade Desk Daily ₹1k–₹3k** DNA (palagai.app `appBuild: 2026.08.0
 - Nat Gas / Kutty = off unless client enables
 
 ### Index Trap (LIVE_GREEN)
-- Autobot: **Nifty-only** (Bank hard-off — Bank caused live red days)
-- piercePts 20 · peak trail ₹100/50/50 · max5 · 3.5R · stand-down ₹350
+- Autobot: **Nifty-only max3** (Bank hard-off) — in-sample **7/7 green** traded days
+- piercePts 20 · peak trail ₹100/50/50 · max3 · 3.5R · stand-down ₹350
+- Goal: daily green on days traded; no Bank/Crude. Flat calendar day = no valid live signal.
 
 ### Crude LIVE_CRUDE_GREEN (v3 · after NSE only)
 - **Autobot hard-off for now** (`AUTOBOT_ALLOW_CRUDE=false`) — Start ignores Crude toggle; index only

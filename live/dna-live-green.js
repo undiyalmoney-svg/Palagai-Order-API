@@ -39,7 +39,8 @@ const LIVE_GREEN_DNA = {
     profitLockArmRs: 100,
     profitLockLockRs: 50,
     profitLockGivebackRs: 50,
-    maxTradesPerDay: 5,
+    /** Zero-red hunt: Nifty-only max3 was 7/7 green (13 Jul–11 Aug live-path). */
+    maxTradesPerDay: 3,
     targetRMultiple: 3.5,
     confirmNextBar: true,
     slConfirmCutoffEnabled: false,
@@ -66,15 +67,17 @@ const LIVE_GREEN_DNA = {
   },
 
   research: {
-    window: '2026-07-21 → 2026-08-10',
+    window: '2026-07-13 → 2026-08-11',
     paperGreenDays: '15/15',
     paperNetRs: 27594,
-    paperTodayRs: 1954,
+    niftyOnlyLivePathGreenDays: '7/7 (100%)',
+    niftyOnlyLivePathNetRs: 8136,
+    niftyOnlyMaxTrades: 3,
+    bankLivePathRedDays: '2 (13 Jul, 24 Jul) + 11 Aug live broker red',
     frictionHardGreenDays: '15/15',
     frictionHardNetRs: 18220,
-    liveTodayActualGrossRs: -1297,
     note:
-      'Altering pierce/peak/max2 hurt friction green%. Keep signals; enforce one-leg + stand-down + fill ledger.',
+      'Autobot green path = Nifty-only · max3. Bank hard-off. Zero red on traded live-path days in-sample; calendar flat days = no live option mark / no signal. Not a guarantee.',
   },
 };
 

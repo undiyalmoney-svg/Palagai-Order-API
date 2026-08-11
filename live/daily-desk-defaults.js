@@ -2,12 +2,12 @@
  * Daily desk DNA — must match Trade Desk Local Live (palagai.app) + Autobot.
  * Point thresholds use the 1-lot ₹ band; money at stop ≈ band × lots (do not multiply points by lots).
  *
- * Trap: pierce20 · peak₹100 · max5 · 3.5R · lock ₹3k · strict stop on.
- * Autobot: Nifty-only (Bank+Crude hard-off) — Bank caused live red days.
+ * Trap: pierce20 · peak₹100 · max3 · 3.5R · lock ₹3k · strict stop on.
+ * Autobot: Nifty-only max3 (Bank+Crude hard-off) — zero-red traded days in-sample.
  */
 
-const APP_VERSION = '1.3.113';
-const APP_BUILD = '2026.08.11-nifty-only-green';
+const APP_VERSION = '1.3.114';
+const APP_BUILD = '2026.08.11-zero-red-nifty';
 const { LIVE_GREEN_DNA } = require('./dna-live-green');
 const { LIVE_CRUDE_GREEN_DNA } = require('./dna-live-crude-green');
 
@@ -69,7 +69,7 @@ const DAILY_3K_PRESET = {
   /** Crude only after NSE close — never during Nifty/Bank session. */
   crudeAfterIndexClose: true,
   researchNote:
-    'LIVE_GREEN Nifty-only (Bank/Crude hard-off) · max5 · lock ₹3k · stand-down ₹350 · one-leg',
+    'LIVE_GREEN Nifty-only max3 (Bank/Crude hard-off) · zero-red traded days in-sample · lock ₹3k',
   dnaId: LIVE_GREEN_DNA.id,
 };
 
