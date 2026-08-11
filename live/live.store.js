@@ -122,6 +122,18 @@ function statusPayload(session) {
     stale: ageSec == null ? session.status === 'running' : ageSec > STALE_SEC,
     config: session.config,
     defaults: DAILY_3K_PRESET,
+    /** Explicit book flags for Autobot UI (even if client UI has no Crude toggle yet). */
+    books: {
+      nifty: !!cfg.enableNifty,
+      bank: !!cfg.enableBank,
+      crude: !!cfg.enableCrude,
+      bankAllowed: AUTOBOT_ALLOW_BANK,
+      crudeAllowed: AUTOBOT_ALLOW_CRUDE,
+      crudeStrategy: cfg.crudeStrategy || 'live-crude-green',
+      crudeAfterIndexClose: cfg.crudeAfterIndexClose !== false,
+      bankOnlyAfterNifty: cfg.bankOnlyAfterNifty !== false,
+      label: 'Nifty → Bank (after Nifty) → Crude after NSE',
+    },
     risk: {
       dayProfitLockRsBase: DAY_PROFIT_LOCK_RS,
       strictDayStopRsBase: STRICT_DAY_STOP_RS,
@@ -283,7 +295,17 @@ async function start(userId, config) {
       'CRUDE_OFF',
       'Autobot Crude hard-off — Nifty-only (enable later via AUTOBOT_ALLOW_CRUDE)',
     );
+  } else if (session.config.enableCrude) {
+    pushEvent(
+      session,
+      'CRUDE_ON',
+      'Crude LIVE_CRUDE_GREEN ON — entries only after NSE close (16:00–21:00, gate 15:30). UI may not show a Crude toggle yet; server still runs it.',
+    );
   }
+  session.message =
+    `All3 desk · N${session.config.enableNifty ? 1 : 0}/B${session.config.enableBank ? 1 : 0}/C${session.config.enableCrude ? 1 : 0}` +
+    ` · Crude after NSE · Bank after Nifty` +
+    (riskBits.length ? ` · ${riskBits.join(' · ')}` : '');
   pushEvent(
     session,
     'START',

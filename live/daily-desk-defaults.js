@@ -9,8 +9,8 @@
  * capital across books). Explicit niftyLots/bankLots/crudeLots still win.
  */
 
-const APP_VERSION = '1.3.117';
-const APP_BUILD = '2026.08.11-all3-daily';
+const APP_VERSION = '1.3.118';
+const APP_BUILD = '2026.08.11-all3-ui-books';
 const { LIVE_GREEN_DNA } = require('./dna-live-green');
 const { LIVE_CRUDE_GREEN_DNA } = require('./dna-live-crude-green');
 

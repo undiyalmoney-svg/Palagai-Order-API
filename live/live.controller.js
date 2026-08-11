@@ -67,6 +67,20 @@ async function defaults(_req, res) {
     dayProfitLockRsBase: DAY_PROFIT_LOCK_RS,
     strictDayStopRsBase: STRICT_DAY_STOP_RS,
     checkboxHint: `₹${DAY_PROFIT_LOCK_RS.toLocaleString('en-IN')} × lots (1→₹3k · 3→₹9k)`,
+    /** Autobot UI should render these books (Crude is server-forced ON). */
+    books: {
+      nifty: true,
+      bank: AUTOBOT_ALLOW_BANK,
+      crude: AUTOBOT_ALLOW_CRUDE,
+      bankAllowed: AUTOBOT_ALLOW_BANK,
+      crudeAllowed: AUTOBOT_ALLOW_CRUDE,
+      crudeStrategy: 'live-crude-green',
+      crudeWindow: '16:00–21:00 IST (gate 15:30)',
+      bankOnlyAfterNifty: true,
+      label: 'Nifty → Bank (after Nifty) → Crude after NSE',
+    },
+    uiHint:
+      'Show Crude book in Autobot: enableCrude + crudeLots from /live/defaults. Server forces Crude ON even if UI omits the toggle.',
   });
 }
 
