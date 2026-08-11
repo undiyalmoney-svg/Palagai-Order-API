@@ -101,9 +101,13 @@ function trapInitOverrides(config, instrumentId) {
   if (config.optionStandDownRs != null) {
     extras.optionStandDownRs = Number(config.optionStandDownRs);
   }
+  const bank = /bank/i.test(String(instrumentId || ''));
+  const maxTrades = bank
+    ? LIVE_GREEN_DNA.trap.bankMaxTradesPerDay || LIVE_GREEN_DNA.trap.maxTradesPerDay
+    : LIVE_GREEN_DNA.trap.maxTradesPerDay;
   return {
     ...risk,
-    maxTradesPerDay: LIVE_GREEN_DNA.trap.maxTradesPerDay,
+    maxTradesPerDay: maxTrades,
     targetRMultiple: LIVE_GREEN_DNA.trap.targetRMultiple,
     extras,
   };
@@ -325,6 +329,8 @@ class LiveWorker {
 
       if (config.enableBank && indexSession) {
         const genie = config.bankStrategy === 'genie';
+        const bankAfterNifty = config.bankOnlyAfterNifty !== false;
+        const niftyReady = !bankAfterNifty || this.niftyTakenToday(today);
         const replay = await this.replayIndexLive({
           authorization,
           instrument: BANK_NIFTY_INSTRUMENT,
@@ -344,16 +350,25 @@ class LiveWorker {
           },
         });
         ingestReplayTrades(this.liveTrades, replay.trades, { rejectEstimated: true });
+        // Zero-red rule: new Bank entries only after Nifty has traded today.
+        // Still manage/exit an already-open Bank leg.
+        const bankOpen = this.liveOpenForSync(BANK_NIFTY_INSTRUMENT.id, replay.open);
+        const bankPos = this.broker.positions?.get(BANK_NIFTY_INSTRUMENT.id);
+        const bankAlreadyLive =
+          bankPos && (bankPos.status === 'open' || bankPos.status === 'exiting');
+        const bankSyncOpen =
+          bankAlreadyLive || niftyReady ? bankOpen : null;
         await this.broker.syncInstrument({
           authorization,
           instrumentId: BANK_NIFTY_INSTRUMENT.id,
           instrumentName: `Bank ${genie ? 'Genie' : 'Trap'}`,
-          open: this.liveOpenForSync(BANK_NIFTY_INSTRUMENT.id, replay.open),
+          open: bankSyncOpen,
           lots: config.bankLots || 1,
         });
         const bankSig =
           `Bank ${genie ? 'Genie' : 'Trap'} · ${replay.lastSignal}` +
-          (replay.open ? ` · OPEN ${replay.open.direction}` : '');
+          (bankSyncOpen ? ` · OPEN ${bankSyncOpen.direction}` : '') +
+          (bankAfterNifty && !niftyReady ? ' · wait Nifty first' : '');
         if (bankSig !== this.lastSignals.bank) {
           this.lastSignals.bank = bankSig;
           this.pushEvent('SIGNAL', bankSig);
@@ -502,6 +517,18 @@ class LiveWorker {
       neededOptionTokens: new Set(),
       strategy: makeStrategy(),
     });
+  }
+
+  /** True once Nifty has an open/exiting broker leg or a closed trade today. */
+  niftyTakenToday(today) {
+    const niftyId = NIFTY_50_INSTRUMENT.id;
+    const pos = this.broker?.positions?.get(niftyId);
+    if (pos && (pos.status === 'open' || pos.status === 'exiting')) return true;
+    for (const t of this.liveTrades || []) {
+      if (t.instrumentId !== niftyId) continue;
+      if (String(t.entryTime || '').slice(0, 10) === today) return true;
+    }
+    return false;
   }
 
   /**

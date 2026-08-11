@@ -120,9 +120,13 @@ function trapInitOverrides(cfg, instrumentId) {
   if (cfg.optionStandDownRs != null) {
     extras.optionStandDownRs = Number(cfg.optionStandDownRs);
   }
+  const bank = /bank/i.test(String(instrumentId || ''));
+  const maxTrades = bank
+    ? LIVE_GREEN_DNA.trap.bankMaxTradesPerDay || LIVE_GREEN_DNA.trap.maxTradesPerDay
+    : LIVE_GREEN_DNA.trap.maxTradesPerDay;
   return {
     ...risk,
-    maxTradesPerDay: LIVE_GREEN_DNA.trap.maxTradesPerDay,
+    maxTradesPerDay: maxTrades,
     targetRMultiple: LIVE_GREEN_DNA.trap.targetRMultiple,
     extras,
   };
@@ -320,6 +324,7 @@ async function runBacktest({ authorization, fromDate, toDate, config }, deps = {
         dayProfitLockRs: cfg.dayProfitLock ? DAY_PROFIT_LOCK_RS : 0,
         dayStopRs: cfg.strictDayStop ? STRICT_DAY_STOP_RS : 0,
         rejectEstimatedPremium: true,
+        bankOnlyAfterNifty: cfg.bankOnlyAfterNifty !== false,
       })
     : rawTrades;
 

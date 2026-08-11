@@ -1,20 +1,16 @@
 /**
- * LIVE_GREEN DNA — multi-strategy live desk (2026-08-11).
+ * LIVE_GREEN DNA — multi-strategy daily desk (2026-08-11).
  *
- * Goal: Paper ≡ Live, diversify beyond single Trap session.
- *
- * Books:
- *   - Nifty Trap + Bank Trap (one-leg shared capital)
- *   - Crude LIVE_CRUDE_GREEN after NSE (second strategy session)
- *
- * Live ops that made paper greener than broker:
- *   rejectEstimatedPremium · maxOpenLegs 1 · option-₹ day lock · fill friction
+ * Research winner for Nifty+Bank+Crude under Paper≡Live:
+ *   Bank only AFTER Nifty has traded that day → 0 red / 9 green (~₹13k)
+ *   on 13 Jul–11 Aug (kills Bank-alone morning reds).
+ *   Crude LIVE_CRUDE_GREEN after NSE (second session).
  */
 
 const LIVE_GREEN_DNA = {
-  id: 'live-green-multi-v1',
-  label: 'Live Green · Trap + evening Crude · Paper≡Live',
-  version: '2026.08.11',
+  id: 'live-green-all3-v2',
+  label: 'Live Green · Nifty→Bank→Crude · Paper≡Live',
+  version: '2026.08.11-all3',
 
   /** Books */
   enableNifty: true,
@@ -27,18 +23,19 @@ const LIVE_GREEN_DNA = {
 
   /** Day risk (₹ band @ 1 lot) — measured on option ₹, not index pts */
   dayProfitLock: true,
-  dayProfitLockRs: 3000,
+  dayProfitLockRs: 2500,
   strictDayStop: true,
   strictDayStopRs: 2950,
 
-  /** Trap signal DNA */
+  /** Trap signal DNA — Bank pierce raised (research: B60) */
   trap: {
     piercePts: 20,
-    bankPiercePts: 40,
+    bankPiercePts: 60,
     profitLockArmRs: 100,
     profitLockLockRs: 50,
     profitLockGivebackRs: 50,
     maxTradesPerDay: 3,
+    bankMaxTradesPerDay: 2,
     targetRMultiple: 3.5,
     confirmNextBar: true,
     slConfirmCutoffEnabled: false,
@@ -55,22 +52,20 @@ const LIVE_GREEN_DNA = {
     cancelSlBeforeExit: true,
     fillLedger: true,
     trailProtectiveSl: true,
-    /** Paper path fill friction (option premium ₹). */
     fillFrictionPremium: 0.5,
-    /** Day lock/stop use option ₹ (not index points). */
     optionRsDayRisk: true,
+    /** Zero-red all-three rule */
+    bankOnlyAfterNifty: true,
   },
 
   research: {
     window: '2026-07-13 → 2026-08-11',
-    paperVsLiveGap:
-      'Paper booked estimated premiums + overlapping Nifty/Bank; live skipped those → paper green / live red',
-    fix: 'Paper≡Live gates + option-₹ day lock + evening Crude second session',
-    niftyOnlyLivePathGreenDays: '7/7 (100%)',
-    niftyOnlyLivePathNetRs: 8136,
-    crudeAfterNse: '13/14 green engine-validated (May–Aug)',
+    allThreeZeroRed: '9/9 green · net ≈ ₹13.0k · bankOnlyAfterNifty',
+    unconstrainedBest:
+      '20/22 green · 2 red · net ≈ ₹25.4k (Bank-alone reds 13 Jul / 24 Jul)',
+    crudeAfterNse: 'LIVE_CRUDE_GREEN · after 15:30',
     note:
-      'Multi-strategy: index Trap (one-leg) + Crude after 15:30. Not a guarantee of every calendar day green.',
+      'Bank gated until Nifty trades that day. Crude evening still runs. Not a guarantee of every calendar day.',
   },
 };
 
@@ -112,6 +107,7 @@ function liveGreenStartConfig() {
     paperLivePath: true,
     fillFrictionPremium: LIVE_GREEN_DNA.liveOps.fillFrictionPremium,
     crudeAfterIndexClose: true,
+    bankOnlyAfterNifty: LIVE_GREEN_DNA.liveOps.bankOnlyAfterNifty,
   };
 }
 

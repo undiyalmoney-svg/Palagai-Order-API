@@ -3947,7 +3947,7 @@ function replayPaperOnCrude(params) {
 // src/app/core/strategy-manager/config/strategy-dna-caps.ts
 var TRAP_1LOT_DAILY_DNA_EXTRAS = {
   piercePts: 20,
-  bankPiercePts: 40,
+  bankPiercePts: 60,
   /** 1-lot bands — Paper/Live multiply by lotsMultiplier. */
   profitLockArmRs: 100,
   profitLockLockRs: 50,

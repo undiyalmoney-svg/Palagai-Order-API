@@ -19,7 +19,7 @@ async function health(_req, res) {
   res.json({
     status: 'ok',
     service: 'palagai-live-control',
-    note: 'Server Live — multi-strategy Paper≡Live (Nifty+Bank Trap one-leg + Crude after NSE)',
+    note: 'Server Live — All3 daily: Nifty→Bank→Crude · Paper≡Live · capital→lots',
     version: APP_VERSION,
     appBuild: APP_BUILD,
     dnaId: LIVE_GREEN_DNA.id,
@@ -28,6 +28,7 @@ async function health(_req, res) {
     bankAllowed: AUTOBOT_ALLOW_BANK,
     crudeAllowed: AUTOBOT_ALLOW_CRUDE,
     paperLivePath: true,
+    bankOnlyAfterNifty: true,
     crudeDna: AUTOBOT_ALLOW_CRUDE
       ? `after NSE · OR${c.minOrWidth}–${c.maxOrWidth} · ${c.entryStart}–${c.entryEnd} · SL${c.stopPts}/TP${c.targetPts} · trail ₹${c.profitLockArmRs}→₹${c.profitLockLockRs} · max${c.maxTradesDay} · first-win · no index-session overlap`
       : 'OFF — Autobot will not trade Crude',
@@ -39,7 +40,7 @@ async function health(_req, res) {
       index: LIVE_GREEN_DNA.research,
       crude: LIVE_CRUDE_GREEN_DNA.research,
       greenPath:
-        'Multi-strategy: index Trap (Paper≡Live one-leg + option-₹ lock) + evening Crude. Not Trap-only.',
+        'All3 zero-red path: Nifty first, Bank only after Nifty, Crude after NSE. Paper≡Live.',
     },
     defaults: DAILY_3K_PRESET,
   });

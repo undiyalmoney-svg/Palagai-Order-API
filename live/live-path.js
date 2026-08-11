@@ -20,6 +20,8 @@ const DEFAULT_LIVE_PATH = {
   /** Desk option-₹ day lock / stop (0 = off; prefer over index-point lock). */
   dayProfitLockRs: 3000,
   dayStopRs: 2950,
+  /** Zero-red all-three: Bank only after Nifty traded that day. */
+  bankOnlyAfterNifty: true,
 };
 
 function tradeNetRs(t) {
@@ -57,6 +59,7 @@ function filterTradesLivePath(trades, opts = {}) {
   const lockRs = Math.max(0, Number(cfg.dayProfitLockRs) || 0);
   const stopRs = Math.max(0, Number(cfg.dayStopRs) || 0);
   const rejectEst = cfg.rejectEstimatedPremium !== false;
+  const bankAfterNifty = cfg.bankOnlyAfterNifty !== false;
 
   const sorted = [...(trades || [])].sort((a, b) =>
     String(a.entryTime).localeCompare(String(b.entryTime)),
@@ -69,6 +72,7 @@ function filterTradesLivePath(trades, opts = {}) {
   let day = null;
   let dayNet = 0;
   let dayStopped = false;
+  let niftyTaken = false;
 
   for (const t of sorted) {
     const d = String(t.entryTime || '').slice(0, 10);
@@ -77,11 +81,17 @@ function filterTradesLivePath(trades, opts = {}) {
       dayNet = 0;
       dayStopped = false;
       openUntil = null;
+      niftyTaken = false;
     }
     if (dayStopped) continue;
     if (rejectEst && isEstimatedOrSynthetic(t)) continue;
     // Missing real option money — cannot credit live-path P&L
     if (t.optionPnlRs == null && t.netOptionPnlRs == null) continue;
+
+    const id = String(t.instrumentId || '').toLowerCase();
+    const isBank = id.includes('bank');
+    const isNifty = id.includes('nifty') && !isBank;
+    if (bankAfterNifty && isBank && !niftyTaken) continue;
 
     const entry = String(t.entryTime || '');
     const exit = String(t.exitTime || t.entryTime || '');
@@ -91,6 +101,7 @@ function filterTradesLivePath(trades, opts = {}) {
     kept.push(t);
     openUntil = exit;
     dayNet += net;
+    if (isNifty) niftyTaken = true;
     if (lockRs > 0 && dayNet >= lockRs) dayStopped = true;
     if (stopRs > 0 && dayNet <= -stopRs) dayStopped = true;
   }

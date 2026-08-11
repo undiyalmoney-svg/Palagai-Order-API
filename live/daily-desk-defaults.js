@@ -1,28 +1,22 @@
 /**
- * Daily desk DNA — must match Trade Desk Local Live (palagai.app) + Autobot.
+ * Daily desk DNA — Autobot multi-strategy Paper≡Live.
  *
- * Multi-strategy live desk (not Trap-only):
- *   1) Nifty Trap  — index session
- *   2) Bank Trap   — same session, one-leg shared capital
- *   3) Crude LIVE_CRUDE_GREEN — after NSE close only (second session)
+ * 1) Nifty Trap (primary)
+ * 2) Bank Trap — only AFTER Nifty traded that day (zero-red all-three rule)
+ * 3) Crude LIVE_CRUDE_GREEN after NSE (second session)
  *
- * Paper ≡ Live: reject estimated premiums, one open leg, option-₹ day lock,
- * fill friction — so Paper stops painting greener fiction than the broker.
+ * Capital: UI `capitalRs` / `capital` → lots (one-leg desk reuses the same
+ * capital across books). Explicit niftyLots/bankLots/crudeLots still win.
  */
 
-const APP_VERSION = '1.3.116';
-const APP_BUILD = '2026.08.11-paper-live-multi';
+const APP_VERSION = '1.3.117';
+const APP_BUILD = '2026.08.11-all3-daily';
 const { LIVE_GREEN_DNA } = require('./dna-live-green');
 const { LIVE_CRUDE_GREEN_DNA } = require('./dna-live-crude-green');
 
-/**
- * Autobot book gates — multi-strategy: index Trap + evening Crude.
- */
 const AUTOBOT_ALLOW_CRUDE = true;
-/** Bank ON with one-leg + option-₹ lock (live-path). */
 const AUTOBOT_ALLOW_BANK = true;
 
-/** Allowed crudeStrategy ids for Autobot / backtest normalize. */
 const CRUDE_STRATEGY_IDS = new Set([
   'selective',
   'all-green',
@@ -39,18 +33,29 @@ function normalizeCrudeStrategy(raw) {
   return 'selective';
 }
 
-/** Base ₹ bands at 1 lot (combined index books). */
-const DAY_PROFIT_LOCK_RS = 3000;
-const STRICT_DAY_STOP_RS = 2950;
+/** Research desk lock band (option ₹). */
+const DAY_PROFIT_LOCK_RS = LIVE_GREEN_DNA.dayProfitLockRs || 2500;
+const STRICT_DAY_STOP_RS = LIVE_GREEN_DNA.strictDayStopRs || 2950;
 
-/** ₹ per index point (same as Trade Desk). */
 const NIFTY_RS_PER_POINT = 65;
 const BANK_RS_PER_POINT = 30;
 const CRUDE_RS_PER_POINT = 10;
 
+/**
+ * Map UI capital → lot counts.
+ * One-leg desk: only one book open at a time, so the same capital rotates
+ * Nifty → Bank → evening Crude. ₹12k+ ≈ 1 lot each; ₹75k+ ≈ 2 lots.
+ */
+function lotsFromCapitalRs(capitalRs) {
+  const c = Math.max(0, Number(capitalRs) || 0);
+  if (!(c > 0)) return null;
+  if (c >= 75000) return { niftyLots: 2, bankLots: 2, crudeLots: 2 };
+  return { niftyLots: 1, bankLots: 1, crudeLots: 1 };
+}
+
 const DAILY_3K_PRESET = {
-  id: 'daily-3k',
-  label: 'Multi-strat · Paper≡Live',
+  id: 'daily-all3',
+  label: 'All3 · Nifty→Bank→Crude',
   niftyLots: 1,
   bankLots: 1,
   crudeLots: 1,
@@ -65,13 +70,12 @@ const DAILY_3K_PRESET = {
   crudeStrategy: 'live-crude-green',
   dayProfitLock: true,
   strictDayStop: true,
-  /** Crude only after NSE close — never during Nifty/Bank session. */
   crudeAfterIndexClose: true,
-  /** Paper backtest always uses live-path gates. */
   paperLivePath: true,
+  bankOnlyAfterNifty: true,
   researchNote:
-    'Nifty+Bank Trap one-leg · Crude after NSE · option-₹ lock · Paper≡Live',
-  dnaId: 'live-green+crude-multi-v1',
+    'Nifty first · Bank after Nifty · Crude after NSE · Paper≡Live · 0-red research path',
+  dnaId: LIVE_GREEN_DNA.id,
 };
 
 function rsPerPointForInstrument(instrumentId) {
@@ -98,11 +102,6 @@ function strictStopMoneyRs(lots) {
   return STRICT_DAY_STOP_RS * Math.max(1, Math.floor(Number(lots)) || 1);
 }
 
-/**
- * Day risk overrides for Trap.
- * Default = option-₹ lock/stop (live/paper parity). Pass useIndexPts:true for legacy.
- * Share 50/50 when both Nifty + Bank are on.
- */
 function indexDayRiskOverrides({
   instrumentId,
   enableNifty,
@@ -146,6 +145,9 @@ function riskStatusLabels(config) {
   if (config?.dayProfitLock) {
     parts.push(`profit lock +₹${profitLockMoneyRs(lots).toLocaleString('en-IN')} (option ₹)`);
   }
+  if (config?.bankOnlyAfterNifty !== false) {
+    parts.push('Bank after Nifty');
+  }
   if (config?.paperLivePath !== false) {
     parts.push('Paper≡Live');
   }
@@ -154,16 +156,30 @@ function riskStatusLabels(config) {
 
 function normalizeStartConfig(config = {}) {
   const preset = DAILY_3K_PRESET;
+  const capitalRaw = config.capitalRs != null ? config.capitalRs : config.capital;
+  const fromCap = lotsFromCapitalRs(capitalRaw);
+
+  const niftyLots =
+    Math.max(1, Math.floor(Number(config.niftyLots)) || 0) ||
+    fromCap?.niftyLots ||
+    preset.niftyLots;
+  const bankLots =
+    Math.max(1, Math.floor(Number(config.bankLots)) || 0) ||
+    fromCap?.bankLots ||
+    preset.bankLots;
+  const crudeLots =
+    Math.max(1, Math.floor(Number(config.crudeLots)) || 0) ||
+    fromCap?.crudeLots ||
+    preset.crudeLots;
 
   return {
     enableNifty: true,
-    /** When allowed, keep Bank ON (ignore UI capital→lots off). */
     enableBank: AUTOBOT_ALLOW_BANK,
-    /** Autobot: evening Crude ON when allowed (second strategy session). */
     enableCrude: AUTOBOT_ALLOW_CRUDE,
-    niftyLots: Math.max(1, Math.floor(Number(config.niftyLots)) || preset.niftyLots),
-    bankLots: Math.max(1, Math.floor(Number(config.bankLots)) || preset.bankLots),
-    crudeLots: Math.max(1, Math.floor(Number(config.crudeLots)) || preset.crudeLots),
+    niftyLots,
+    bankLots,
+    crudeLots,
+    capitalRs: capitalRaw != null && Number(capitalRaw) > 0 ? Number(capitalRaw) : null,
     bankStrategy: config.bankStrategy === 'genie' ? 'genie' : 'trap',
     niftyStrategy: 'trap',
     crudeStrategy: normalizeCrudeStrategy(config.crudeStrategy ?? preset.crudeStrategy),
@@ -189,7 +205,11 @@ function normalizeStartConfig(config = {}) {
     fillFrictionPremium:
       config.fillFrictionPremium != null
         ? Math.max(0, Number(config.fillFrictionPremium) || 0)
-        : 0.5,
+        : LIVE_GREEN_DNA.liveOps.fillFrictionPremium ?? 0.5,
+    bankOnlyAfterNifty:
+      config.bankOnlyAfterNifty != null
+        ? !!config.bankOnlyAfterNifty
+        : LIVE_GREEN_DNA.liveOps.bankOnlyAfterNifty !== false,
   };
 }
 
@@ -208,6 +228,7 @@ module.exports = {
   LIVE_CRUDE_GREEN_DNA,
   CRUDE_STRATEGY_IDS,
   normalizeCrudeStrategy,
+  lotsFromCapitalRs,
   rsPerPointForInstrument,
   deskRiskLots,
   profitLockMoneyRs,
