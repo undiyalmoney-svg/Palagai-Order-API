@@ -4,6 +4,7 @@ const {
   APP_BUILD,
   APP_VERSION,
   AUTOBOT_ALLOW_CRUDE,
+  AUTOBOT_ALLOW_BANK,
   DAILY_3K_PRESET,
   DAY_PROFIT_LOCK_RS,
   STRICT_DAY_STOP_RS,
@@ -18,25 +19,28 @@ async function health(_req, res) {
   res.json({
     status: 'ok',
     service: 'palagai-live-control',
-    note: AUTOBOT_ALLOW_CRUDE
-      ? 'Server Live — LIVE_GREEN index + LIVE_CRUDE_GREEN Crude desk'
-      : 'Server Live — LIVE_GREEN index only (Autobot Crude hard-off)',
+    note: 'Server Live — LIVE_GREEN Nifty-only (Bank+Crude hard-off)',
     version: APP_VERSION,
     appBuild: APP_BUILD,
     dnaId: LIVE_GREEN_DNA.id,
     crudeDnaId: LIVE_CRUDE_GREEN_DNA.id,
     crudeDefault: 'live-crude-green',
+    bankAllowed: AUTOBOT_ALLOW_BANK,
     crudeAllowed: AUTOBOT_ALLOW_CRUDE,
     crudeDna: AUTOBOT_ALLOW_CRUDE
       ? `after NSE · OR${c.minOrWidth}–${c.maxOrWidth} · ${c.entryStart}–${c.entryEnd} · SL${c.stopPts}/TP${c.targetPts} · trail ₹${c.profitLockArmRs}→₹${c.profitLockLockRs} · max${c.maxTradesDay} · first-win · no index-session overlap`
       : 'OFF — Autobot will not trade Crude (DNA parked for later)',
-    trapDna: `SR Trap · pierce ${t.piercePts}/B${t.bankPiercePts} · peak ₹${t.profitLockArmRs}/${t.profitLockLockRs}/${t.profitLockGivebackRs} · max${t.maxTradesPerDay} · ${t.targetRMultiple}R · stand-down ₹${ops.optionStandDownRs} · one-leg`,
+    trapDna: AUTOBOT_ALLOW_BANK
+      ? `SR Trap · pierce ${t.piercePts}/B${t.bankPiercePts} · peak ₹${t.profitLockArmRs}/${t.profitLockLockRs}/${t.profitLockGivebackRs} · max${t.maxTradesPerDay} · ${t.targetRMultiple}R · stand-down ₹${ops.optionStandDownRs} · one-leg`
+      : `SR Trap Nifty-only · pierce ${t.piercePts} · peak ₹${t.profitLockArmRs}/${t.profitLockLockRs}/${t.profitLockGivebackRs} · max${t.maxTradesPerDay} · ${t.targetRMultiple}R · stand-down ₹${ops.optionStandDownRs} · Bank OFF`,
     dayProfitLockRsBase: DAY_PROFIT_LOCK_RS,
     strictDayStopRsBase: STRICT_DAY_STOP_RS,
     liveOps: { ...ops, ...LIVE_CRUDE_GREEN_DNA.liveOps },
     research: {
       index: LIVE_GREEN_DNA.research,
       crude: LIVE_CRUDE_GREEN_DNA.research,
+      greenPath:
+        'Jul13–Aug11 live-path: Bank caused both red days + 11 Aug live red. Nifty-only → 7/7 green in-sample.',
     },
     defaults: DAILY_3K_PRESET,
   });

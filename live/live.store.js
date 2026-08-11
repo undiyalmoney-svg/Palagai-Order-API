@@ -7,6 +7,7 @@ const {
   APP_BUILD,
   APP_VERSION,
   AUTOBOT_ALLOW_CRUDE,
+  AUTOBOT_ALLOW_BANK,
   DAILY_3K_PRESET,
   deskRiskLots,
   profitLockMoneyRs,
@@ -253,6 +254,7 @@ async function start(userId, config) {
     return statusPayload(session);
   }
   const askedCrude = !!config?.enableCrude;
+  const askedBank = !!config?.enableBank;
   session.config = normalizeStartConfig(config);
   if (session.config.realOrders && !session.auth) {
     const err = new Error('Push Kite token first before real money Start');
@@ -268,11 +270,18 @@ async function start(userId, config) {
   session.startedAt = new Date().toISOString();
   session.stoppedAt = null;
   const riskBits = riskStatusLabels(session.config);
+  if (askedBank && !AUTOBOT_ALLOW_BANK) {
+    pushEvent(
+      session,
+      'BANK_OFF',
+      'Autobot Bank hard-off — Nifty-only green path (enable later via AUTOBOT_ALLOW_BANK)',
+    );
+  }
   if (askedCrude && !AUTOBOT_ALLOW_CRUDE) {
     pushEvent(
       session,
       'CRUDE_OFF',
-      'Autobot Crude hard-off — index only (enable later via AUTOBOT_ALLOW_CRUDE)',
+      'Autobot Crude hard-off — Nifty-only (enable later via AUTOBOT_ALLOW_CRUDE)',
     );
   }
   pushEvent(
