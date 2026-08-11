@@ -63,7 +63,7 @@ const LIVE_GREEN_DNA = {
     allThreeZeroRed: '9/9 green · net ≈ ₹13.0k · bankOnlyAfterNifty',
     unconstrainedBest:
       '20/22 green · 2 red · net ≈ ₹25.4k (Bank-alone reds 13 Jul / 24 Jul)',
-    crudeAfterNse: 'LIVE_CRUDE_GREEN · after 15:30',
+    crudeAfterNse: 'LIVE_CRUDE_GREEN · hard gate 15:15 · entries 16:00–21:00',
     note:
       'Bank gated until Nifty trades that day. Crude evening still runs. Not a guarantee of every calendar day.',
   },

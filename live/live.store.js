@@ -306,7 +306,7 @@ async function start(userId, config) {
     pushEvent(
       session,
       'CRUDE_ON',
-      'Crude LIVE_CRUDE_GREEN ON — entries only after NSE close (16:00–21:00, gate 15:30). UI may not show a Crude toggle yet; server still runs it.',
+      'Crude LIVE_CRUDE_GREEN ON — no entries before 15:15 IST; signal window 16:00–21:00. UI may not show a Crude toggle yet; server still runs it.',
     );
   }
   session.message =

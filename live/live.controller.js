@@ -76,7 +76,7 @@ async function defaults(_req, res) {
       crudeAllowed: AUTOBOT_ALLOW_CRUDE,
       deskLots: DAILY_3K_PRESET.niftyLots,
       crudeStrategy: 'live-crude-green',
-      crudeWindow: '16:00–21:00 IST (gate 15:30)',
+      crudeWindow: '16:00–21:00 IST (hard gate 15:15)',
       bankOnlyAfterNifty: true,
       label: 'Nifty → Bank (after Nifty) → Crude after NSE',
       capitalLots: {
