@@ -1,21 +1,25 @@
 /**
  * Daily desk DNA — must match Trade Desk Local Live (palagai.app) + Autobot.
- * Point thresholds use the 1-lot ₹ band; money at stop ≈ band × lots (do not multiply points by lots).
  *
- * Trap: pierce20 · Bank40 · peak₹100 · max3 · 3.5R · lock ₹3k · strict stop on.
- * Autobot: Nifty+Bank ON (same LIVE_GREEN) · Crude hard-off · 1 lot each.
+ * Multi-strategy live desk (not Trap-only):
+ *   1) Nifty Trap  — index session
+ *   2) Bank Trap   — same session, one-leg shared capital
+ *   3) Crude LIVE_CRUDE_GREEN — after NSE close only (second session)
+ *
+ * Paper ≡ Live: reject estimated premiums, one open leg, option-₹ day lock,
+ * fill friction — so Paper stops painting greener fiction than the broker.
  */
 
-const APP_VERSION = '1.3.115';
-const APP_BUILD = '2026.08.11-nifty-bank-on';
+const APP_VERSION = '1.3.116';
+const APP_BUILD = '2026.08.11-paper-live-multi';
 const { LIVE_GREEN_DNA } = require('./dna-live-green');
 const { LIVE_CRUDE_GREEN_DNA } = require('./dna-live-crude-green');
 
 /**
- * Autobot book gates — flip when ready.
+ * Autobot book gates — multi-strategy: index Trap + evening Crude.
  */
-const AUTOBOT_ALLOW_CRUDE = false;
-/** User opted back on — same Trap DNA, accept higher profit + red-day risk. */
+const AUTOBOT_ALLOW_CRUDE = true;
+/** Bank ON with one-leg + option-₹ lock (live-path). */
 const AUTOBOT_ALLOW_BANK = true;
 
 /** Allowed crudeStrategy ids for Autobot / backtest normalize. */
@@ -46,29 +50,28 @@ const CRUDE_RS_PER_POINT = 10;
 
 const DAILY_3K_PRESET = {
   id: 'daily-3k',
-  label: 'Option ₹ · ₹40k',
+  label: 'Multi-strat · Paper≡Live',
   niftyLots: 1,
   bankLots: 1,
   crudeLots: 1,
   enableNifty: true,
   enableBank: true,
-  /** Hard-off for Autobot — flip AUTOBOT_ALLOW_CRUDE later. */
-  enableCrude: false,
+  enableCrude: true,
   enableNatGas: false,
   enableKutty: false,
   kuttyAlone: false,
   niftyStrategy: 'trap',
   bankStrategy: 'trap',
-  /** Prefer fee-capped LIVE_CRUDE_GREEN when Crude is enabled. */
   crudeStrategy: 'live-crude-green',
   dayProfitLock: true,
-  /** On for hands-off — capital must not drain (Trade Desk parity). */
   strictDayStop: true,
   /** Crude only after NSE close — never during Nifty/Bank session. */
   crudeAfterIndexClose: true,
+  /** Paper backtest always uses live-path gates. */
+  paperLivePath: true,
   researchNote:
-    'LIVE_GREEN Nifty+Bank max3 · Crude OFF · 1 lot · lock ₹3k · stand-down ₹350 · one-leg',
-  dnaId: LIVE_GREEN_DNA.id,
+    'Nifty+Bank Trap one-leg · Crude after NSE · option-₹ lock · Paper≡Live',
+  dnaId: 'live-green+crude-multi-v1',
 };
 
 function rsPerPointForInstrument(instrumentId) {
@@ -96,8 +99,9 @@ function strictStopMoneyRs(lots) {
 }
 
 /**
- * Index point overrides for Trap day risk — mirrors Trade Desk.
- * Share 50/50 when both Nifty + Bank are on. Points are NOT lot-multiplied.
+ * Day risk overrides for Trap.
+ * Default = option-₹ lock/stop (live/paper parity). Pass useIndexPts:true for legacy.
+ * Share 50/50 when both Nifty + Bank are on.
  */
 function indexDayRiskOverrides({
   instrumentId,
@@ -105,9 +109,23 @@ function indexDayRiskOverrides({
   enableBank,
   dayProfitLock,
   strictDayStop,
+  useIndexPts = false,
 }) {
   if (!dayProfitLock && !strictDayStop) return null;
   const share = enableNifty && enableBank ? 0.5 : 1;
+  if (!useIndexPts) {
+    const out = {
+      dayProfitLockPts: 0,
+      dayStopPts: 0,
+    };
+    if (strictDayStop) {
+      out.dayStopRs = Math.max(1, Math.round(STRICT_DAY_STOP_RS * share));
+    }
+    if (dayProfitLock) {
+      out.dayProfitLockRs = Math.max(1, Math.round(DAY_PROFIT_LOCK_RS * share));
+    }
+    return out;
+  }
   const rs = rsPerPointForInstrument(instrumentId);
   const out = {};
   if (strictDayStop) {
@@ -126,39 +144,35 @@ function riskStatusLabels(config) {
     parts.push(`strict −₹${strictStopMoneyRs(lots).toLocaleString('en-IN')}`);
   }
   if (config?.dayProfitLock) {
-    parts.push(`profit lock +₹${profitLockMoneyRs(lots).toLocaleString('en-IN')}`);
+    parts.push(`profit lock +₹${profitLockMoneyRs(lots).toLocaleString('en-IN')} (option ₹)`);
+  }
+  if (config?.paperLivePath !== false) {
+    parts.push('Paper≡Live');
   }
   return parts;
 }
 
 function normalizeStartConfig(config = {}) {
   const preset = DAILY_3K_PRESET;
-  const hasBookFlag =
-    config.enableNifty != null ||
-    config.enableBank != null ||
-    config.enableCrude != null;
 
-  const wantCrude = hasBookFlag ? !!config.enableCrude : preset.enableCrude;
   return {
     enableNifty: true,
-    /** When allowed, keep Bank ON for the Nifty+Bank profit test (ignore UI capital→lots off). */
+    /** When allowed, keep Bank ON (ignore UI capital→lots off). */
     enableBank: AUTOBOT_ALLOW_BANK,
-    /** Autobot: ignore client Crude toggle while AUTOBOT_ALLOW_CRUDE is false. */
-    enableCrude: AUTOBOT_ALLOW_CRUDE ? wantCrude : false,
+    /** Autobot: evening Crude ON when allowed (second strategy session). */
+    enableCrude: AUTOBOT_ALLOW_CRUDE,
     niftyLots: Math.max(1, Math.floor(Number(config.niftyLots)) || preset.niftyLots),
     bankLots: Math.max(1, Math.floor(Number(config.bankLots)) || preset.bankLots),
     crudeLots: Math.max(1, Math.floor(Number(config.crudeLots)) || preset.crudeLots),
-    // Daily path: Trap only (Genie only if client explicitly asks).
     bankStrategy: config.bankStrategy === 'genie' ? 'genie' : 'trap',
     niftyStrategy: 'trap',
     crudeStrategy: normalizeCrudeStrategy(config.crudeStrategy ?? preset.crudeStrategy),
-    // Desk risk: profit lock ON unless client opts out; strict ON unless client opts out.
     dayProfitLock: config.dayProfitLock !== false,
     strictDayStop: config.strictDayStop !== false,
     enableKutty: !!config.enableKutty,
     kuttyAlone: !!config.kuttyAlone,
     realOrders: !!config.realOrders,
-    dnaId: config.dnaId || LIVE_GREEN_DNA.id,
+    dnaId: config.dnaId || preset.dnaId,
     maxOpenLegs:
       config.maxOpenLegs != null
         ? Math.max(0, Math.floor(Number(config.maxOpenLegs)) || 0)
@@ -171,6 +185,11 @@ function normalizeStartConfig(config = {}) {
       config.crudeAfterIndexClose != null
         ? !!config.crudeAfterIndexClose
         : preset.crudeAfterIndexClose !== false,
+    paperLivePath: config.paperLivePath !== false,
+    fillFrictionPremium:
+      config.fillFrictionPremium != null
+        ? Math.max(0, Number(config.fillFrictionPremium) || 0)
+        : 0.5,
   };
 }
 

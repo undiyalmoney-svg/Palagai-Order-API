@@ -1,8 +1,8 @@
 /**
- * Server Live strategy worker — Trade Desk parity:
- * Trap pierce20/B40 · Nifty+Bank max3 · peak₹100 · 3.5R · lock ₹3k · strict stop.
- * Crude LIVE_CRUDE_GREEN when enabled (OFF by default) — after NSE only (16:00+).
- * With index on, Crude entries hard-gate until 15:30 (no overlap with Nifty/Bank).
+ * Server Live strategy worker — multi-strategy Paper≡Live desk:
+ * 1) Nifty Trap + Bank Trap (one-leg, option-₹ day lock)
+ * 2) Crude LIVE_CRUDE_GREEN after NSE close (second session)
+ * Paper path rejects estimated premiums + fill friction (same as broker skips).
  * Places orders via live-broker → kite.service (does NOT touch kiteOrders.controller).
  */
 const {
@@ -29,6 +29,7 @@ const {
 } = require('./live-trades');
 const { LIVE_GREEN_DNA, liveGreenTrapExtras } = require('./dna-live-green');
 const { LIVE_CRUDE_GREEN_DNA } = require('./dna-live-crude-green');
+const { livePathReplayOpts, isEstimatedOrSynthetic } = require('./live-path');
 
 const CRUDE_EXIT_BY = '23:10';
 const LOOKBACK_DAYS = 12;
@@ -151,11 +152,12 @@ class LiveWorker {
     );
   }
 
-  /** Snapshot for GET /live/status — broker fills when real, else paper marks. */
+  /** Snapshot for GET /live/status — broker fills when real, else live-path paper. */
   moneySnapshot() {
+    const real = !!this.getConfig()?.realOrders;
     return {
       trades: publicTrades(this.liveTrades),
-      totals: moneyTotals(this.liveTrades),
+      totals: moneyTotals(this.liveTrades, { brokerOnly: real }),
     };
   }
 
@@ -280,6 +282,12 @@ class LiveWorker {
       const crudeSession = now >= '09:00' && now <= '23:15';
       const enableKutty = !!config.enableKutty;
 
+      const livePath = livePathReplayOpts({
+        rejectEstimatedPremium: true,
+        fillFrictionPremium:
+          config.fillFrictionPremium != null ? config.fillFrictionPremium : 0.5,
+      });
+
       if (config.enableNifty && indexSession) {
         const replay = await this.replayIndexLive({
           authorization,
@@ -291,18 +299,19 @@ class LiveWorker {
           enableKutty,
           kuttyAlone: !!config.kuttyAlone,
           today,
+          livePath,
           makeStrategy: () => {
             const s = createTrapStrategy();
             s.initialize(trapInitOverrides(config, NIFTY_50_INSTRUMENT.id));
             return s;
           },
         });
-        ingestReplayTrades(this.liveTrades, replay.trades);
+        ingestReplayTrades(this.liveTrades, replay.trades, { rejectEstimated: true });
         await this.broker.syncInstrument({
           authorization,
           instrumentId: NIFTY_50_INSTRUMENT.id,
           instrumentName: 'Nifty Trap',
-          open: toLiveOpen(replay.open),
+          open: this.liveOpenForSync(NIFTY_50_INSTRUMENT.id, replay.open),
           lots: config.niftyLots || 1,
         });
         const niftySig =
@@ -326,6 +335,7 @@ class LiveWorker {
           enableKutty,
           kuttyAlone: !!config.kuttyAlone,
           today,
+          livePath,
           makeStrategy: () => {
             const s = genie ? createGenieStrategy() : createTrapStrategy();
             if (genie) s.initialize();
@@ -333,12 +343,12 @@ class LiveWorker {
             return s;
           },
         });
-        ingestReplayTrades(this.liveTrades, replay.trades);
+        ingestReplayTrades(this.liveTrades, replay.trades, { rejectEstimated: true });
         await this.broker.syncInstrument({
           authorization,
           instrumentId: BANK_NIFTY_INSTRUMENT.id,
           instrumentName: `Bank ${genie ? 'Genie' : 'Trap'}`,
-          open: toLiveOpen(replay.open),
+          open: this.liveOpenForSync(BANK_NIFTY_INSTRUMENT.id, replay.open),
           lots: config.bankLots || 1,
         });
         const bankSig =
@@ -392,12 +402,12 @@ class LiveWorker {
             enableEvening: crudeEntryOk && tradeParams.defaultEnableEvening,
             tradeParams,
           });
-          ingestReplayTrades(this.liveTrades, replay.trades);
+          ingestReplayTrades(this.liveTrades, replay.trades, { rejectEstimated: true });
           await this.broker.syncInstrument({
             authorization,
             instrumentId: CRUDE_OIL_MINI_INSTRUMENT.id,
             instrumentName: crudeLabel,
-            open: toLiveOpen(replay.open),
+            open: this.liveOpenForSync(CRUDE_OIL_MINI_INSTRUMENT.id, replay.open),
             lots: config.crudeLots || 1,
           });
           const crudeSig =
@@ -457,6 +467,7 @@ class LiveWorker {
     enableKutty,
     kuttyAlone,
     today,
+    livePath,
   }) {
     const base = {
       instrumentId: instrument.id,
@@ -470,6 +481,7 @@ class LiveWorker {
       lotsMultiplier: lots,
       enableKutty,
       kuttyAlone,
+      livePath: livePath || null,
     };
     const needed = new Set();
     replayPaperOnIndex({
@@ -490,6 +502,26 @@ class LiveWorker {
       neededOptionTokens: new Set(),
       strategy: makeStrategy(),
     });
+  }
+
+  /**
+   * Only sync an entry the broker would accept — no phantom paper legs when
+   * another book already holds the one-leg slot or premium is estimated.
+   */
+  liveOpenForSync(instrumentId, replayOpen) {
+    const open = toLiveOpen(replayOpen);
+    if (!open) return null;
+    if (isEstimatedOrSynthetic({ option: open.option, premiumEstimated: open.premiumEstimated })) {
+      return null;
+    }
+    const current = this.broker.positions?.get(instrumentId);
+    if (current && (current.status === 'open' || current.status === 'exiting')) {
+      return open; // manage / exit path
+    }
+    if (this.broker.maxOpenLegs > 0 && this.broker.openLegCount() >= this.broker.maxOpenLegs) {
+      return null;
+    }
+    return open;
   }
 
   resetWarm() {

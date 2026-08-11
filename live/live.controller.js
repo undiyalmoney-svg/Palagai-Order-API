@@ -19,9 +19,7 @@ async function health(_req, res) {
   res.json({
     status: 'ok',
     service: 'palagai-live-control',
-    note: AUTOBOT_ALLOW_BANK
-      ? 'Server Live — LIVE_GREEN Nifty+Bank (Crude hard-off)'
-      : 'Server Live — LIVE_GREEN Nifty-only (Bank+Crude hard-off)',
+    note: 'Server Live — multi-strategy Paper≡Live (Nifty+Bank Trap one-leg + Crude after NSE)',
     version: APP_VERSION,
     appBuild: APP_BUILD,
     dnaId: LIVE_GREEN_DNA.id,
@@ -29,10 +27,11 @@ async function health(_req, res) {
     crudeDefault: 'live-crude-green',
     bankAllowed: AUTOBOT_ALLOW_BANK,
     crudeAllowed: AUTOBOT_ALLOW_CRUDE,
+    paperLivePath: true,
     crudeDna: AUTOBOT_ALLOW_CRUDE
       ? `after NSE · OR${c.minOrWidth}–${c.maxOrWidth} · ${c.entryStart}–${c.entryEnd} · SL${c.stopPts}/TP${c.targetPts} · trail ₹${c.profitLockArmRs}→₹${c.profitLockLockRs} · max${c.maxTradesDay} · first-win · no index-session overlap`
-      : 'OFF — Autobot will not trade Crude (DNA parked for later)',
-    trapDna: `SR Trap · pierce ${t.piercePts}/B${t.bankPiercePts} · peak ₹${t.profitLockArmRs}/${t.profitLockLockRs}/${t.profitLockGivebackRs} · max${t.maxTradesPerDay} · ${t.targetRMultiple}R · stand-down ₹${ops.optionStandDownRs} · one-leg`,
+      : 'OFF — Autobot will not trade Crude',
+    trapDna: `SR Trap · pierce ${t.piercePts}/B${t.bankPiercePts} · peak ₹${t.profitLockArmRs}/${t.profitLockLockRs}/${t.profitLockGivebackRs} · max${t.maxTradesPerDay} · ${t.targetRMultiple}R · stand-down ₹${ops.optionStandDownRs} · one-leg · option-₹ lock`,
     dayProfitLockRsBase: DAY_PROFIT_LOCK_RS,
     strictDayStopRsBase: STRICT_DAY_STOP_RS,
     liveOps: { ...ops, ...LIVE_CRUDE_GREEN_DNA.liveOps },
@@ -40,7 +39,7 @@ async function health(_req, res) {
       index: LIVE_GREEN_DNA.research,
       crude: LIVE_CRUDE_GREEN_DNA.research,
       greenPath:
-        'Nifty+Bank ON for larger profit (accept red-day risk). Crude still hard-off.',
+        'Multi-strategy: index Trap (Paper≡Live one-leg + option-₹ lock) + evening Crude. Not Trap-only.',
     },
     defaults: DAILY_3K_PRESET,
   });

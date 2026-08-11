@@ -2,50 +2,45 @@
 
 Runs on the Order-API droplet. **Does not change** `/api/kite/*` handlers.
 
-Matches **Trade Desk Daily ₹1k–₹3k** DNA (palagai.app `appBuild: 2026.08.04-desk-one-profit`).
+## DNA — multi-strategy Paper≡Live (`appBuild: 2026.08.11-paper-live-multi`)
 
-## DNA
-- Nifty = **Trap** (SR Trap Confirm — next-bar confirm ON)
-- Bank = Trap by default (Genie only if client sends `bankStrategy: 'genie'`)
-- Crude = **LIVE_CRUDE_GREEN** when enabled (OFF by default — fee protection)
-- Nat Gas / Kutty = off unless client enables
+Not a single-strategy desk:
 
-### Index Trap (LIVE_GREEN)
-- Autobot: **Nifty+Bank max3** (Crude hard-off) · 1 lot each · same LIVE_GREEN Trap
+1. **Nifty Trap** — index session (09:45–14:45)
+2. **Bank Trap** — same session, **one open leg** shared with Nifty
+3. **Crude LIVE_CRUDE_GREEN** — after NSE close only (16:00–21:00, worker gate 15:30)
+
+### Paper ≡ Live (critical)
+
+Autobot Paper used to look greener than the broker because it:
+- booked **estimated/synthetic** option premiums (live skips those)
+- allowed **overlapping Nifty+Bank** legs (live `maxOpenLegs: 1`)
+- locked the day on **index points** while option ₹ was still red
+
+Paper backtest now applies the same gates:
+- `rejectEstimatedPremium`
+- desk **one-leg** chronological filter
+- **option-₹** day profit lock / strict stop
+- **fill friction** (entry +0.5 / exit −0.5 premium)
+
+### Index Trap
 - piercePts 20 · Bank 40 · peak trail ₹100/50/50 · max3 · 3.5R · stand-down ₹350
-- Larger profit path vs Nifty-only; Bank can add red-day risk
+- Day lock **+₹3,000** / stop **−₹2,950** on **option ₹** (50/50 share when both books on)
 
-### Crude LIVE_CRUDE_GREEN (v3 · after NSE only)
-- **Autobot hard-off for now** (`AUTOBOT_ALLOW_CRUDE=false`) — Start ignores Crude toggle; index only
-- When re-enabled: **no entries during Nifty/Bank session** — window **16:00–21:00**, worker gate **15:30**
-- Session-OR · width **40–60** · SL30 / TP80 · trail ₹350→₹180 · max **1**/day · first-win
-- Engine-validated May–Aug 2026: **13/14 green (92.9%)**, 0 entries before 15:30
-- Shares capital with index via `maxOpenLegs: 1`
-
-## Desk risk defaults
-- **Day profit lock ON** — base ₹3,000 at 1 lot (50/50 Nifty/Bank when both on)
-  - Points = ₹3000 × share / ₹-per-point (**not** × lots)
-  - Money ≈ ₹3,000 × lots (1→₹3k · 3→₹9k)
-- **Strict day stop OFF** unless client opts in — base −₹2,950 × lots
-- Empty start body → Daily 3k books: Nifty+Bank+Crude on, lots 1/1/1, Trap, Selective
+### Crude LIVE_CRUDE_GREEN
+- Session-OR · width 40–60 · SL30/TP80 · trail ₹350→₹180 · max 1/day · first-win
+- Engine-validated May–Aug 2026: **13/14 green** · 0 entries before 15:30
+- Shares capital via `maxOpenLegs: 1`
 
 ## Behaviour
 - `POST /live/start` → 60s ticks
-- `GET /live/defaults` → Daily preset + checkbox hint
-- `GET /live/health` → `appBuild: 2026.08.04-autobot-daily-3k`
-- Futures: prefer next CRUDEOILM on expiry day (options already roll)
-- Options long only via broker path (BUY→CE / SELL→PE); per-trade SL does not halt the day
-
-## Files
-- `daily-desk-defaults.js` — ₹ bands, lot-scaled labels, start normalize
-- `strategy-core.cjs` — Trap / Genie / Selective engines
-- `live.worker.js` — tick orchestrator + day-risk overrides on Trap init
-- `live-broker.js` — place / modify SL / exit
+- `POST /live/backtest` → Paper date-range (live-path filtered)
+- `GET /live/health` → build + DNA + liveOps
+- Real-money totals prefer **broker fills** only (no phantom paper P&L)
 
 ## Safety
 - Push token before real-money Start
-- Prefer paper first (`realOrders` unchecked)
+- Prefer paper first (`realOrders` unchecked) — Paper now matches live gates
 - Do **not** re-enable unlimited All-Green or Nat Gas as defaults
-- Do **not** disable Trap next-bar confirm
-- EXIT always cancels / confirms resting SL is gone before MARKET SELL — a locked SL qty makes Zerodha treat the SELL as a naked short (“Insufficient funds” ~full option margin)
-- Live money ledger on `GET /live/status` → `trades` + `totals`: paper marks kept as `paper*`, overwritten by broker `average_price` fills (`fillSource: "broker"`). Auto UI should show these for real-money P&L, not candle/trail estimates.
+- EXIT always cancels resting SL before MARKET SELL
+- No guarantee of every calendar day green — diversify sessions, cut fiction

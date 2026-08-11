@@ -967,6 +967,9 @@ function defaultStrategySettings(partial) {
     instrumentType: "index",
     dayStopPts: 60,
     dayProfitLockPts: 0,
+    /** Option-₹ day risk (preferred for live/paper parity; 0 = use index pts). */
+    dayStopRs: 0,
+    dayProfitLockRs: 0,
     targetRMultiple: 0,
     profitProtectEnabled: false,
     profitProtectArmR: 1,
@@ -1138,6 +1141,7 @@ function createRuleDayState() {
   return {
     tradingDate: null,
     dayNetPts: 0,
+    dayNetOptionRs: 0,
     tradesToday: 0,
     dayStopped: false,
     insideHigh: null,
@@ -1333,9 +1337,22 @@ function mergeSettings(base, partial) {
   }
   return defaultStrategySettings({ ...base, ...partial, extras: { ...base.extras, ...partial.extras } });
 }
-function recordRuleTradeClosed(state, points, dayStopPts, dayProfitLockPts = 0) {
+function recordRuleTradeClosed(state, points, dayStopPts, dayProfitLockPts = 0, money = null) {
   state.dayNetPts += points;
   state.tradesToday += 1;
+  // Live/paper parity: lock/stop on option ₹ when configured (avoids Bank
+  // "day lock" on index points while option money is still red).
+  if (money && (money.dayStopRs > 0 || money.dayProfitLockRs > 0)) {
+    const netRs = Number(money.netRs);
+    state.dayNetOptionRs = (state.dayNetOptionRs || 0) + (Number.isFinite(netRs) ? netRs : 0);
+    if (money.dayStopRs > 0 && state.dayNetOptionRs <= -money.dayStopRs) {
+      state.dayStopped = true;
+    }
+    if (money.dayProfitLockRs > 0 && state.dayNetOptionRs >= money.dayProfitLockRs) {
+      state.dayStopped = true;
+    }
+    return;
+  }
   if (dayStopPts > 0 && state.dayNetPts <= -dayStopPts) {
     state.dayStopped = true;
   }
@@ -1780,6 +1797,7 @@ function computeOptionPnl(params) {
 var tradeSeq = 0;
 function closePaperTrade(params) {
   const { open } = params;
+  const livePath = params.livePath || null;
   const lots = Math.max(1, Math.floor(params.lotsMultiplier ?? 1) || 1);
   const indexPoints = open.direction === "BUY" ? params.exitPrice - open.entry : open.entry - params.exitPrice;
   let optionExitPremium = null;
@@ -1788,7 +1806,9 @@ function closePaperTrade(params) {
   let optionEntryPremium = open.optionEntryPremium;
   if (open.option) {
     const restingOpt = params.optionExitPremium != null && params.optionExitPremium > 0 ? params.optionExitPremium : null;
-    const useEstimate = restingOpt == null && (open.option.source === "synthetic" || open.option.instrumentToken <= 0 || open.premiumEstimated || isLevelExitReason(params.exitReason));
+    // Live path: never invent delta PnL on level exits — only real option marks.
+    const allowEstimate = !(livePath && livePath.noEstimatedExitPnl);
+    const useEstimate = allowEstimate && restingOpt == null && (open.option.source === "synthetic" || open.option.instrumentToken <= 0 || open.premiumEstimated || isLevelExitReason(params.exitReason));
     if (restingOpt != null) {
       optionExitPremium = restingOpt;
       premiumEstimated = false;
@@ -1800,6 +1820,11 @@ function closePaperTrade(params) {
       );
     }
     if (!useEstimate && optionEntryPremium != null && optionExitPremium != null) {
+      const friction = livePath ? Number(livePath.fillFrictionPremium) || 0 : 0;
+      if (friction > 0) {
+        optionEntryPremium = Math.max(0.05, Number(optionEntryPremium) + friction);
+        optionExitPremium = Math.max(0.05, Number(optionExitPremium) - friction);
+      }
       optionPnlRs = computeOptionPnl({
         entryPremium: optionEntryPremium,
         exitPremium: optionExitPremium,
@@ -1807,7 +1832,7 @@ function closePaperTrade(params) {
         lots
       });
       premiumEstimated = false;
-    } else {
+    } else if (allowEstimate) {
       const est = applyEstimatedOptionPnl({
         indexPoints,
         entryPremium: optionEntryPremium,
@@ -1819,6 +1844,10 @@ function closePaperTrade(params) {
       optionExitPremium = est.exit;
       optionPnlRs = est.pnl;
       premiumEstimated = true;
+    } else {
+      // Live path: missing exit mark → no fictional ₹ (trade marked estimated, PnL null).
+      premiumEstimated = true;
+      optionPnlRs = null;
     }
   }
   tradeSeq += 1;
@@ -1895,6 +1924,7 @@ function replayPaperOnIndex(params) {
   const kuttyMargin = params.kuttyMargin ?? { usedRs: 0, trapOpenLegs: 0 };
   const kuttyState = createKuttyDayState();
   const liveHook = params.liveHook;
+  const livePath = params.livePath || null;
   const afterBar = liveHook?.afterBarTime ?? null;
   const hookActive = (barTime) => !!liveHook && (!afterBar || barTime > afterBar);
   const strategy = params.strategy ?? (() => {
@@ -2002,7 +2032,8 @@ function replayPaperOnIndex(params) {
           lotsMultiplier,
           strategyId: isKutty ? KUTTY_ID : strategy.id,
           strategyName: isKutty ? KUTTY_NAME : strategy.name,
-          optionExitPremium: exit.optionExitPremium ?? null
+          optionExitPremium: exit.optionExitPremium ?? null,
+          livePath
         });
         trades.push(closed);
         if (hookActive(candle.date)) {
@@ -2012,9 +2043,11 @@ function replayPaperOnIndex(params) {
           recordKuttyClosed(kuttyState);
           kuttyMargin.usedRs = Math.max(0, kuttyMargin.usedRs - KUTTY_MARGIN_PER_TRADE_RS);
         } else {
-          strategy.onTradeClosed?.(closed.indexPoints, day);
+          const moneyRs = closed.netOptionPnlRs ?? closed.optionPnlRs;
+          strategy.onTradeClosed?.(closed.indexPoints, day, moneyRs);
           kuttyMargin.trapOpenLegs = Math.max(0, kuttyMargin.trapOpenLegs - 1);
         }
+        if (livePath?.deskGate) livePath.deskGate.release();
         dayNetByDate[day] = (dayNetByDate[day] ?? 0) + closed.indexPoints;
         open = null;
         lastSignal = `Closed: ${exit.reason}`;
@@ -2099,6 +2132,15 @@ function replayPaperOnIndex(params) {
         premiumEstimated = true;
       }
     }
+    // Paper ≡ Live: skip entries the broker would never take.
+    if (livePath && livePath.rejectEstimatedPremium !== false && premiumEstimated) {
+      lastSignal = `Live-path skip \u2014 estimated/synthetic premium`;
+      continue;
+    }
+    if (livePath?.deskGate && !livePath.deskGate.tryOpen()) {
+      lastSignal = `Live-path skip \u2014 maxOpenLegs ${livePath.deskGate.maxOpenLegs}`;
+      continue;
+    }
     open = {
       direction: entryAction,
       entry: entryPrice,
@@ -2167,7 +2209,8 @@ function replayPaperOnIndex(params) {
         optionCandlesByToken,
         lotsMultiplier,
         strategyId: isKutty ? KUTTY_ID : strategy.id,
-        strategyName: isKutty ? KUTTY_NAME : strategy.name
+        strategyName: isKutty ? KUTTY_NAME : strategy.name,
+        livePath
       });
       trades.push(closed);
       if (hookActive(candle.date)) {
@@ -2177,9 +2220,11 @@ function replayPaperOnIndex(params) {
         recordKuttyClosed(kuttyState);
         kuttyMargin.usedRs = Math.max(0, kuttyMargin.usedRs - KUTTY_MARGIN_PER_TRADE_RS);
       } else {
-        strategy.onTradeClosed?.(closed.indexPoints, day);
+        const moneyRs = closed.netOptionPnlRs ?? closed.optionPnlRs;
+        strategy.onTradeClosed?.(closed.indexPoints, day, moneyRs);
         kuttyMargin.trapOpenLegs = Math.max(0, kuttyMargin.trapOpenLegs - 1);
       }
+      if (livePath?.deskGate) livePath.deskGate.release();
       dayNetByDate[day] = (dayNetByDate[day] ?? 0) + closed.indexPoints;
       if (closed.option) {
         chosenOption = closed.option;
@@ -4589,8 +4634,8 @@ function createSrTrapDayState() {
     barSeq: 0
   };
 }
-function recordSrTrapTradeClosed(state, points, dayStopPts, dayProfitLockPts = 0) {
-  recordRuleTradeClosed(state, points, dayStopPts, dayProfitLockPts);
+function recordSrTrapTradeClosed(state, points, dayStopPts, dayProfitLockPts = 0, money = null) {
+  recordRuleTradeClosed(state, points, dayStopPts, dayProfitLockPts, money);
 }
 function num2(v, fallback) {
   return typeof v === "number" && Number.isFinite(v) ? v : fallback;
@@ -4648,6 +4693,7 @@ function runSrTrapConfirm(ctx, state, settings) {
   if (state.tradingDate !== day) {
     state.tradingDate = day;
     state.dayNetPts = 0;
+    state.dayNetOptionRs = 0;
     state.tradesToday = 0;
     state.dayStopped = false;
     state.pending = null;
@@ -4671,7 +4717,12 @@ function runSrTrapConfirm(ctx, state, settings) {
     analysis: { strategy: "sr-trap-confirm", ...analysis }
   });
   if (state.dayStopped) {
-    return skip(`Day stopped (net ${state.dayNetPts.toFixed(1)})`);
+    const rs = state.dayNetOptionRs || 0;
+    const netLabel =
+      settings.dayProfitLockRs > 0 || settings.dayStopRs > 0
+        ? `\u20B9${Math.round(rs)}`
+        : `${state.dayNetPts.toFixed(1)} pts`;
+    return skip(`Day stopped (net ${netLabel})`);
   }
   if (settings.maxTradesPerDay > 0 && state.tradesToday >= settings.maxTradesPerDay) {
     return skip(
@@ -5007,12 +5058,21 @@ function createTrapStrategy() {
     exitLogic(candle, open, closes, ctx) {
       return srTrapExitLogic(candle, open, closes, settings, ctx);
     },
-    onTradeClosed(points) {
+    onTradeClosed(points, _day, optionRs) {
+      const useMoney = settings.dayProfitLockRs > 0 || settings.dayStopRs > 0;
+      const money = useMoney
+        ? {
+            netRs: optionRs != null ? Number(optionRs) : 0,
+            dayProfitLockRs: settings.dayProfitLockRs || 0,
+            dayStopRs: settings.dayStopRs || 0
+          }
+        : null;
       recordSrTrapTradeClosed(
         state,
         points,
-        settings.dayStopPts,
-        settings.dayProfitLockPts ?? 0
+        useMoney ? 0 : settings.dayStopPts,
+        useMoney ? 0 : settings.dayProfitLockPts ?? 0,
+        money
       );
     },
     getSettings() {

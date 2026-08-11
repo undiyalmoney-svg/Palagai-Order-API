@@ -1,14 +1,11 @@
 /**
- * Server-side Paper backtest — Trade Desk parity.
+ * Server-side Paper backtest — Paper ≡ Live path.
  *
  * Replays the SAME strategy engine (strategy-core.cjs) over a From→To date
- * range and returns closed trades + P&L totals, so the Auto Bot "Paper" mode
- * shows the same results table the browser Trade Desk shows — but computed on
- * the DigitalOcean backend.
+ * range with live-path gates (reject estimated, fill friction, one-leg desk
+ * filter, option-₹ day lock) so Autobot Paper matches broker reality.
  *
  * Read-only: fetches historical candles via kite-market; never places orders.
- * The data provider is injectable (`deps.market`) so it can be unit-tested
- * without a live Kite session.
  */
 const {
   NIFTY_50_INSTRUMENT,
@@ -27,7 +24,15 @@ const {
   normalizeStartConfig,
   indexDayRiskOverrides,
   riskStatusLabels,
+  DAY_PROFIT_LOCK_RS,
+  STRICT_DAY_STOP_RS,
 } = require('./daily-desk-defaults');
+const { LIVE_GREEN_DNA, liveGreenTrapExtras } = require('./dna-live-green');
+const {
+  filterTradesLivePath,
+  livePathReplayOpts,
+  DEFAULT_LIVE_PATH,
+} = require('./live-path');
 
 /** Warm-up days before `fromDate` so indicators have history at the window start. */
 const LOOKBACK_DAYS = 12;
@@ -103,15 +108,24 @@ function bookSummary(label, replay) {
 }
 
 function trapInitOverrides(cfg, instrumentId) {
-  return (
+  const risk =
     indexDayRiskOverrides({
       instrumentId,
       enableNifty: !!cfg.enableNifty,
       enableBank: !!cfg.enableBank,
       dayProfitLock: !!cfg.dayProfitLock,
       strictDayStop: !!cfg.strictDayStop,
-    }) || {}
-  );
+    }) || {};
+  const extras = liveGreenTrapExtras();
+  if (cfg.optionStandDownRs != null) {
+    extras.optionStandDownRs = Number(cfg.optionStandDownRs);
+  }
+  return {
+    ...risk,
+    maxTradesPerDay: LIVE_GREEN_DNA.trap.maxTradesPerDay,
+    targetRMultiple: LIVE_GREEN_DNA.trap.targetRMultiple,
+    extras,
+  };
 }
 
 /** Fetch 5m option candles for the resolved ATM tokens (Trade Desk parity). */
@@ -122,7 +136,7 @@ async function fetchOptionHistories(market, authorization, tokens, from, to) {
     try {
       map.set(token, await market.fetchHistorical5m(authorization, token, from, to));
     } catch (err) {
-      // Missing/illiquid option history → that trade falls back to estimate.
+      // Missing/illiquid option history → live-path rejects (no estimate credit).
       map.set(token, []);
     }
   }
@@ -130,11 +144,7 @@ async function fetchOptionHistories(market, authorization, tokens, from, to) {
 }
 
 /**
- * Two-pass index replay, exactly like the browser Trade Desk:
- *  1) discover pass with empty option candles to collect the ATM option tokens
- *  2) fetch those CE/PE 5m candles
- *  3) real pass fed the option candles, so the option-₹ peak-lock exits fire
- *     and premiums come from real bars (not estimates).
+ * Two-pass index replay with live-path entry gates.
  */
 async function replayIndexBook({
   market,
@@ -147,6 +157,7 @@ async function replayIndexBook({
   kind,
   lots,
   makeStrategy,
+  livePath,
 }) {
   const candles = await market.fetchHistorical5m(
     authorization,
@@ -166,6 +177,7 @@ async function replayIndexBook({
     lotsMultiplier: lots,
     enableKutty: false,
     kuttyAlone: false,
+    livePath,
   };
   const needed = new Set();
   replayPaperOnIndex({
@@ -185,8 +197,7 @@ async function replayIndexBook({
 
 /**
  * Run a Paper backtest for [fromDate, toDate] with the given desk config.
- * @param {{authorization:string, fromDate:string, toDate:string, config:object}} args
- * @param {{market?:object, instruments?:Array}} [deps]
+ * Paper always applies live-path desk filter unless paperLivePath:false.
  */
 async function runBacktest({ authorization, fromDate, toDate, config }, deps = {}) {
   if (!fromDate || !toDate || fromDate > toDate) {
@@ -198,9 +209,16 @@ async function runBacktest({ authorization, fromDate, toDate, config }, deps = {
   const cfg = normalizeStartConfig(config);
   const warmFrom = addDaysIso(fromDate, -LOOKBACK_DAYS);
   const instruments = deps.instruments || (await market.fetchInstruments(authorization));
+  const useLivePath = cfg.paperLivePath !== false;
+  const livePath = useLivePath
+    ? livePathReplayOpts({
+        rejectEstimatedPremium: true,
+        fillFrictionPremium: cfg.fillFrictionPremium,
+      })
+    : null;
 
   const books = [];
-  const allTrades = [];
+  const rawTrades = [];
 
   if (cfg.enableNifty) {
     const replay = await replayIndexBook({
@@ -213,13 +231,14 @@ async function runBacktest({ authorization, fromDate, toDate, config }, deps = {
       instrument: NIFTY_50_INSTRUMENT,
       kind: 'nifty',
       lots: cfg.niftyLots || 1,
+      livePath,
       makeStrategy: () => {
         const s = createTrapStrategy();
         s.initialize(trapInitOverrides(cfg, NIFTY_50_INSTRUMENT.id));
         return s;
       },
     });
-    allTrades.push(...(replay.trades || []));
+    rawTrades.push(...(replay.trades || []));
     books.push(bookSummary('Nifty Trap', replay));
   }
 
@@ -235,6 +254,7 @@ async function runBacktest({ authorization, fromDate, toDate, config }, deps = {
       instrument: BANK_NIFTY_INSTRUMENT,
       kind: 'banknifty',
       lots: cfg.bankLots || 1,
+      livePath,
       makeStrategy: () => {
         const s = genie ? createGenieStrategy() : createTrapStrategy();
         if (genie) s.initialize();
@@ -242,7 +262,7 @@ async function runBacktest({ authorization, fromDate, toDate, config }, deps = {
         return s;
       },
     });
-    allTrades.push(...(replay.trades || []));
+    rawTrades.push(...(replay.trades || []));
     books.push(bookSummary(`Bank ${genie ? 'Genie' : 'Trap'}`, replay));
   }
 
@@ -280,20 +300,38 @@ async function runBacktest({ authorization, fromDate, toDate, config }, deps = {
         optionCandlesByToken: crudeOpt,
         neededOptionTokens: new Set(),
       });
-      allTrades.push(...(replay.trades || []));
-      books.push(bookSummary(tradeParams.profileId === 'selective' ? 'Crude Selective' : `Crude ${tradeParams.label}`, replay));
+      rawTrades.push(...(replay.trades || []));
+      books.push(
+        bookSummary(
+          tradeParams.profileId === 'selective' ? 'Crude Selective' : `Crude ${tradeParams.label}`,
+          replay,
+        ),
+      );
     }
   }
 
-  allTrades.sort((a, b) => String(a.entryTime).localeCompare(String(b.entryTime)));
+  rawTrades.sort((a, b) => String(a.entryTime).localeCompare(String(b.entryTime)));
+
+  // Desk-level Paper≡Live: one-leg across books + option-₹ day lock/stop.
+  const allTrades = useLivePath
+    ? filterTradesLivePath(rawTrades, {
+        ...DEFAULT_LIVE_PATH,
+        maxOpenLegs: cfg.maxOpenLegs != null ? cfg.maxOpenLegs : DEFAULT_LIVE_PATH.maxOpenLegs,
+        dayProfitLockRs: cfg.dayProfitLock ? DAY_PROFIT_LOCK_RS : 0,
+        dayStopRs: cfg.strictDayStop ? STRICT_DAY_STOP_RS : 0,
+        rejectEstimatedPremium: true,
+      })
+    : rawTrades;
 
   return {
     fromDate,
     toDate,
     config: cfg,
     riskLabels: riskStatusLabels(cfg),
+    paperLivePath: useLivePath,
     books,
     totals: summarize(allTrades),
+    rawTotals: useLivePath ? summarize(rawTrades) : undefined,
     dayStats: dayBreakdown(allTrades),
     trades: allTrades,
   };

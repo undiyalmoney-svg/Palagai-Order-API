@@ -204,9 +204,15 @@ function sideIsExit(side) {
 }
 
 /** Ingest newly appeared replay closes into the ledger. */
-function ingestReplayTrades(ledger, replayTrades) {
+function ingestReplayTrades(ledger, replayTrades, opts = {}) {
   const added = [];
   for (const t of replayTrades || []) {
+    if (opts.rejectEstimated) {
+      if (t.premiumEstimated) continue;
+      const o = t.option || {};
+      if (o.source === 'synthetic' || !(o.instrumentToken > 0)) continue;
+      if (t.optionPnlRs == null && t.netOptionPnlRs == null) continue;
+    }
     const before = ledger.length;
     const row = upsertPaperClose(ledger, t);
     if (row && ledger.length > before) added.push(row);
@@ -214,18 +220,21 @@ function ingestReplayTrades(ledger, replayTrades) {
   return added;
 }
 
-function moneyTotals(ledger) {
-  const settled = (ledger || []).filter(
-    (t) => t.moneyStatus === 'settled' || t.fillSource === 'broker' || t.fillSource === 'paper',
+function moneyTotals(ledger, opts = {}) {
+  const brokerSettled = (ledger || []).filter(
+    (t) => t.moneyStatus === 'settled' && t.fillSource === 'broker',
   );
-  // For display: prefer settled broker rows; include paper_closed only when no broker yet
+  const brokerTotals = summarize(brokerSettled);
+  // Real-money desk: primary totals = broker fills only (ignore phantom paper).
   const forTotals = (ledger || []).filter((t) => {
     if (t.moneyStatus === 'pending_broker_exit') return false;
+    if (opts.brokerOnly) {
+      return t.fillSource === 'broker' && t.moneyStatus === 'settled';
+    }
+    if (t.premiumEstimated) return false;
     return t.optionPnlRs != null || t.netOptionPnlRs != null;
   });
   const totals = summarize(forTotals);
-  const brokerSettled = (ledger || []).filter((t) => t.moneyStatus === 'settled' && t.fillSource === 'broker');
-  const brokerTotals = summarize(brokerSettled);
   return {
     ...totals,
     brokerTrades: brokerSettled.length,

@@ -1,44 +1,43 @@
 /**
- * LIVE_GREEN DNA — research 2026-08-10 (pro-trader pass).
+ * LIVE_GREEN DNA — multi-strategy live desk (2026-08-11).
  *
- * Goal: all-day green live ≈ paper.
+ * Goal: Paper ≡ Live, diversify beyond single Trap session.
  *
- * Finding: current Trap signal DNA is already 15/15 green (21 Jul–10 Aug)
- * even under hard fill friction. Today's live loss was execution
- * (SL/EXIT margin lock, estimated paper premiums, overlapping legs),
- * not a bad signal DNA.
+ * Books:
+ *   - Nifty Trap + Bank Trap (one-leg shared capital)
+ *   - Crude LIVE_CRUDE_GREEN after NSE (second strategy session)
  *
- * So LIVE_GREEN = keep proven signals + live ops that make fills survive.
+ * Live ops that made paper greener than broker:
+ *   rejectEstimatedPremium · maxOpenLegs 1 · option-₹ day lock · fill friction
  */
 
 const LIVE_GREEN_DNA = {
-  id: 'live-green-v1',
-  label: 'Live Green · Trap desk + one-leg ops',
-  version: '2026.08.10',
+  id: 'live-green-multi-v1',
+  label: 'Live Green · Trap + evening Crude · Paper≡Live',
+  version: '2026.08.11',
 
   /** Books */
   enableNifty: true,
   enableBank: true,
-  enableCrude: false,
+  enableCrude: true,
   niftyLots: 1,
   bankLots: 1,
   niftyStrategy: 'trap',
   bankStrategy: 'trap',
 
-  /** Day risk (₹ band @ 1 lot) */
+  /** Day risk (₹ band @ 1 lot) — measured on option ₹, not index pts */
   dayProfitLock: true,
   dayProfitLockRs: 3000,
   strictDayStop: true,
   strictDayStopRs: 2950,
 
-  /** Trap signal DNA (do not loosen — research winner) */
+  /** Trap signal DNA */
   trap: {
     piercePts: 20,
     bankPiercePts: 40,
     profitLockArmRs: 100,
     profitLockLockRs: 50,
     profitLockGivebackRs: 50,
-    /** Zero-red hunt: Nifty-only max3 was 7/7 green (13 Jul–11 Aug live-path). */
     maxTradesPerDay: 3,
     targetRMultiple: 3.5,
     confirmNextBar: true,
@@ -49,34 +48,29 @@ const LIVE_GREEN_DNA = {
     exitTime: '15:15',
   },
 
-  /**
-   * Live ops — what actually separates green paper from red live.
-   * - oneLeg: never hold Nifty+Bank together (today's margin death)
-   * - optionStandDownRs: hard cut when option ₹ MAE hits this
-   * - rejectEstimatedPremium: no live entry on synthetic/estimated marks
-   */
   liveOps: {
     maxOpenLegs: 1,
     optionStandDownRs: 350,
     rejectEstimatedPremium: true,
     cancelSlBeforeExit: true,
     fillLedger: true,
-    /** Ratchet exchange SL up to paper peak-trail floor each tick (LTP). */
     trailProtectiveSl: true,
+    /** Paper path fill friction (option premium ₹). */
+    fillFrictionPremium: 0.5,
+    /** Day lock/stop use option ₹ (not index points). */
+    optionRsDayRisk: true,
   },
 
   research: {
     window: '2026-07-13 → 2026-08-11',
-    paperGreenDays: '15/15',
-    paperNetRs: 27594,
+    paperVsLiveGap:
+      'Paper booked estimated premiums + overlapping Nifty/Bank; live skipped those → paper green / live red',
+    fix: 'Paper≡Live gates + option-₹ day lock + evening Crude second session',
     niftyOnlyLivePathGreenDays: '7/7 (100%)',
     niftyOnlyLivePathNetRs: 8136,
-    niftyOnlyMaxTrades: 3,
-    bankLivePathRedDays: '2 (13 Jul, 24 Jul) + 11 Aug live broker red',
-    frictionHardGreenDays: '15/15',
-    frictionHardNetRs: 18220,
+    crudeAfterNse: '13/14 green engine-validated (May–Aug)',
     note:
-      'Autobot green path = Nifty-only · max3. Bank hard-off. Zero red on traded live-path days in-sample; calendar flat days = no live option mark / no signal. Not a guarantee.',
+      'Multi-strategy: index Trap (one-leg) + Crude after 15:30. Not a guarantee of every calendar day green.',
   },
 };
 
@@ -115,6 +109,9 @@ function liveGreenStartConfig() {
     dnaId: LIVE_GREEN_DNA.id,
     maxOpenLegs: LIVE_GREEN_DNA.liveOps.maxOpenLegs,
     optionStandDownRs: LIVE_GREEN_DNA.liveOps.optionStandDownRs,
+    paperLivePath: true,
+    fillFrictionPremium: LIVE_GREEN_DNA.liveOps.fillFrictionPremium,
+    crudeAfterIndexClose: true,
   };
 }
 
