@@ -4861,7 +4861,9 @@ function srTrapExitLogic(candle, open, closes, settings, ctx) {
   );
   const optionMarksKnown = typeof open.optionPeakMfeRs === "number" && open.optionEntryPremium != null && open.optionEntryPremium > 0 && open.optionBarLow != null && open.optionLotUnits != null && open.optionLotUnits > 0;
   // Live Green: hard option-₹ stand-down (cuts before index SL / trail lag).
-  const standDownRs = num2(settings.extras?.optionStandDownRs, 0);
+  // Band is defined per 1 lot — scale with desk lots (MAE already includes lotUnits).
+  const standDownRs =
+    num2(settings.extras?.optionStandDownRs, 0) * clampTrailLots(open.lotsMultiplier);
   if (standDownRs > 0 && optionMarksKnown) {
     const maeRs = Math.max(0, (open.optionEntryPremium - open.optionBarLow) * open.optionLotUnits);
     if (maeRs >= standDownRs) {
