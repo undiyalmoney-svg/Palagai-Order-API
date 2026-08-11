@@ -9,8 +9,8 @@
  * Crude never keeps a private lot size. Stop→Start required to apply a new capital.
  */
 
-const APP_VERSION = '1.3.122';
-const APP_BUILD = '2026.08.11-capital-lot-ladder';
+const APP_VERSION = '1.3.123';
+const APP_BUILD = '2026.08.11-crude-gate-1515';
 const { LIVE_GREEN_DNA } = require('./dna-live-green');
 const { LIVE_CRUDE_GREEN_DNA } = require('./dna-live-crude-green');
 

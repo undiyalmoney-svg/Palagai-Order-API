@@ -374,15 +374,12 @@ class LiveWorker {
       }
 
       if (config.enableCrude && crudeSession && this.candles.crude.length) {
-        // Never open new Crude during Nifty/Bank session when index books are on.
-        const indexOn = !!(config.enableNifty || config.enableBank);
-        const gateTime =
-          LIVE_CRUDE_GREEN_DNA.liveOps.crudeAfterIndexCloseTime || '15:30';
-        // Default ON: only allow skipping the gate if client explicitly sets false
-        // AND index books are off (Crude-only desk).
-        const gateAfterClose = config.crudeAfterIndexClose !== false;
-        const crudeEntryOk =
-          now >= gateTime || (!indexOn && !gateAfterClose);
+        // Hard floor: never open new Crude before 15:15 IST (user: 3:15pm).
+        const CRUDE_NOT_BEFORE = '15:15';
+        const dnaGate =
+          LIVE_CRUDE_GREEN_DNA.liveOps.crudeAfterIndexCloseTime || CRUDE_NOT_BEFORE;
+        const gateTime = dnaGate > CRUDE_NOT_BEFORE ? dnaGate : CRUDE_NOT_BEFORE;
+        const crudeEntryOk = now >= gateTime;
         const crudeOpen = this.broker?.positions?.get(CRUDE_OIL_MINI_INSTRUMENT.id);
         const crudeOpenLive = crudeOpen?.status === 'open';
 
@@ -409,6 +406,7 @@ class LiveWorker {
             authorization,
             futSym,
             dayLossStopPts,
+            // New entries only after gate; still manage exits if already live.
             enableMorning: crudeEntryOk && tradeParams.defaultEnableMorning,
             enableEvening: crudeEntryOk && tradeParams.defaultEnableEvening,
             tradeParams,
@@ -441,7 +439,7 @@ class LiveWorker {
             `${crudeLabel} · ${replay.lastSignal}` +
             (crudeSyncOpen ? ` · OPEN ${crudeSyncOpen.direction}` : '') +
             (replay.open && !crudeSyncOpen ? ' · paper-only (no live entry)' : '') +
-            (!crudeEntryOk ? ' · gated until 15:30' : '');
+            (!crudeEntryOk ? ` · gated until ${gateTime}` : '');
           if (crudeSig !== this.lastSignals.crude) {
             this.lastSignals.crude = crudeSig;
             this.pushEvent('SIGNAL', crudeSig);

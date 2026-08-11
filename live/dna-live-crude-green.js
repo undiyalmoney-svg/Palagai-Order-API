@@ -1,7 +1,7 @@
 /**
  * LIVE_CRUDE_GREEN DNA v3 — after NSE close only.
  *
- * Never enters during Nifty/Bank session (09:15–15:30). Entries start 16:00 IST.
+ * Never enters before 15:15 IST. Entries start 16:00 IST (after index cash).
  *
  * Engine-validated May–Aug 2026 @ 1 lot (charge-aware):
  *   13/14 green (92.9%) · net ≈ ₹2.6k · 0 entries before 15:30
@@ -49,9 +49,9 @@ const LIVE_CRUDE_GREEN_DNA = {
 
   liveOps: {
     maxOpenLegs: 1,
-    /** Hard gate when index books are on — no Crude entries before this IST time. */
+    /** Hard gate — no Crude entries before this IST time (always). */
     crudeAfterIndexClose: true,
-    crudeAfterIndexCloseTime: '15:30',
+    crudeAfterIndexCloseTime: '15:15',
     rejectEstimatedPremium: true,
     cancelSlBeforeExit: true,
     fillLedger: true,
@@ -63,9 +63,9 @@ const LIVE_CRUDE_GREEN_DNA = {
     greenDays: '13/14 (92.9%)',
     engineValidated: true,
     netRsApprox: 2641,
-    earlyEntriesBefore1530: 0,
+    earlyEntriesBefore1515: 0,
     note:
-      'Entry window 16:00–21:00 + worker gate 15:30 when Nifty/Bank on. No overlap with index session.',
+      'Entry window 16:00–21:00 + hard worker gate 15:15. No Crude before 3:15pm IST.',
   },
 };
 
