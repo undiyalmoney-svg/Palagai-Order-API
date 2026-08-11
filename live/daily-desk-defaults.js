@@ -2,12 +2,12 @@
  * Daily desk DNA — must match Trade Desk Local Live (palagai.app) + Autobot.
  * Point thresholds use the 1-lot ₹ band; money at stop ≈ band × lots (do not multiply points by lots).
  *
- * Trap: pierce20 · Bank40 · peak₹100 · max3 · 3.5R · lock ₹3k · strict stop on.
+ * Trap: pierce20 · Bank40 · peak₹100 · max5 · 3.5R · lock ₹3k · strict stop on.
  * Index only by default (Crude OFF — fee protection).
  */
 
-const APP_VERSION = '1.3.111';
-const APP_BUILD = '2026.08.10-autobot-crude-off';
+const APP_VERSION = '1.3.112';
+const APP_BUILD = '2026.08.11-max-trades-5';
 const { LIVE_GREEN_DNA } = require('./dna-live-green');
 const { LIVE_CRUDE_GREEN_DNA } = require('./dna-live-crude-green');
 

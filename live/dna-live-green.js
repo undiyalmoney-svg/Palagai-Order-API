@@ -38,7 +38,7 @@ const LIVE_GREEN_DNA = {
     profitLockArmRs: 100,
     profitLockLockRs: 50,
     profitLockGivebackRs: 50,
-    maxTradesPerDay: 3,
+    maxTradesPerDay: 5,
     targetRMultiple: 3.5,
     confirmNextBar: true,
     slConfirmCutoffEnabled: false,

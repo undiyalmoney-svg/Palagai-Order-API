@@ -11,7 +11,7 @@ Matches **Trade Desk Daily ₹1k–₹3k** DNA (palagai.app `appBuild: 2026.08.0
 - Nat Gas / Kutty = off unless client enables
 
 ### Index Trap (LIVE_GREEN)
-- piercePts 20 · Bank 40 · peak trail ₹100/50/50 · max3 · 3.5R · stand-down ₹350
+- piercePts 20 · Bank 40 · peak trail ₹100/50/50 · max5 · 3.5R · stand-down ₹350
 
 ### Crude LIVE_CRUDE_GREEN (v3 · after NSE only)
 - **Autobot hard-off for now** (`AUTOBOT_ALLOW_CRUDE=false`) — Start ignores Crude toggle; index only
