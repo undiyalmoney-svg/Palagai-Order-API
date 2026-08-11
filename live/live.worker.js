@@ -280,8 +280,6 @@ class LiveWorker {
       }
 
       const { date: today, hhmm: now } = istParts();
-      const emptyOpt = new Map();
-      const needed = new Set();
       const indexSession = now >= '09:15' && now <= '15:30';
       const crudeSession = now >= '09:00' && now <= '23:15';
       const enableKutty = !!config.enableKutty;
@@ -400,34 +398,48 @@ class LiveWorker {
             tradeParams.profileId === 'selective'
               ? 'Crude Selective'
               : `Crude ${tradeParams.label}`;
-          const replay = replayPaperOnCrude({
-            instrumentId: CRUDE_OIL_MINI_INSTRUMENT.id,
-            instrumentName: `Crude Mini (${futSym})`,
+          // Two-pass like index: fetch real option 5m marks so live entry is
+          // not stuck on premiumEstimated (broker SKIP / liveOpenForSync null).
+          const replay = await this.replayCrudeLive({
             candles: this.candles.crude,
-            fromDate: today,
-            toDate: today,
-            instruments: this.instruments,
-            optionCandlesByToken: emptyOpt,
-            neededOptionTokens: needed,
-            forceCloseOpen: now >= CRUDE_EXIT_BY,
-            lotsMultiplier: config.crudeLots || 1,
+            lots: config.crudeLots || 1,
+            forceClose: now >= CRUDE_EXIT_BY,
+            today,
+            authorization,
+            futSym,
             dayLossStopPts,
-            // Before gate: manage exits only (no new session entries).
             enableMorning: crudeEntryOk && tradeParams.defaultEnableMorning,
             enableEvening: crudeEntryOk && tradeParams.defaultEnableEvening,
             tradeParams,
           });
           ingestReplayTrades(this.liveTrades, replay.trades, { rejectEstimated: true });
+          const crudeSyncOpen = this.liveOpenForSync(
+            CRUDE_OIL_MINI_INSTRUMENT.id,
+            replay.open,
+          );
+          if (replay.open && !crudeSyncOpen) {
+            const why = isEstimatedOrSynthetic({
+              option: replay.open.option,
+              premiumEstimated: replay.open.premiumEstimated,
+            })
+              ? 'estimated/missing option premium'
+              : 'maxOpenLegs / not tradeable';
+            this.pushEvent(
+              'SKIP',
+              `${crudeLabel}: signal open but no live entry — ${why}`,
+            );
+          }
           await this.broker.syncInstrument({
             authorization,
             instrumentId: CRUDE_OIL_MINI_INSTRUMENT.id,
             instrumentName: crudeLabel,
-            open: this.liveOpenForSync(CRUDE_OIL_MINI_INSTRUMENT.id, replay.open),
+            open: crudeSyncOpen,
             lots: config.crudeLots || 1,
           });
           const crudeSig =
             `${crudeLabel} · ${replay.lastSignal}` +
-            (replay.open ? ` · OPEN ${replay.open.direction}` : '') +
+            (crudeSyncOpen ? ` · OPEN ${crudeSyncOpen.direction}` : '') +
+            (replay.open && !crudeSyncOpen ? ' · paper-only (no live entry)' : '') +
             (!crudeEntryOk ? ' · gated until 15:30' : '');
           if (crudeSig !== this.lastSignals.crude) {
             this.lastSignals.crude = crudeSig;
@@ -463,6 +475,56 @@ class LiveWorker {
       }
     }
     return map;
+  }
+
+  /**
+   * Two-pass Crude replay — same as index: discover ATM option token, fetch
+   * 5m option candles, replay with marks so premiumEstimated is false when
+   * history exists (required for live broker entry).
+   */
+  async replayCrudeLive({
+    candles,
+    lots,
+    forceClose,
+    today,
+    authorization,
+    futSym,
+    dayLossStopPts,
+    enableMorning,
+    enableEvening,
+    tradeParams,
+  }) {
+    const base = {
+      instrumentId: CRUDE_OIL_MINI_INSTRUMENT.id,
+      instrumentName: `Crude Mini (${futSym || 'CRUDEOILM'})`,
+      candles,
+      fromDate: today,
+      toDate: today,
+      instruments: this.instruments,
+      forceCloseOpen: forceClose,
+      lotsMultiplier: lots,
+      dayLossStopPts,
+      enableMorning,
+      enableEvening,
+      tradeParams,
+    };
+    const needed = new Set();
+    replayPaperOnCrude({
+      ...base,
+      optionCandlesByToken: new Map(),
+      neededOptionTokens: needed,
+    });
+    let optionCandles = new Map();
+    try {
+      optionCandles = await this.fetchOptionCandles(authorization, needed, today, today);
+    } catch (err) {
+      optionCandles = new Map();
+    }
+    return replayPaperOnCrude({
+      ...base,
+      optionCandlesByToken: optionCandles,
+      neededOptionTokens: new Set(),
+    });
   }
 
   /**

@@ -9,8 +9,8 @@
  * capital across books). Explicit niftyLots/bankLots/crudeLots still win.
  */
 
-const APP_VERSION = '1.3.118';
-const APP_BUILD = '2026.08.11-all3-ui-books';
+const APP_VERSION = '1.3.119';
+const APP_BUILD = '2026.08.11-crude-opt-marks';
 const { LIVE_GREEN_DNA } = require('./dna-live-green');
 const { LIVE_CRUDE_GREEN_DNA } = require('./dna-live-crude-green');
 
@@ -180,7 +180,10 @@ function normalizeStartConfig(config = {}) {
     capitalRs: capitalRaw != null && Number(capitalRaw) > 0 ? Number(capitalRaw) : null,
     bankStrategy: config.bankStrategy === 'genie' ? 'genie' : 'trap',
     niftyStrategy: 'trap',
-    crudeStrategy: normalizeCrudeStrategy(config.crudeStrategy ?? preset.crudeStrategy),
+    /** Autobot always uses fee-capped LIVE_CRUDE_GREEN (ignore UI 'selective'/'all-green'). */
+    crudeStrategy: AUTOBOT_ALLOW_CRUDE
+      ? 'live-crude-green'
+      : normalizeCrudeStrategy(config.crudeStrategy ?? preset.crudeStrategy),
     dayProfitLock: config.dayProfitLock !== false,
     strictDayStop: config.strictDayStop !== false,
     enableKutty: !!config.enableKutty,
