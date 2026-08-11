@@ -5,12 +5,12 @@
  * 2) Bank Trap — only AFTER Nifty traded that day (zero-red all-three rule)
  * 3) Crude LIVE_CRUDE_GREEN after NSE (second session)
  *
- * Capital: UI `capitalRs` / `capital` → lots (one-leg desk reuses the same
- * capital across books). Explicit niftyLots/bankLots/crudeLots still win.
+ * Capital: UI `capitalRs` / `capital` → one shared deskLots for Nifty+Bank+Crude.
+ * Crude never keeps a private lot size. Stop→Start required to apply a new capital.
  */
 
-const APP_VERSION = '1.3.120';
-const APP_BUILD = '2026.08.11-crude-qty-1lot';
+const APP_VERSION = '1.3.121';
+const APP_BUILD = '2026.08.11-desk-lots-capital';
 const { LIVE_GREEN_DNA } = require('./dna-live-green');
 const { LIVE_CRUDE_GREEN_DNA } = require('./dna-live-crude-green');
 
@@ -42,15 +42,22 @@ const BANK_RS_PER_POINT = 30;
 const CRUDE_RS_PER_POINT = 10;
 
 /**
- * Map UI capital → lot counts.
- * One-leg desk: only one book open at a time, so the same capital rotates
- * Nifty → Bank → evening Crude. ₹12k+ ≈ 1 lot each; ₹75k+ ≈ 2 lots.
+ * Map UI capital → one shared desk lot size.
+ * One-leg desk: same capital rotates Nifty → Bank → evening Crude.
+ * ₹1+ → 1 lot all books; ₹75k+ → 2 lots all books.
+ * Crude never gets a separate lot count.
  */
-function lotsFromCapitalRs(capitalRs) {
+function deskLotsFromCapitalRs(capitalRs) {
   const c = Math.max(0, Number(capitalRs) || 0);
   if (!(c > 0)) return null;
-  if (c >= 75000) return { niftyLots: 2, bankLots: 2, crudeLots: 2 };
-  return { niftyLots: 1, bankLots: 1, crudeLots: 1 };
+  return c >= 75000 ? 2 : 1;
+}
+
+/** @deprecated use deskLotsFromCapitalRs — kept for callers expecting {nifty,bank,crude} */
+function lotsFromCapitalRs(capitalRs) {
+  const n = deskLotsFromCapitalRs(capitalRs);
+  if (n == null) return null;
+  return { niftyLots: n, bankLots: n, crudeLots: n };
 }
 
 const DAILY_3K_PRESET = {
@@ -154,26 +161,47 @@ function riskStatusLabels(config) {
   return parts;
 }
 
+function parseLotCount(raw) {
+  if (raw == null || raw === '') return null;
+  if (!Number.isFinite(Number(raw))) return null;
+  return Math.max(1, Math.floor(Number(raw)));
+}
+
+/**
+ * One desk lot for Nifty + Bank + Crude.
+ * 1) capitalRs/capital wins (UI capital change must resize ALL books)
+ * 2) else shared deskLots/lots/niftyLots/bankLots (first present)
+ * 3) else preset
+ * Crude never keeps a private crudeLots that differs from the desk.
+ */
+function resolveDeskLots(config = {}, preset = DAILY_3K_PRESET) {
+  const capitalRaw = config.capitalRs != null ? config.capitalRs : config.capital;
+  const fromCap = deskLotsFromCapitalRs(capitalRaw);
+  if (fromCap != null) return fromCap;
+  return (
+    parseLotCount(config.deskLots) ||
+    parseLotCount(config.lots) ||
+    parseLotCount(config.niftyLots) ||
+    parseLotCount(config.bankLots) ||
+    parseLotCount(config.crudeLots) ||
+    preset.niftyLots ||
+    1
+  );
+}
+
 function normalizeStartConfig(config = {}) {
   const preset = DAILY_3K_PRESET;
   const capitalRaw = config.capitalRs != null ? config.capitalRs : config.capital;
-  const fromCap = lotsFromCapitalRs(capitalRaw);
-
-  /** Prefer explicit lots; else capital map; else preset. Never Math.max(1,…) before capital. */
-  const pickLots = (raw, capVal, presetVal) => {
-    if (raw != null && raw !== '' && Number.isFinite(Number(raw))) {
-      return Math.max(1, Math.floor(Number(raw)));
-    }
-    return Math.max(1, Math.floor(Number(capVal)) || presetVal || 1);
-  };
-  const niftyLots = pickLots(config.niftyLots, fromCap?.niftyLots, preset.niftyLots);
-  const bankLots = pickLots(config.bankLots, fromCap?.bankLots, preset.bankLots);
-  const crudeLots = pickLots(config.crudeLots, fromCap?.crudeLots, preset.crudeLots);
+  const deskLots = resolveDeskLots(config, preset);
+  const niftyLots = deskLots;
+  const bankLots = deskLots;
+  const crudeLots = deskLots;
 
   return {
     enableNifty: true,
     enableBank: AUTOBOT_ALLOW_BANK,
     enableCrude: AUTOBOT_ALLOW_CRUDE,
+    deskLots,
     niftyLots,
     bankLots,
     crudeLots,
@@ -217,6 +245,8 @@ function normalizeStartConfig(config = {}) {
 module.exports = {
   APP_VERSION,
   APP_BUILD,
+  deskLotsFromCapitalRs,
+  resolveDeskLots,
   AUTOBOT_ALLOW_CRUDE,
   AUTOBOT_ALLOW_BANK,
   DAY_PROFIT_LOCK_RS,

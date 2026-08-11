@@ -74,13 +74,19 @@ async function defaults(_req, res) {
       crude: AUTOBOT_ALLOW_CRUDE,
       bankAllowed: AUTOBOT_ALLOW_BANK,
       crudeAllowed: AUTOBOT_ALLOW_CRUDE,
+      deskLots: DAILY_3K_PRESET.niftyLots,
       crudeStrategy: 'live-crude-green',
       crudeWindow: '16:00–21:00 IST (gate 15:30)',
       bankOnlyAfterNifty: true,
       label: 'Nifty → Bank (after Nifty) → Crude after NSE',
+      capitalLots: {
+        under75k: 1,
+        from75k: 2,
+        note: 'One deskLots for Nifty+Bank+Crude — Crude has no private lots',
+      },
     },
     uiHint:
-      'Show Crude book in Autobot: enableCrude + crudeLots from /live/defaults. Server forces Crude ON even if UI omits the toggle.',
+      'Capital drives one shared deskLots for Nifty+Bank+Crude. On capital change, auto-update all lot fields to the same number, send capitalRs on Start, Stop→Start to apply. Do not send a separate crudeLots that differs.',
   });
 }
 

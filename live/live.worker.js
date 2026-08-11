@@ -296,7 +296,7 @@ class LiveWorker {
           instrument: NIFTY_50_INSTRUMENT,
           kind: 'nifty',
           candles: this.candles.nifty,
-          lots: config.niftyLots || 1,
+          lots: config.deskLots || config.niftyLots || 1,
           forceClose: now >= '15:15',
           enableKutty,
           kuttyAlone: !!config.kuttyAlone,
@@ -314,7 +314,7 @@ class LiveWorker {
           instrumentId: NIFTY_50_INSTRUMENT.id,
           instrumentName: 'Nifty Trap',
           open: this.liveOpenForSync(NIFTY_50_INSTRUMENT.id, replay.open),
-          lots: config.niftyLots || 1,
+          lots: config.deskLots || config.niftyLots || 1,
         });
         const niftySig =
           `Nifty Trap · ${replay.lastSignal}` +
@@ -334,7 +334,7 @@ class LiveWorker {
           instrument: BANK_NIFTY_INSTRUMENT,
           kind: 'banknifty',
           candles: this.candles.bank,
-          lots: config.bankLots || 1,
+          lots: config.deskLots || config.bankLots || 1,
           forceClose: now >= '15:15',
           enableKutty,
           kuttyAlone: !!config.kuttyAlone,
@@ -361,7 +361,7 @@ class LiveWorker {
           instrumentId: BANK_NIFTY_INSTRUMENT.id,
           instrumentName: `Bank ${genie ? 'Genie' : 'Trap'}`,
           open: bankSyncOpen,
-          lots: config.bankLots || 1,
+          lots: config.deskLots || config.bankLots || 1,
         });
         const bankSig =
           `Bank ${genie ? 'Genie' : 'Trap'} · ${replay.lastSignal}` +
@@ -400,9 +400,10 @@ class LiveWorker {
               : `Crude ${tradeParams.label}`;
           // Two-pass like index: fetch real option 5m marks so live entry is
           // not stuck on premiumEstimated (broker SKIP / liveOpenForSync null).
+          const crudeLots = config.deskLots || config.crudeLots || 1;
           const replay = await this.replayCrudeLive({
             candles: this.candles.crude,
-            lots: config.crudeLots || 1,
+            lots: crudeLots,
             forceClose: now >= CRUDE_EXIT_BY,
             today,
             authorization,
@@ -434,7 +435,7 @@ class LiveWorker {
             instrumentId: CRUDE_OIL_MINI_INSTRUMENT.id,
             instrumentName: crudeLabel,
             open: crudeSyncOpen,
-            lots: config.crudeLots || 1,
+            lots: crudeLots,
           });
           const crudeSig =
             `${crudeLabel} · ${replay.lastSignal}` +

@@ -129,6 +129,10 @@ function statusPayload(session) {
       crude: !!cfg.enableCrude,
       bankAllowed: AUTOBOT_ALLOW_BANK,
       crudeAllowed: AUTOBOT_ALLOW_CRUDE,
+      deskLots: cfg.deskLots || cfg.niftyLots || 1,
+      niftyLots: cfg.niftyLots || 1,
+      bankLots: cfg.bankLots || 1,
+      crudeLots: cfg.crudeLots || 1,
       crudeStrategy: cfg.crudeStrategy || 'live-crude-green',
       crudeAfterIndexClose: cfg.crudeAfterIndexClose !== false,
       bankOnlyAfterNifty: cfg.bankOnlyAfterNifty !== false,
@@ -137,11 +141,14 @@ function statusPayload(session) {
     risk: {
       dayProfitLockRsBase: DAY_PROFIT_LOCK_RS,
       strictDayStopRsBase: STRICT_DAY_STOP_RS,
+      deskLots: cfg.deskLots || cfg.niftyLots || lots,
       riskLots: lots,
       profitLockMoneyRs: profitLockMoneyRs(lots),
       strictStopMoneyRs: strictStopMoneyRs(lots),
       labels: riskStatusLabels(cfg),
       checkboxHint: `₹${DAY_PROFIT_LOCK_RS.toLocaleString('en-IN')} × lots (1→₹3k · 3→₹9k)`,
+      capitalHint:
+        'capitalRs ≥ ₹75k → deskLots 2 for Nifty+Bank+Crude; else 1. Same lot all books. Stop→Start to apply.',
     },
     version: APP_VERSION,
     appBuild: APP_BUILD,
@@ -309,7 +316,8 @@ async function start(userId, config) {
   pushEvent(
     session,
     'START',
-    `Daily desk · books N${session.config.enableNifty ? 1 : 0}/B${session.config.enableBank ? 1 : 0}/C${session.config.enableCrude ? 1 : 0} · bank=${session.config.bankStrategy} · crude=${session.config.crudeStrategy} · real=${session.config.realOrders}` +
+    `Daily desk · books N${session.config.enableNifty ? 1 : 0}/B${session.config.enableBank ? 1 : 0}/C${session.config.enableCrude ? 1 : 0} · deskLots=${session.config.deskLots || session.config.niftyLots || 1} · bank=${session.config.bankStrategy} · crude=${session.config.crudeStrategy} · real=${session.config.realOrders}` +
+      (session.config.capitalRs ? ` · capital₹${session.config.capitalRs}` : '') +
       (riskBits.length ? ` · ${riskBits.join(' · ')}` : ''),
   );
   startTickLoop(session);
