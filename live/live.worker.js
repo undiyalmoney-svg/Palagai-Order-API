@@ -1,6 +1,6 @@
 /**
  * Server Live strategy worker — Trade Desk parity:
- * Trap pierce20 · Nifty-only max3 · peak₹100 · 3.5R · lock ₹3k · strict stop.
+ * Trap pierce20/B40 · Nifty+Bank max3 · peak₹100 · 3.5R · lock ₹3k · strict stop.
  * Crude LIVE_CRUDE_GREEN when enabled (OFF by default) — after NSE only (16:00+).
  * With index on, Crude entries hard-gate until 15:30 (no overlap with Nifty/Bank).
  * Places orders via live-broker → kite.service (does NOT touch kiteOrders.controller).

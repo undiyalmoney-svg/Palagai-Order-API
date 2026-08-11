@@ -18,8 +18,7 @@ const LIVE_GREEN_DNA = {
 
   /** Books */
   enableNifty: true,
-  /** Autobot green path: Bank OFF (live red-day source). */
-  enableBank: false,
+  enableBank: true,
   enableCrude: false,
   niftyLots: 1,
   bankLots: 1,

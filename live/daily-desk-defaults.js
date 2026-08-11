@@ -2,22 +2,21 @@
  * Daily desk DNA — must match Trade Desk Local Live (palagai.app) + Autobot.
  * Point thresholds use the 1-lot ₹ band; money at stop ≈ band × lots (do not multiply points by lots).
  *
- * Trap: pierce20 · peak₹100 · max3 · 3.5R · lock ₹3k · strict stop on.
- * Autobot: Nifty-only max3 (Bank+Crude hard-off) — zero-red traded days in-sample.
+ * Trap: pierce20 · Bank40 · peak₹100 · max3 · 3.5R · lock ₹3k · strict stop on.
+ * Autobot: Nifty+Bank ON (same LIVE_GREEN) · Crude hard-off · 1 lot each.
  */
 
-const APP_VERSION = '1.3.114';
-const APP_BUILD = '2026.08.11-zero-red-nifty';
+const APP_VERSION = '1.3.115';
+const APP_BUILD = '2026.08.11-nifty-bank-on';
 const { LIVE_GREEN_DNA } = require('./dna-live-green');
 const { LIVE_CRUDE_GREEN_DNA } = require('./dna-live-crude-green');
 
 /**
- * Hard off for Autobot / Server Live Start.
- * DNA stays on disk for later; flip these true when ready.
+ * Autobot book gates — flip when ready.
  */
 const AUTOBOT_ALLOW_CRUDE = false;
-/** Bank live fills caused researched red days + 11 Aug live red — keep OFF. */
-const AUTOBOT_ALLOW_BANK = false;
+/** User opted back on — same Trap DNA, accept higher profit + red-day risk. */
+const AUTOBOT_ALLOW_BANK = true;
 
 /** Allowed crudeStrategy ids for Autobot / backtest normalize. */
 const CRUDE_STRATEGY_IDS = new Set([
@@ -52,8 +51,7 @@ const DAILY_3K_PRESET = {
   bankLots: 1,
   crudeLots: 1,
   enableNifty: true,
-  /** Hard-off — Bank option fills were the red-day source in live-path research. */
-  enableBank: false,
+  enableBank: true,
   /** Hard-off for Autobot — flip AUTOBOT_ALLOW_CRUDE later. */
   enableCrude: false,
   enableNatGas: false,
@@ -69,7 +67,7 @@ const DAILY_3K_PRESET = {
   /** Crude only after NSE close — never during Nifty/Bank session. */
   crudeAfterIndexClose: true,
   researchNote:
-    'LIVE_GREEN Nifty-only max3 (Bank/Crude hard-off) · zero-red traded days in-sample · lock ₹3k',
+    'LIVE_GREEN Nifty+Bank max3 · Crude OFF · 1 lot · lock ₹3k · stand-down ₹350 · one-leg',
   dnaId: LIVE_GREEN_DNA.id,
 };
 
@@ -141,13 +139,10 @@ function normalizeStartConfig(config = {}) {
     config.enableCrude != null;
 
   const wantCrude = hasBookFlag ? !!config.enableCrude : preset.enableCrude;
-  const wantBank = hasBookFlag ? !!config.enableBank : preset.enableBank;
-  const wantNifty = hasBookFlag ? !!config.enableNifty : preset.enableNifty;
   return {
-    /** Always keep Nifty on for Autobot green path when Bank/Crude forced off. */
-    enableNifty: AUTOBOT_ALLOW_BANK || AUTOBOT_ALLOW_CRUDE ? wantNifty : true,
-    /** Autobot: ignore client Bank toggle while AUTOBOT_ALLOW_BANK is false. */
-    enableBank: AUTOBOT_ALLOW_BANK ? wantBank : false,
+    enableNifty: true,
+    /** When allowed, keep Bank ON for the Nifty+Bank profit test (ignore UI capital→lots off). */
+    enableBank: AUTOBOT_ALLOW_BANK,
     /** Autobot: ignore client Crude toggle while AUTOBOT_ALLOW_CRUDE is false. */
     enableCrude: AUTOBOT_ALLOW_CRUDE ? wantCrude : false,
     niftyLots: Math.max(1, Math.floor(Number(config.niftyLots)) || preset.niftyLots),

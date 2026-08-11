@@ -4966,7 +4966,7 @@ function createTrapStrategy() {
     id: MANAGED_STRATEGY_IDS.SR_TRAP_CONFIRM,
     name: "Trap",
     version: "1.2.0",
-    description: "Server Live Trap \xB7 pierce20 \xB7 Nifty-only \xB7 peak\u20B9100 \xB7 max3 \xB7 3.5R \xB7 Paper\u2261Live",
+    description: "Server Live Trap \xB7 pierce20 \xB7 Bank40 \xB7 peak\u20B9100 \xB7 max3 \xB7 3.5R \xB7 Paper\u2261Live",
     supports: ["nifty", "bank"],
     defaultSettings: TRAP_DEFAULTS,
     initialize(partial) {
