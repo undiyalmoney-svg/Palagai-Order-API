@@ -82,11 +82,14 @@ async function defaults(_req, res) {
       capitalLots: {
         under75k: 1,
         from75k: 2,
+        perLakhAbove: 1,
+        at6L: 6,
+        cap: 10,
         note: 'One deskLots for Nifty+Bank+Crude — Crude has no private lots',
       },
     },
     uiHint:
-      'Capital drives one shared deskLots for Nifty+Bank+Crude. On capital change, auto-update all lot fields to the same number, send capitalRs on Start, Stop→Start to apply. Do not send a separate crudeLots that differs.',
+      'Capital ladder → shared deskLots (Nifty=Bank=Crude): <₹75k→1, ₹75k+→2, then ≈₹1L per lot (₹6L→6, max 10). Auto-update all lot fields when capital changes; send capitalRs; Stop→Start.',
   });
 }
 

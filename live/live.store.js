@@ -148,7 +148,7 @@ function statusPayload(session) {
       labels: riskStatusLabels(cfg),
       checkboxHint: `₹${DAY_PROFIT_LOCK_RS.toLocaleString('en-IN')} × lots (1→₹3k · 3→₹9k)`,
       capitalHint:
-        'capitalRs ≥ ₹75k → deskLots 2 for Nifty+Bank+Crude; else 1. Same lot all books. Stop→Start to apply.',
+        'Capital ladder (same deskLots Nifty+Bank+Crude): <₹75k→1 · ₹75k+→2 · then ₹1L per lot (₹6L→6, cap 10). Stop→Start to apply.',
     },
     version: APP_VERSION,
     appBuild: APP_BUILD,
