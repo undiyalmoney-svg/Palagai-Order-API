@@ -148,14 +148,13 @@ class LiveWorker {
 
   deskOps(config = {}) {
     const dna = LIVE_GREEN_DNA.liveOps || {};
-    const band = LIVE_GREEN_DNA.dailyBand || {};
     const lots = Math.max(1, Number(config.deskLots || config.niftyLots || 1) || 1);
-    const bandMin1 = dna.deskGreenLockRs ?? band.minRs ?? 750;
+    const bandMin1 = Number(dna.deskGreenLockRs) || 0;
     return {
       winStreakToBand:
         config.winStreakToBand != null
           ? !!config.winStreakToBand
-          : dna.winStreakToBand !== false,
+          : dna.winStreakToBand === true,
       indexFirstWinLock:
         config.indexFirstWinLock != null
           ? !!config.indexFirstWinLock
@@ -167,7 +166,7 @@ class LiveWorker {
       bankOnlyAfterNifty:
         config.bankOnlyAfterNifty != null
           ? !!config.bankOnlyAfterNifty
-          : dna.bankOnlyAfterNifty !== false,
+          : dna.bankOnlyAfterNifty === true,
       bankOnlyAfterNiftyGreen:
         config.bankOnlyAfterNiftyGreen != null
           ? !!config.bankOnlyAfterNiftyGreen
@@ -175,7 +174,7 @@ class LiveWorker {
       crudeOnlyBelowBand:
         config.crudeOnlyBelowBand != null
           ? !!config.crudeOnlyBelowBand
-          : dna.crudeOnlyBelowBand !== false,
+          : dna.crudeOnlyBelowBand === true,
     };
   }
 
@@ -451,8 +450,9 @@ class LiveWorker {
           LIVE_CRUDE_GREEN_DNA.liveOps.crudeAfterIndexCloseTime || CRUDE_NOT_BEFORE;
         const gateTime = dnaGate > CRUDE_NOT_BEFORE ? dnaGate : CRUDE_NOT_BEFORE;
         const deskDay = summarizeDeskDay(this.liveTrades, today);
-        const bandMin = deskOps.deskGreenLockRs || 750;
-        const belowBand = !deskOps.crudeOnlyBelowBand || deskDay.dayNet < bandMin;
+        const bandMin = Math.max(0, Number(deskOps.deskGreenLockRs) || 0);
+        const belowBand =
+          !deskOps.crudeOnlyBelowBand || bandMin <= 0 || deskDay.dayNet < bandMin;
         const crudeEntryOk = now >= gateTime && belowBand;
         const crudeOpen = this.broker?.positions?.get(CRUDE_OIL_MINI_INSTRUMENT.id);
         const crudeOpenLive = crudeOpen?.status === 'open';
@@ -510,7 +510,9 @@ class LiveWorker {
             lots: crudeLots,
           });
           const bandSkip =
-            deskOps.crudeOnlyBelowBand && deskDay.dayNet >= bandMin
+            deskOps.crudeOnlyBelowBand &&
+            bandMin > 0 &&
+            deskDay.dayNet >= bandMin
               ? ` · band locked ₹${Math.round(deskDay.dayNet)}`
               : '';
           const crudeSig =

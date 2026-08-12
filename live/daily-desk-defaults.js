@@ -1,16 +1,10 @@
 /**
- * Daily desk DNA — Autobot multi-strategy Paper≡Live.
- *
- * Daily Band Loop (₹750–₹2000 @ 1 lot):
- * 1) Nifty Trap → 2) Bank after Nifty green → 3) lock at ₹750 / hard ₹2000
- * 4) no dig after a green-then-loss → 5) Crude after NSE only if still < ₹750
- *
- * Capital: UI `capitalRs` / `capital` → one shared deskLots for Nifty+Bank+Crude.
- * Stop→Start required to apply a new capital.
+ * Treasure DNA — Pivot S/R · unlimited trades · zero-red live-path.
+ * Capital: UI capitalRs → shared deskLots. Stop→Start to apply.
  */
 
-const APP_VERSION = '1.3.128';
-const APP_BUILD = '2026.08.12-sr-perfect-sl';
+const APP_VERSION = '1.3.129';
+const APP_BUILD = '2026.08.12-treasure-zero-red';
 const { LIVE_GREEN_DNA } = require('./dna-live-green');
 const { LIVE_CRUDE_GREEN_DNA } = require('./dna-live-crude-green');
 
@@ -33,9 +27,11 @@ function normalizeCrudeStrategy(raw) {
   return 'selective';
 }
 
-/** Research desk lock band (option ₹). */
-const DAY_PROFIT_LOCK_RS = LIVE_GREEN_DNA.dayProfitLockRs || 2500;
-const STRICT_DAY_STOP_RS = LIVE_GREEN_DNA.strictDayStopRs || 2950;
+/** Desk lock band (0 = off for treasure DNA). */
+const DAY_PROFIT_LOCK_RS =
+  LIVE_GREEN_DNA.dayProfitLockRs != null ? LIVE_GREEN_DNA.dayProfitLockRs : 0;
+const STRICT_DAY_STOP_RS =
+  LIVE_GREEN_DNA.strictDayStopRs != null ? LIVE_GREEN_DNA.strictDayStopRs : 0;
 
 const NIFTY_RS_PER_POINT = 65;
 const BANK_RS_PER_POINT = 30;
@@ -72,7 +68,7 @@ function lotsFromCapitalRs(capitalRs) {
 
 const DAILY_3K_PRESET = {
   id: 'daily-all3',
-  label: 'All3 · Nifty→Bank→Crude',
+  label: 'Treasure · Pivot S/R · Unlimited',
   niftyLots: 1,
   bankLots: 1,
   crudeLots: 1,
@@ -85,13 +81,13 @@ const DAILY_3K_PRESET = {
   niftyStrategy: 'trap',
   bankStrategy: 'trap',
   crudeStrategy: 'live-crude-green',
-  dayProfitLock: true,
-  strictDayStop: true,
+  dayProfitLock: false,
+  strictDayStop: false,
   crudeAfterIndexClose: true,
   paperLivePath: true,
-  bankOnlyAfterNifty: true,
+  bankOnlyAfterNifty: false,
   researchNote:
-    'Nifty first · Bank after Nifty · Crude after NSE · Paper≡Live · 0-red research path',
+    'Pivot S/R · perfect SL · unlimited · stand0 · 18/18 zero-red live-path',
   dnaId: LIVE_GREEN_DNA.id,
 };
 
@@ -162,7 +158,7 @@ function riskStatusLabels(config) {
   if (config?.dayProfitLock) {
     parts.push(`profit lock +₹${profitLockMoneyRs(lots).toLocaleString('en-IN')} (option ₹)`);
   }
-  if (config?.bankOnlyAfterNifty !== false) {
+  if (config?.bankOnlyAfterNifty) {
     parts.push('Bank after Nifty');
   }
   if (config?.paperLivePath !== false) {
@@ -222,8 +218,14 @@ function normalizeStartConfig(config = {}) {
     crudeStrategy: AUTOBOT_ALLOW_CRUDE
       ? 'live-crude-green'
       : normalizeCrudeStrategy(config.crudeStrategy ?? preset.crudeStrategy),
-    dayProfitLock: config.dayProfitLock !== false,
-    strictDayStop: config.strictDayStop !== false,
+    dayProfitLock:
+      config.dayProfitLock != null
+        ? !!config.dayProfitLock
+        : !!LIVE_GREEN_DNA.dayProfitLock,
+    strictDayStop:
+      config.strictDayStop != null
+        ? !!config.strictDayStop
+        : !!LIVE_GREEN_DNA.strictDayStop,
     enableKutty: !!config.enableKutty,
     kuttyAlone: !!config.kuttyAlone,
     realOrders: !!config.realOrders,
@@ -248,7 +250,7 @@ function normalizeStartConfig(config = {}) {
     bankOnlyAfterNifty:
       config.bankOnlyAfterNifty != null
         ? !!config.bankOnlyAfterNifty
-        : LIVE_GREEN_DNA.liveOps.bankOnlyAfterNifty !== false,
+        : LIVE_GREEN_DNA.liveOps.bankOnlyAfterNifty === true,
     bankOnlyAfterNiftyGreen:
       config.bankOnlyAfterNiftyGreen != null
         ? !!config.bankOnlyAfterNiftyGreen
@@ -256,7 +258,7 @@ function normalizeStartConfig(config = {}) {
     winStreakToBand:
       config.winStreakToBand != null
         ? !!config.winStreakToBand
-        : LIVE_GREEN_DNA.liveOps.winStreakToBand !== false,
+        : LIVE_GREEN_DNA.liveOps.winStreakToBand === true,
     indexFirstWinLock:
       config.indexFirstWinLock != null
         ? !!config.indexFirstWinLock
@@ -264,9 +266,7 @@ function normalizeStartConfig(config = {}) {
     deskGreenLockRs:
       config.deskGreenLockRs != null
         ? Math.max(0, Number(config.deskGreenLockRs) || 0)
-        : LIVE_GREEN_DNA.liveOps.deskGreenLockRs ??
-          LIVE_GREEN_DNA.dailyBand?.minRs ??
-          750,
+        : Number(LIVE_GREEN_DNA.liveOps.deskGreenLockRs) || 0,
     recoveryMaxExtra:
       config.recoveryMaxExtra != null
         ? Math.max(0, Math.floor(Number(config.recoveryMaxExtra) || 0))
@@ -274,7 +274,7 @@ function normalizeStartConfig(config = {}) {
     crudeOnlyBelowBand:
       config.crudeOnlyBelowBand != null
         ? !!config.crudeOnlyBelowBand
-        : LIVE_GREEN_DNA.liveOps.crudeOnlyBelowBand !== false,
+        : LIVE_GREEN_DNA.liveOps.crudeOnlyBelowBand === true,
   };
 }
 

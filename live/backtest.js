@@ -324,7 +324,10 @@ async function runBacktest({ authorization, fromDate, toDate, config }, deps = {
         dayProfitLockRs: cfg.dayProfitLock ? DAY_PROFIT_LOCK_RS : 0,
         dayStopRs: cfg.strictDayStop ? STRICT_DAY_STOP_RS : 0,
         rejectEstimatedPremium: true,
-        bankOnlyAfterNifty: cfg.bankOnlyAfterNifty !== false,
+        bankOnlyAfterNifty:
+          cfg.bankOnlyAfterNifty != null
+            ? !!cfg.bankOnlyAfterNifty
+            : LIVE_GREEN_DNA.liveOps.bankOnlyAfterNifty === true,
         bankOnlyAfterNiftyGreen:
           cfg.bankOnlyAfterNiftyGreen != null
             ? !!cfg.bankOnlyAfterNiftyGreen
@@ -332,7 +335,7 @@ async function runBacktest({ authorization, fromDate, toDate, config }, deps = {
         winStreakToBand:
           cfg.winStreakToBand != null
             ? !!cfg.winStreakToBand
-            : LIVE_GREEN_DNA.liveOps.winStreakToBand !== false,
+            : LIVE_GREEN_DNA.liveOps.winStreakToBand === true,
         indexFirstWinLock:
           cfg.indexFirstWinLock != null
             ? !!cfg.indexFirstWinLock
@@ -340,13 +343,15 @@ async function runBacktest({ authorization, fromDate, toDate, config }, deps = {
         deskGreenLockRs:
           cfg.deskGreenLockRs != null
             ? Number(cfg.deskGreenLockRs)
-            : LIVE_GREEN_DNA.liveOps.deskGreenLockRs ??
-              LIVE_GREEN_DNA.dailyBand?.minRs ??
-              750,
+            : Number(LIVE_GREEN_DNA.liveOps.deskGreenLockRs) || 0,
         recoveryMaxExtra:
           cfg.recoveryMaxExtra != null
             ? Number(cfg.recoveryMaxExtra)
             : LIVE_GREEN_DNA.liveOps.recoveryMaxExtra ?? 0,
+        dustTradeRs:
+          cfg.dustTradeRs != null
+            ? Number(cfg.dustTradeRs)
+            : LIVE_GREEN_DNA.liveOps.dustTradeRs ?? 0,
       })
     : rawTrades;
 

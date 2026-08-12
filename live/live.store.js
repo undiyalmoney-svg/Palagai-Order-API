@@ -135,8 +135,10 @@ function statusPayload(session) {
       crudeLots: cfg.crudeLots || 1,
       crudeStrategy: cfg.crudeStrategy || 'live-crude-green',
       crudeAfterIndexClose: cfg.crudeAfterIndexClose !== false,
-      bankOnlyAfterNifty: cfg.bankOnlyAfterNifty !== false,
-      label: 'Nifty → Bank (after Nifty) → Crude after NSE',
+      bankOnlyAfterNifty: !!cfg.bankOnlyAfterNifty,
+      label: cfg.bankOnlyAfterNifty
+        ? 'Nifty → Bank (after Nifty) → Crude after NSE'
+        : 'Treasure · Nifty + Bank + Crude (unlimited)',
     },
     risk: {
       dayProfitLockRsBase: DAY_PROFIT_LOCK_RS,

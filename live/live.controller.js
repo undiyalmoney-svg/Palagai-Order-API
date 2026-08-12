@@ -19,7 +19,7 @@ async function health(_req, res) {
   res.json({
     status: 'ok',
     service: 'palagai-live-control',
-    note: 'Server Live — Pivot S/R · Perfect SL · Band ₹750–2000 · Paper≡Live',
+    note: 'Server Live — Treasure · Pivot S/R · Perfect SL · Unlimited · Zero-red path · Paper≡Live',
     version: APP_VERSION,
     appBuild: APP_BUILD,
     dnaId: LIVE_GREEN_DNA.id,
@@ -28,11 +28,11 @@ async function health(_req, res) {
     bankAllowed: AUTOBOT_ALLOW_BANK,
     crudeAllowed: AUTOBOT_ALLOW_CRUDE,
     paperLivePath: true,
-    bankOnlyAfterNifty: true,
+    bankOnlyAfterNifty: !!ops.bankOnlyAfterNifty,
     crudeDna: AUTOBOT_ALLOW_CRUDE
       ? `after NSE · OR${c.minOrWidth}–${c.maxOrWidth} · ${c.entryStart}–${c.entryEnd} · SL${c.stopPts}/TP${c.targetPts} · trail ₹${c.profitLockArmRs}→₹${c.profitLockLockRs} · max${c.maxTradesDay} · first-win · no index-session overlap`
       : 'OFF — Autobot will not trade Crude',
-    trapDna: `Pivot S/R · ${t.srMethod || 'pivot'}${t.pivotStrength || 2} · perfectSL · mode ${t.trapMode || 'both'} · pierce ${t.piercePts}/B${t.bankPiercePts} · peak ₹${t.profitLockArmRs}/${t.profitLockLockRs}/${t.profitLockGivebackRs} · max${t.maxTradesPerDay} · stand-down ₹${ops.optionStandDownRs}`,
+    trapDna: `Treasure · Pivot${t.pivotStrength || 2} · perfectSL · ${t.trapMode || 'both'} · pierce ${t.piercePts}/B${t.bankPiercePts} · peak ₹${t.profitLockArmRs}/${t.profitLockLockRs}/${t.profitLockGivebackRs} · max${t.maxTradesPerDay || '∞'} · stand ₹${ops.optionStandDownRs}`,
     dayProfitLockRsBase: DAY_PROFIT_LOCK_RS,
     strictDayStopRsBase: STRICT_DAY_STOP_RS,
     liveOps: { ...ops, ...LIVE_CRUDE_GREEN_DNA.liveOps },
@@ -40,7 +40,7 @@ async function health(_req, res) {
       index: LIVE_GREEN_DNA.research,
       crude: LIVE_CRUDE_GREEN_DNA.research,
       greenPath:
-        'Daily Band Loop: Nifty→Bank(after Nifty green)→lock ₹750/₹2000→no dig after green→Crude if still <₹750.',
+        'Treasure: Pivot2 BOTH pierce20/B60 · perfectSweepSl · stand0 · unlimited · one-leg · reject estimated · no day lock/band/bank gate.',
       dailyBand: LIVE_GREEN_DNA.dailyBand,
     },
     defaults: DAILY_3K_PRESET,
@@ -67,7 +67,10 @@ async function defaults(_req, res) {
     preset: DAILY_3K_PRESET,
     dayProfitLockRsBase: DAY_PROFIT_LOCK_RS,
     strictDayStopRsBase: STRICT_DAY_STOP_RS,
-    checkboxHint: `₹${DAY_PROFIT_LOCK_RS.toLocaleString('en-IN')} × lots (1→₹3k · 3→₹9k)`,
+    checkboxHint:
+      DAY_PROFIT_LOCK_RS > 0
+        ? `₹${DAY_PROFIT_LOCK_RS.toLocaleString('en-IN')} × lots (1→₹3k · 3→₹9k)`
+        : 'Treasure DNA — no day profit lock / stop (S/R + perfect SL)',
     /** Autobot UI should render these books (Crude is server-forced ON). */
     books: {
       nifty: true,
@@ -78,8 +81,8 @@ async function defaults(_req, res) {
       deskLots: DAILY_3K_PRESET.niftyLots,
       crudeStrategy: 'live-crude-green',
       crudeWindow: '16:00–21:00 IST (hard gate 15:15)',
-      bankOnlyAfterNifty: true,
-      label: 'Nifty → Bank (after Nifty) → Crude after NSE',
+      bankOnlyAfterNifty: !!LIVE_GREEN_DNA.liveOps.bankOnlyAfterNifty,
+      label: 'Treasure · Nifty + Bank + Crude (unlimited · no band)',
       capitalLots: {
         under75k: 1,
         from75k: 2,
@@ -90,7 +93,7 @@ async function defaults(_req, res) {
       },
     },
     uiHint:
-      'Capital ladder → shared deskLots (Nifty=Bank=Crude): <₹75k→1, ₹75k+→2, then ≈₹1L per lot (₹6L→6, max 10). Auto-update all lot fields when capital changes; send capitalRs; Stop→Start.',
+      'Treasure DNA: Pivot S/R + perfect SL, unlimited trades, no day lock/band. Capital ladder → shared deskLots. Send capitalRs; Stop→Start.',
   });
 }
 

@@ -86,7 +86,7 @@ function indexEntryGate(summary, ops = {}) {
     0,
     Number(ops.deskGreenLockRs != null ? ops.deskGreenLockRs : ops.bandMinRs) || 0,
   );
-  const winStreak = ops.winStreakToBand !== false;
+  const winStreak = ops.winStreakToBand === true;
   const firstWin = ops.indexFirstWinLock === true;
   const net = Number(summary?.dayNet) || 0;
   const hadWin = !!summary?.hadIndexWin;
@@ -123,7 +123,7 @@ function indexEntryGate(summary, ops = {}) {
 }
 
 function bankEntryGate(summary, ops = {}) {
-  const afterNifty = ops.bankOnlyAfterNifty !== false;
+  const afterNifty = ops.bankOnlyAfterNifty === true;
   const afterNiftyGreen = ops.bankOnlyAfterNiftyGreen === true;
   const niftyTaken =
     (Number(summary?.indexTrades) || 0) > 0 || summary?.niftyTaken === true;

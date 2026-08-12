@@ -16,16 +16,20 @@ const DEFAULT_LIVE_PATH = {
   rejectEstimatedPremium: true,
   noEstimatedExitPnl: true,
   fillFrictionPremium: 0.5,
-  maxOpenLegs: ops.maxOpenLegs || 1,
-  dayProfitLockRs: LIVE_GREEN_DNA.dayProfitLockRs || band.maxRs || 2000,
-  dayStopRs: LIVE_GREEN_DNA.strictDayStopRs || 2950,
-  bankOnlyAfterNifty: ops.bankOnlyAfterNifty !== false,
+  maxOpenLegs: ops.maxOpenLegs != null ? ops.maxOpenLegs : 1,
+  dayProfitLockRs:
+    LIVE_GREEN_DNA.dayProfitLockRs != null
+      ? LIVE_GREEN_DNA.dayProfitLockRs
+      : band.maxRs || 0,
+  dayStopRs:
+    LIVE_GREEN_DNA.strictDayStopRs != null ? LIVE_GREEN_DNA.strictDayStopRs : 0,
+  bankOnlyAfterNifty: ops.bankOnlyAfterNifty === true,
   bankOnlyAfterNiftyGreen: ops.bankOnlyAfterNiftyGreen === true,
-  winStreakToBand: ops.winStreakToBand !== false,
+  winStreakToBand: ops.winStreakToBand === true,
   indexFirstWinLock: ops.indexFirstWinLock === true,
-  deskGreenLockRs:
-    ops.deskGreenLockRs != null ? ops.deskGreenLockRs : band.minRs || 750,
+  deskGreenLockRs: ops.deskGreenLockRs != null ? ops.deskGreenLockRs : 0,
   recoveryMaxExtra: ops.recoveryMaxExtra != null ? ops.recoveryMaxExtra : 0,
+  dustTradeRs: ops.dustTradeRs != null ? ops.dustTradeRs : 0,
 };
 
 function tradeNetRs(t) {
@@ -54,8 +58,7 @@ function applyFillFriction(premium, side, friction) {
 }
 
 /**
- * Chronological desk filter: reject estimated, one-leg, daily band lock,
- * no-dig after green, Bank-after-Nifty(+green).
+ * Chronological desk filter: reject estimated, one-leg, optional gates.
  */
 function filterTradesLivePath(trades, opts = {}) {
   const cfg = { ...DEFAULT_LIVE_PATH, ...opts };
@@ -63,10 +66,11 @@ function filterTradesLivePath(trades, opts = {}) {
   const lockRs = Math.max(0, Number(cfg.dayProfitLockRs) || 0);
   const stopRs = Math.max(0, Number(cfg.dayStopRs) || 0);
   const bandMin = Math.max(0, Number(cfg.deskGreenLockRs) || 0);
+  const dustRs = Math.max(0, Number(cfg.dustTradeRs) || 0);
   const rejectEst = cfg.rejectEstimatedPremium !== false;
-  const bankAfterNifty = cfg.bankOnlyAfterNifty !== false;
+  const bankAfterNifty = cfg.bankOnlyAfterNifty === true;
   const bankAfterNiftyGreen = cfg.bankOnlyAfterNiftyGreen === true;
-  const winStreak = cfg.winStreakToBand !== false;
+  const winStreak = cfg.winStreakToBand === true;
   const firstWin = cfg.indexFirstWinLock === true;
 
   const sorted = [...(trades || [])].sort((a, b) =>
@@ -106,6 +110,10 @@ function filterTradesLivePath(trades, opts = {}) {
     const isIndex = isIndexBook(t.instrumentId);
     const isCrude = kind === 'crude';
 
+    const net = tradeNetRs(t);
+    // Charge-dust: skip microscopic nets so they don't create fake red days.
+    if (dustRs > 0 && Math.abs(net) < dustRs) continue;
+
     if (bankAfterNifty && isBank && !niftyTaken) continue;
     if (bankAfterNiftyGreen && isBank && niftyNet <= 0) continue;
 
@@ -113,7 +121,6 @@ function filterTradesLivePath(trades, opts = {}) {
     if (isIndex && bandMin > 0 && dayNet >= bandMin) continue;
     if (isIndex && winStreak && lostAfterGreen) continue;
     if (isIndex && firstWin && dayNet > 0) continue;
-    // Crude only helps finish the band — skip if already in-band.
     if (isCrude && bandMin > 0 && dayNet >= bandMin) continue;
 
     const entry = String(t.entryTime || '');
@@ -121,7 +128,6 @@ function filterTradesLivePath(trades, opts = {}) {
     if (maxLegs > 0 && openUntil && entry < openUntil) continue;
 
     const before = dayNet;
-    const net = tradeNetRs(t);
     kept.push(t);
     openUntil = exit;
     dayNet += net;
@@ -131,7 +137,7 @@ function filterTradesLivePath(trades, opts = {}) {
     }
     if (isIndex && before > 0 && net < 0) {
       lostAfterGreen = true;
-      indexStopped = true;
+      if (winStreak) indexStopped = true;
     }
     if (bandMin > 0 && dayNet >= bandMin) dayStopped = true;
     if (lockRs > 0 && dayNet >= lockRs) dayStopped = true;
