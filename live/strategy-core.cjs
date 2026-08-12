@@ -4691,24 +4691,13 @@ function morningOrWidth(dayBars, orEnd) {
   return or ? or.width : 0;
 }
 function priorDayHl(series, day) {
+  let last = null;
   let hi = -Infinity;
   let lo = Infinity;
-  let found = false;
-  for (const b of series) {
-    const d = extractTradeDate(b.date);
-    if (d >= day) break;
-    // last completed session only
-    found = true;
-  }
-  // Walk once: collect last day before `day`
-  let last = null;
   for (const b of series) {
     const d = extractTradeDate(b.date);
     if (d >= day) break;
     if (d !== last) {
-      if (last != null && Number.isFinite(hi) && Number.isFinite(lo)) {
-        // keep rolling until we finish prior day
-      }
       last = d;
       hi = -Infinity;
       lo = Infinity;
@@ -4716,7 +4705,7 @@ function priorDayHl(series, day) {
     hi = Math.max(hi, b.high);
     lo = Math.min(lo, b.low);
   }
-  if (!found || !Number.isFinite(hi) || !Number.isFinite(lo) || hi < lo) return null;
+  if (last == null || !Number.isFinite(hi) || !Number.isFinite(lo) || hi < lo) return null;
   return { hi, lo };
 }
 function levelNear(level, anchors, pts) {

@@ -47,10 +47,19 @@ const LIVE_GREEN_DNA = {
   strictDayStop: true,
   strictDayStopRs: 2950,
 
-  /** Trap signal DNA — research winner; do not loosen */
+  /**
+   * Trap = Support/Resistance engine:
+   *   swing lookback → S/R · pierce beyond level · reclaim close · next-bar confirm
+   *   optional OR / PDHL confluence so we only trade structural S/R
+   */
   trap: {
     piercePts: 20,
     bankPiercePts: 60,
+    swingLb: 5,
+    trapMode: 'trap',
+    /** Swing S/R must sit within N pts of morning OR hi/lo (0=off until hunt sets it) */
+    orConfluencePts: 40,
+    pdhlConfluencePts: 0,
     profitLockArmRs: 100,
     profitLockLockRs: 50,
     profitLockGivebackRs: 50,
@@ -113,12 +122,15 @@ function liveGreenTrapExtras(overrides = {}) {
   return {
     piercePts: t.piercePts,
     bankPiercePts: t.bankPiercePts,
+    swingLb: t.swingLb || 5,
     profitLockArmRs: t.profitLockArmRs,
     profitLockLockRs: t.profitLockLockRs,
     profitLockGivebackRs: t.profitLockGivebackRs,
     slConfirmCutoffEnabled: t.slConfirmCutoffEnabled,
     slConfirmSoftRs: t.softRs,
-    trapMode: 'both',
+    trapMode: t.trapMode || 'trap',
+    orConfluencePts: t.orConfluencePts || 0,
+    pdhlConfluencePts: t.pdhlConfluencePts || 0,
     bounceOrPierceMult: 0,
     bounceOrPierceCap: 0,
     optionStandDownRs: LIVE_GREEN_DNA.liveOps.optionStandDownRs,
