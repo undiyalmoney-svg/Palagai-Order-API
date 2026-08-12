@@ -114,7 +114,7 @@ const LIVE_GREEN_DNA = {
     approach:
       'Pivot-2 both-direction S/R (index) + confirmed OR breakout (crude). Max 3/book/day + cooldown + daily loss stop. ₹1,000/day desk target lock (× lots): book the target and protect it.',
     measuredJulAug:
-      '2026-07-01→08-12 live-path, 1 lot, guarded: all-3 20/20 green · avg ~₹1,166/day (Bank ₹19,995 + Crude ₹2,052 + Nifty ₹1,274). With ₹1,000 lock most days land near target.',
+      '2026-07-01→08-12 live-path, 1 lot, guarded, WITH ₹1,000/day lock: all-3 20/20 green · net ₹19,778 · avg ₹989/day · 13/20 days hit ₹1,000+ (Bank-led ₹17,589 · Nifty ₹1,139 · Crude ₹1,050).',
     note:
       'Backtest on a favorable window; live can differ (intra-bar fills). Anti-churn caps make it far more live-faithful than before. Validate in PAPER — targets ₹1,000/day, does not guarantee it.',
   },
