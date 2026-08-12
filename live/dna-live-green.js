@@ -33,7 +33,8 @@ const LIVE_GREEN_DNA = {
 
   enableNifty: true,
   enableBank: true,
-  enableCrude: true,
+  /** Crude OFF by default (weakest book, only one with red days). Toggle in UI. */
+  enableCrude: false,
   niftyLots: 1,
   bankLots: 1,
   niftyStrategy: 'trap',

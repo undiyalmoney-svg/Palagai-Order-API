@@ -67,14 +67,15 @@ function lotsFromCapitalRs(capitalRs) {
 }
 
 const DAILY_3K_PRESET = {
-  id: 'daily-all3',
-  label: 'Professional · Pivot S/R + OR breakout · risk-managed',
+  id: 'daily-index-core',
+  label: 'Professional · Nifty+Bank core (Crude optional) · risk-managed',
   niftyLots: 1,
   bankLots: 1,
   crudeLots: 1,
   enableNifty: true,
   enableBank: true,
-  enableCrude: true,
+  /** Crude optional (off by default) — index N+B is the reliable engine. */
+  enableCrude: false,
   enableNatGas: false,
   enableKutty: false,
   kuttyAlone: false,
@@ -87,7 +88,7 @@ const DAILY_3K_PRESET = {
   paperLivePath: true,
   bankOnlyAfterNifty: false,
   researchNote:
-    'Professional risk-managed desk · confirmed pivot S/R + OR breakout · 2–2.5R · caps + cooldown + daily loss stop',
+    'Nifty+Bank core (17/17 green ~₹1,251/day). Crude optional — weakest book, only one with red days. Charges ~9% of gross (net figures). Lots auto from capital.',
   dnaId: LIVE_GREEN_DNA.id,
 };
 
@@ -206,7 +207,13 @@ function normalizeStartConfig(config = {}) {
   return {
     enableNifty: true,
     enableBank: AUTOBOT_ALLOW_BANK,
-    enableCrude: AUTOBOT_ALLOW_CRUDE,
+    /**
+     * Crude OFF by default — data shows it is the weakest book (avg ~₹187/day)
+     * and the only one with red days; index (Nifty+Bank) is 17/17 green at
+     * ~₹1,251/day. Still fully toggleable from the UI (send enableCrude:true).
+     */
+    enableCrude:
+      config.enableCrude != null ? !!config.enableCrude : false,
     deskLots,
     niftyLots,
     bankLots,
