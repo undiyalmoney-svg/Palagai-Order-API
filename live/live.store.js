@@ -159,6 +159,8 @@ function statusPayload(session) {
     /** Money ledger: paper marks overwritten by broker fills when realOrders. */
     trades: money.trades,
     totals: money.totals,
+    /** Closed round-trips today — one trade = placed + closed. */
+    tradeCounts: money.tradeCounts || { nifty: 0, bank: 0, crude: 0, other: 0, total: 0 },
     mongo: !!mongoDb,
     userId: session.userId,
   };

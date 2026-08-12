@@ -38,10 +38,26 @@ const {
   summarizeDeskDay,
   indexEntryGate,
   bankEntryGate,
+  bookKind,
 } = require('./desk-day-policy');
 
 const CRUDE_EXIT_BY = '23:10';
 const LOOKBACK_DAYS = 12;
+
+/** One trade = placed + closed (has entryTime and exitTime). */
+function countClosedTradesByBook(trades, today) {
+  const day = String(today || '').slice(0, 10);
+  const counts = { nifty: 0, bank: 0, crude: 0, other: 0, total: 0 };
+  for (const t of trades || []) {
+    if (String(t.entryTime || '').slice(0, 10) !== day) continue;
+    if (!t.exitTime) continue;
+    if (t.optionPnlRs == null && t.netOptionPnlRs == null) continue;
+    const k = bookKind(t.instrumentId);
+    counts[k] = (counts[k] || 0) + 1;
+    counts.total += 1;
+  }
+  return counts;
+}
 
 function istParts(d = new Date()) {
   const fmt = new Intl.DateTimeFormat('en-CA', {
@@ -147,6 +163,39 @@ class LiveWorker {
     this.reconciled = false;
     this.tickBusy = false;
     this.lastSignals = { nifty: '', bank: '', crude: '' };
+    /** Last TRADE_COUNT log signature (avoid spam). */
+    this.lastTradeCountSig = '';
+  }
+
+  /**
+   * Log each newly closed round-trip and a running day count.
+   * Count rule: one trade = placed + closed.
+   */
+  noteClosedTrades(added, today) {
+    const day = String(today || istParts().date).slice(0, 10);
+    for (const t of added || []) {
+      if (!t?.exitTime) continue;
+      const book = bookKind(t.instrumentId);
+      const net = Math.round(
+        t.netOptionPnlRs != null ? t.netOptionPnlRs : t.optionPnlRs || 0,
+      );
+      const entry = String(t.entryTime || '').slice(11, 16);
+      const exit = String(t.exitTime || '').slice(11, 16);
+      this.pushEvent(
+        'TRADE_CLOSED',
+        `${book.toUpperCase()} ${entry}→${exit} · ₹${net} · ${String(t.exitReason || '').slice(0, 60)}`,
+      );
+    }
+    const c = countClosedTradesByBook(this.liveTrades, day);
+    const sig = `N${c.nifty}|B${c.bank}|C${c.crude}|T${c.total}`;
+    if (sig !== this.lastTradeCountSig || (added && added.length)) {
+      this.lastTradeCountSig = sig;
+      this.pushEvent(
+        'TRADE_COUNT',
+        `Today closed (placed+closed): Nifty ${c.nifty} · Bank ${c.bank} · Crude ${c.crude} · total ${c.total}`,
+      );
+    }
+    return c;
   }
 
   deskOps(config = {}) {
@@ -203,14 +252,22 @@ class LiveWorker {
       'FILL',
       `${fill.instrumentName || fill.instrumentId || ''}: ${String(fill.side).toUpperCase()} ${fill.tradingSymbol} @ ${px.toFixed(2)}${pnl}`.trim(),
     );
+    // Exit fill completes a round-trip — bump day trade count in logs.
+    if (String(fill.side || '').toLowerCase() !== 'entry' && row.exitTime) {
+      const { date: today } = istParts();
+      this.noteClosedTrades([row], today);
+    }
   }
 
   /** Snapshot for GET /live/status — broker fills when real, else live-path paper. */
   moneySnapshot() {
     const real = !!this.getConfig()?.realOrders;
+    const { date: today } = istParts();
     return {
       trades: publicTrades(this.liveTrades),
       totals: moneyTotals(this.liveTrades, { brokerOnly: real }),
+      /** Closed round-trips today (placed + closed). */
+      tradeCounts: countClosedTradesByBook(this.liveTrades, today),
     };
   }
 
@@ -361,7 +418,10 @@ class LiveWorker {
             return s;
           },
         });
-        ingestReplayTrades(this.liveTrades, replay.trades, { rejectEstimated: true });
+        const niftyAdded = ingestReplayTrades(this.liveTrades, replay.trades, {
+          rejectEstimated: true,
+        });
+        this.noteClosedTrades(niftyAdded, today);
         const niftyPos = this.broker.positions?.get(NIFTY_50_INSTRUMENT.id);
         const niftyAlreadyLive =
           niftyPos && (niftyPos.status === 'open' || niftyPos.status === 'exiting');
@@ -416,7 +476,10 @@ class LiveWorker {
             return s;
           },
         });
-        ingestReplayTrades(this.liveTrades, replay.trades, { rejectEstimated: true });
+        const bankAdded = ingestReplayTrades(this.liveTrades, replay.trades, {
+          rejectEstimated: true,
+        });
+        this.noteClosedTrades(bankAdded, today);
         // Daily-band + Bank-after-Nifty-green: new entries only when gates allow.
         const bankOpen = this.liveOpenForSync(
           BANK_NIFTY_INSTRUMENT.id,
@@ -491,7 +554,10 @@ class LiveWorker {
             enableEvening: crudeEntryOk && tradeParams.defaultEnableEvening,
             tradeParams,
           });
-          ingestReplayTrades(this.liveTrades, replay.trades, { rejectEstimated: true });
+          const crudeAdded = ingestReplayTrades(this.liveTrades, replay.trades, {
+            rejectEstimated: true,
+          });
+          this.noteClosedTrades(crudeAdded, today);
           const crudeSyncOpen = this.liveOpenForSync(
             CRUDE_OIL_MINI_INSTRUMENT.id,
             replay.open,

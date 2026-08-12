@@ -3,8 +3,8 @@
  * Capital: UI capitalRs → shared deskLots. Stop→Start to apply.
  */
 
-const APP_VERSION = '1.3.130';
-const APP_BUILD = '2026.08.12-all3-treasure';
+const APP_VERSION = '1.3.131';
+const APP_BUILD = '2026.08.12-trade-count-logs';
 const { LIVE_GREEN_DNA } = require('./dna-live-green');
 const { LIVE_CRUDE_GREEN_DNA } = require('./dna-live-crude-green');
 
