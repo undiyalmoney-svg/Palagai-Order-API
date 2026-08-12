@@ -3958,10 +3958,10 @@ function replayPaperOnCrude(params) {
 var TRAP_1LOT_DAILY_DNA_EXTRAS = {
   piercePts: 20,
   bankPiercePts: 60,
-  /** 1-lot bands — Paper/Live multiply by lotsMultiplier. */
-  profitLockArmRs: 100,
-  profitLockLockRs: 50,
-  profitLockGivebackRs: 50,
+  /** 1-lot bands — Paper/Live multiply by lotsMultiplier. Smart-exit trail. */
+  profitLockArmRs: 80,
+  profitLockLockRs: 70,
+  profitLockGivebackRs: 30,
   slConfirmCutoffEnabled: false,
   slConfirmCutoffFracR: 0,
   slConfirmCutoffMaxMfeR: 0,
@@ -4623,9 +4623,15 @@ function evaluateOptionPeakTrail(params) {
       hit: false
     };
   }
+  // Smart exit: as MFE stretches, shrink giveback so winners do not drain
+  // back through breakeven before the trail fires.
+  const peak = params.optionPeakMfeRs;
+  const baseGive = Math.max(0, params.givebackRs);
+  const give =
+    peak >= params.armRs * 2 ? Math.min(baseGive, Math.max(15, baseGive * 0.5)) : baseGive;
   const floorRs = Math.max(
     params.lockRs,
-    params.optionPeakMfeRs - Math.max(0, params.givebackRs)
+    peak - give
   );
   const floorPremium = roundOptionPremiumTick(entry + floorRs / units);
   return {

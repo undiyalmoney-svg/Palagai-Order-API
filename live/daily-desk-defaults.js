@@ -2,15 +2,16 @@
  * Daily desk DNA — Autobot multi-strategy Paper≡Live.
  *
  * 1) Nifty Trap (primary)
- * 2) Bank Trap — only AFTER Nifty traded that day (zero-red all-three rule)
- * 3) Crude LIVE_CRUDE_GREEN after NSE (second session)
+ * 2) Bank Trap — after Nifty traded AND Nifty day net green
+ * 3) Index first-win green lock (+ one recovery shot if desk red after a win)
+ * 4) Crude LIVE_CRUDE_GREEN after NSE (second session)
  *
  * Capital: UI `capitalRs` / `capital` → one shared deskLots for Nifty+Bank+Crude.
  * Crude never keeps a private lot size. Stop→Start required to apply a new capital.
  */
 
-const APP_VERSION = '1.3.124';
-const APP_BUILD = '2026.08.11-standdown-scale-lots';
+const APP_VERSION = '1.3.125';
+const APP_BUILD = '2026.08.12-first-win-green-lock';
 const { LIVE_GREEN_DNA } = require('./dna-live-green');
 const { LIVE_CRUDE_GREEN_DNA } = require('./dna-live-crude-green');
 
@@ -249,6 +250,22 @@ function normalizeStartConfig(config = {}) {
       config.bankOnlyAfterNifty != null
         ? !!config.bankOnlyAfterNifty
         : LIVE_GREEN_DNA.liveOps.bankOnlyAfterNifty !== false,
+    bankOnlyAfterNiftyGreen:
+      config.bankOnlyAfterNiftyGreen != null
+        ? !!config.bankOnlyAfterNiftyGreen
+        : LIVE_GREEN_DNA.liveOps.bankOnlyAfterNiftyGreen === true,
+    indexFirstWinLock:
+      config.indexFirstWinLock != null
+        ? !!config.indexFirstWinLock
+        : LIVE_GREEN_DNA.liveOps.indexFirstWinLock !== false,
+    deskGreenLockRs:
+      config.deskGreenLockRs != null
+        ? Math.max(0, Number(config.deskGreenLockRs) || 0)
+        : LIVE_GREEN_DNA.liveOps.deskGreenLockRs ?? 50,
+    recoveryMaxExtra:
+      config.recoveryMaxExtra != null
+        ? Math.max(0, Math.floor(Number(config.recoveryMaxExtra) || 0))
+        : LIVE_GREEN_DNA.liveOps.recoveryMaxExtra ?? 1,
   };
 }
 
