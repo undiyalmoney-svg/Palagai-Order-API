@@ -1,20 +1,20 @@
 /**
- * CRUDE TREASURE DNA v4 — pairs with index treasure (Nifty+Bank).
+ * PROFESSIONAL CRUDE DNA (v5) — risk-managed after-NSE breakout.
  *
- * Hunt + refine 2026-08-12 (live-path · reject estimated · dust ₹10):
- *   Session-OR · SL20/TP60 · OR width 35–65 · confirm OFF · unlimited
- *   · trail ₹350→₹180 · after NSE 16:00–21:00 · no day lock/stop
+ * Why the old v4 bled: SL20 is nothing for Crude Oil (moves 20 pts constantly),
+ * confirm-off + unlimited re-entered every 60s tick → 18 losing round-trips,
+ * each paying the option spread. Professional fix:
+ *   - Confirmation ON, wider structural SL (40 pts), 2R target.
+ *   - Max 2 trades/day + cooldown (worker guard) + daily loss stop.
+ *   - Only clean OR-range breakouts after NSE close (16:00–21:00).
  *
- * Crude-only (Jul 1 → Aug 11 marks): 11/11 green · avg ~₹839/day
- * All3 with index treasure: 20/20 green · avg ~₹1,719/day
- *
- * Hard worker gate: no new Crude before 15:15 IST.
+ * NOT a guaranteed-green promise. Validate in paper.
  */
 
 const LIVE_CRUDE_GREEN_DNA = {
-  id: 'live-crude-treasure-v4',
-  label: 'Crude Treasure · Session-OR · Unlimited · Zero-red',
-  version: '2026.08.12-crude-treasure',
+  id: 'live-crude-pro-v5',
+  label: 'Crude Professional · OR breakout · risk-managed',
+  version: '2026.08.12-crude-professional',
   profileId: 'live-crude-green',
 
   enableNifty: false,
@@ -23,11 +23,11 @@ const LIVE_CRUDE_GREEN_DNA = {
   crudeLots: 1,
   crudeStrategy: 'live-crude-green',
 
-  /** No profit/stop caps — S/R-OR + trail carry the edge */
-  dayProfitLock: false,
-  dayProfitLockRs: 0,
-  strictDayStop: false,
-  strictDayStopRs: 0,
+  /** Professional daily risk envelope. */
+  dayProfitLock: true,
+  dayProfitLockRs: 1500,
+  strictDayStop: true,
+  strictDayStopRs: 800,
 
   signal: {
     entryMode: 'session-or',
@@ -36,19 +36,20 @@ const LIVE_CRUDE_GREEN_DNA = {
     /** After Bank/Nifty cash close — no overlap with index session. */
     entryStart: '16:00',
     entryEnd: '21:00',
-    stopPts: 20,
-    targetPts: 60,
-    /** Hunt winner: confirm OFF */
-    requireConfirm: false,
+    /** Wider structural stop — Crude noise chops a 20pt SL to pieces. */
+    stopPts: 40,
+    targetPts: 80,
+    /** Confirmation ON — no raw break entries. */
+    requireConfirm: true,
     firstWinLock: false,
-    /** 0 = unlimited */
-    maxTradesDay: 0,
+    /** Hard cap — quality over churn (worker cooldown also applies). */
+    maxTradesDay: 2,
     minOrWidth: 35,
     maxOrWidth: 65,
-    breakBufferPts: 0,
-    profitLockArmRs: 350,
-    profitLockLockRs: 180,
-    profitLockGivebackRs: 170,
+    breakBufferPts: 5,
+    profitLockArmRs: 400,
+    profitLockLockRs: 220,
+    profitLockGivebackRs: 180,
   },
 
   liveOps: {
@@ -60,18 +61,17 @@ const LIVE_CRUDE_GREEN_DNA = {
     cancelSlBeforeExit: true,
     fillLedger: true,
     trailProtectiveSl: true,
+    /** Anti-churn (enforced in worker). */
+    cooldownMin: 20,
+    maxTradesDay: 2,
+    dayLossStopRs: 500,
   },
 
   research: {
-    windowLiveMarks: '2026-07-01 → 2026-08-11',
-    crudeZeroRed:
-      '11/11 green · net ₹9,227 · avg ₹839/day · sor SL20/TP60 · OR35–65 · confirm OFF · unlimited · trail on',
-    crudeDayTable:
-      'Jul2 +157 · 9 +264 · 17 +1187 · 20 +830 · 22 +1193 · 28 +708 · 30 +1160 · 31 +1287 · Aug5 +226 · 6 +901 · 10 +1314',
-    all3ZeroRed:
-      '20/20 green · net ₹34,379 · avg ₹1,719/day with index treasure (pivot2 BOTH p20/B60 stand0)',
+    approach:
+      'After-NSE OR breakout with confirmation, wider 40pt SL, 2R target, max 2 trades/day, cooldown, daily loss stop. Slower & selective to survive Crude noise + option spread.',
     note:
-      'After NSE only. OR35–65 beat OR40–60 (more crude days + higher All3 avg). Trail required (off → 1 red). No trade/profit caps.',
+      'Redesigned after v4 churned 18 losing round-trips live (SL20 too tight, confirm off, unlimited). Validate in PAPER — no all-green guarantee.',
   },
 };
 
@@ -101,7 +101,7 @@ function liveCrudeGreenProfileOverrides() {
     defaultEnableMorning: false,
     defaultEnableEvening: true,
     dailyBandLabel:
-      'Treasure · after NSE · OR35–65 · 16:00–21:00 · SL20/TP60 · no confirm · trail ₹350→₹180 · unlimited',
+      'Professional · after NSE · OR35–65 · 16:00–21:00 · SL40/TP80 · confirm ON · trail ₹400→₹220 · max 2/day',
     profitLockArmRs: s.profitLockArmRs,
     profitLockLockRs: s.profitLockLockRs,
     profitLockGivebackRs: s.profitLockGivebackRs,

@@ -1,26 +1,31 @@
 /**
- * TREASURE DNA — Zero-red live-path S/R (hunt 2026-08-12).
+ * PROFESSIONAL INDEX DNA (v8) — risk-managed Nifty + Bank options desk.
  *
- * Signal (no trade caps):
- *   Pivot2 S/R · mode BOTH · pierce20/B60 · perfect sweep SL · stand-down OFF
- *   maxTrades = unlimited (0)
+ * Philosophy (why this beats the old "unlimited zero-red" fiction):
+ *   - Live re-runs every 60s and the real exchange SL fills intra-bar. The old
+ *     unlimited/confirm-off DNA churned 26 round-trips/day, bleeding spread +
+ *     charges. A professional book trades FEW, HIGH-CONVICTION setups and holds
+ *     for a real R-multiple so the spread is a small fraction of the move.
  *
- * Desk (paper≡live only — not profit caps):
- *   one open leg · reject estimated premiums · fill ledger · trail SL
- *   · cancel SL before EXIT · NO day lock/stop · NO band lock · NO bank gate
+ * Rules:
+ *   - Entry: confirmed pivot S/R (strength 3) reversal, with a real confirm
+ *     candle body, preferring prior-day H/L structural levels. Mode = trap
+ *     (fade extremes) — no chasing both directions on every bar.
+ *   - Risk: structural sweep SL padded, clamped to a min/max risk band so we
+ *     skip chop (too-tight) and gaps (too-wide). Target 2.5R, lock to
+ *     breakeven+ after the move arms.
+ *   - Trade budget: max 3 quality trades/book/day + cooldown (worker guard).
+ *   - Daily risk: hard day loss stop + day profit lock (capital protection).
  *
- * Live-path (reject estimated, |dayNet|≥₹10):
- *   2026-07-15 → 2026-08-11 · 18/18 green · net ₹26,124 · avg ₹1,451/day
- *   best +₹3,030 · worst +₹41
- * Earlier months lack expired NFO option history on Kite (cannot mark live).
- * Paper+estimated over full 5m ≈ 100/101 green · avg ~₹1.9k (1 residual red).
+ * NOT a guaranteed-green promise. Validate in paper before real money.
  */
 
 const LIVE_GREEN_DNA = {
-  id: 'live-green-treasure-v7',
-  label: 'Treasure · Pivot S/R · Unlimited · Zero-red path',
-  version: '2026.08.12-treasure-zero-red',
+  id: 'live-green-pro-v8',
+  label: 'Professional · Pivot S/R reversal · risk-managed',
+  version: '2026.08.12-professional',
 
+  /** Kept for legacy desk-policy math; band lock itself is off. */
   dailyBand: {
     minRs: 0,
     maxRs: 0,
@@ -34,41 +39,53 @@ const LIVE_GREEN_DNA = {
   niftyStrategy: 'trap',
   bankStrategy: 'trap',
 
-  /** No profit/stop caps — S/R + SL carry the edge */
-  dayProfitLock: false,
-  dayProfitLockRs: 0,
-  strictDayStop: false,
-  strictDayStopRs: 0,
+  /** Professional daily risk envelope (per lot; split across Nifty+Bank). */
+  dayProfitLock: true,
+  dayProfitLockRs: 2500,
+  strictDayStop: true,
+  strictDayStopRs: 1500,
 
   trap: {
     piercePts: 20,
     bankPiercePts: 60,
     swingLb: 5,
     srMethod: 'pivot',
-    pivotStrength: 2,
+    /** Cleaner, rarer levels (7-bar fractal) → fewer, better setups. */
+    pivotStrength: 3,
     perfectSweepSl: true,
-    slPadPts: 1,
-    trapMode: 'both',
+    slPadPts: 2,
+    /** Reversal at structural S/R only — no both-direction chasing. */
+    trapMode: 'trap',
+    /** Require a real confirmation candle body (points) before entry. */
+    minConfirmBody: 8,
+    bankMinConfirmBody: 20,
+    /** Skip chop (too-tight SL) and gaps (too-wide SL). */
+    minRiskPts: 10,
+    maxRiskPts: 45,
+    bankMinRiskPts: 25,
+    bankMaxRiskPts: 120,
     orConfluencePts: 0,
-    pdhlConfluencePts: 0,
-    profitLockArmRs: 100,
-    profitLockLockRs: 50,
-    profitLockGivebackRs: 50,
-    /** 0 = unlimited */
-    maxTradesPerDay: 0,
-    bankMaxTradesPerDay: 0,
-    targetRMultiple: 3.5,
+    /** Prefer prior-day High/Low as structural S/R (strong levels). */
+    pdhlConfluencePts: 30,
+    bankPdhlConfluencePts: 80,
+    /** Arm a protective lock after a real move, give back little. */
+    profitLockArmRs: 900,
+    profitLockLockRs: 500,
+    profitLockGivebackRs: 300,
+    /** Quality over quantity — capped, cooldown enforced in worker. */
+    maxTradesPerDay: 3,
+    bankMaxTradesPerDay: 3,
+    targetRMultiple: 2.5,
     confirmNextBar: true,
     slConfirmCutoffEnabled: false,
     softRs: 0,
     entryTimeStart: '09:45',
-    entryTimeEnd: '14:45',
+    entryTimeEnd: '14:30',
     exitTime: '15:15',
   },
 
   liveOps: {
     maxOpenLegs: 1,
-    /** Hunt winner: stand-down OFF */
     optionStandDownRs: 0,
     rejectEstimatedPremium: true,
     cancelSlBeforeExit: true,
@@ -83,23 +100,18 @@ const LIVE_GREEN_DNA = {
     indexFirstWinLock: false,
     recoveryMaxExtra: 0,
     crudeOnlyBelowBand: false,
-    /** Ignore charge-dust trades when scoring day green (|net|<₹10) */
     dustTradeRs: 10,
+    /** Anti-churn (enforced in worker): cooldown + trade caps + loss stops. */
+    cooldownMin: 12,
+    bookDayLossStopRs: 500,
+    deskDayLossStopRs: 900,
   },
 
   research: {
-    windowLiveMarks: '2026-07-15 → 2026-08-11',
-    windowRequested: '2026-03-12 → 2026-08-11 (5 months)',
-    zeroRedLive:
-      '18/18 green · net ₹26,124 · avg ₹1,451/day · pivot2 BOTH p20/B60 · stand0 · unlimited',
-    dayTable:
-      'Jul15 +41 · 16 +3030 · 17 +1047 · 20 +716 · 22 +2038 · 23 +1538 · 27 +1375 · 28 +1095 · 29 +2163 · 30 +1235 · 31 +495 · Aug3 +2394 · 4 +887 · 5 +1875 · 6 +146 · 7 +1656 · 10 +1714 · 11 +2679',
-    paperFiveMonth:
-      'With estimated marks ~100/101 green · avg ~₹1,869 · 1 residual red (−₹62)',
+    approach:
+      'Professional risk-managed reversal at confirmed pivot S/R. Few high-conviction trades, 2.5R targets, breakeven trail, max 3/book/day, cooldown, daily loss stop + profit lock.',
     note:
-      'Mar–mid Jul lack expired NFO option candles on Kite — live-path cannot mark those days. Treasure rules are the zero-red live-markable set.',
-    all3WithCrudeTreasure:
-      'With Crude Treasure (SOR SL20/TP60 OR35–65 confirm OFF): 20/20 green · avg ~₹1,719/day',
+      'Redesigned after live churn losses (26 round-trips/day bled spread). Backtest ≠ live for high-frequency options; this trades slower on purpose. Validate in PAPER before real money — no all-green guarantee.',
   },
 };
 
@@ -110,15 +122,18 @@ function liveGreenTrapExtras(overrides = {}) {
     bankPiercePts: t.bankPiercePts,
     swingLb: t.swingLb || 5,
     srMethod: t.srMethod || 'pivot',
-    pivotStrength: t.pivotStrength || 2,
+    pivotStrength: t.pivotStrength || 3,
     perfectSweepSl: t.perfectSweepSl !== false,
-    slPadPts: t.slPadPts != null ? t.slPadPts : 1,
+    slPadPts: t.slPadPts != null ? t.slPadPts : 2,
+    minConfirmBody: t.minConfirmBody != null ? t.minConfirmBody : 0,
+    minRiskPts: t.minRiskPts != null ? t.minRiskPts : 4,
+    maxRiskPts: t.maxRiskPts != null ? t.maxRiskPts : 28,
     profitLockArmRs: t.profitLockArmRs,
     profitLockLockRs: t.profitLockLockRs,
     profitLockGivebackRs: t.profitLockGivebackRs,
     slConfirmCutoffEnabled: t.slConfirmCutoffEnabled,
     slConfirmSoftRs: t.softRs,
-    trapMode: t.trapMode || 'both',
+    trapMode: t.trapMode || 'trap',
     orConfluencePts: t.orConfluencePts || 0,
     pdhlConfluencePts: t.pdhlConfluencePts || 0,
     bounceOrPierceMult: 0,
@@ -126,6 +141,18 @@ function liveGreenTrapExtras(overrides = {}) {
     optionStandDownRs: LIVE_GREEN_DNA.liveOps.optionStandDownRs,
     ...overrides,
   };
+}
+
+/** Bank uses wider risk/confirm bands (bigger point moves). */
+function liveGreenBankTrapExtras(overrides = {}) {
+  const t = LIVE_GREEN_DNA.trap;
+  return liveGreenTrapExtras({
+    minConfirmBody: t.bankMinConfirmBody != null ? t.bankMinConfirmBody : t.minConfirmBody,
+    minRiskPts: t.bankMinRiskPts != null ? t.bankMinRiskPts : t.minRiskPts,
+    maxRiskPts: t.bankMaxRiskPts != null ? t.bankMaxRiskPts : t.maxRiskPts,
+    pdhlConfluencePts: t.bankPdhlConfluencePts != null ? t.bankPdhlConfluencePts : t.pdhlConfluencePts,
+    ...overrides,
+  });
 }
 
 function liveGreenRecoveryTrailExtras() {
@@ -166,6 +193,7 @@ function liveGreenStartConfig() {
 module.exports = {
   LIVE_GREEN_DNA,
   liveGreenTrapExtras,
+  liveGreenBankTrapExtras,
   liveGreenRecoveryTrailExtras,
   liveGreenStartConfig,
 };

@@ -3,8 +3,8 @@
  * Capital: UI capitalRs → shared deskLots. Stop→Start to apply.
  */
 
-const APP_VERSION = '1.3.132';
-const APP_BUILD = '2026.08.12-anti-churn-guard';
+const APP_VERSION = '1.4.0';
+const APP_BUILD = '2026.08.12-professional-dna';
 const { LIVE_GREEN_DNA } = require('./dna-live-green');
 const { LIVE_CRUDE_GREEN_DNA } = require('./dna-live-crude-green');
 
@@ -68,7 +68,7 @@ function lotsFromCapitalRs(capitalRs) {
 
 const DAILY_3K_PRESET = {
   id: 'daily-all3',
-  label: 'Treasure · Pivot S/R · Unlimited',
+  label: 'Professional · Pivot S/R + OR breakout · risk-managed',
   niftyLots: 1,
   bankLots: 1,
   crudeLots: 1,
@@ -87,7 +87,7 @@ const DAILY_3K_PRESET = {
   paperLivePath: true,
   bankOnlyAfterNifty: false,
   researchNote:
-    'All3 Treasure · Index Pivot S/R + Crude SOR SL20/TP60 · unlimited · zero-red live-path',
+    'Professional risk-managed desk · confirmed pivot S/R + OR breakout · 2–2.5R · caps + cooldown + daily loss stop',
   dnaId: LIVE_GREEN_DNA.id,
 };
 

@@ -49,7 +49,7 @@ async function health(_req, res) {
       index: LIVE_GREEN_DNA.research,
       crude: LIVE_CRUDE_GREEN_DNA.research,
       greenPath:
-        'Anti-churn guard: cooldown + max 3 trades/book/day + per-book ₹500 & desk ₹900 loss stops. Reduces (not guarantees) red. Validate in paper.',
+        'Professional DNA: confirmed pivot S/R reversal (index) + confirmed OR breakout (crude), 2–2.5R targets, breakeven trail, max 2–3 trades/book/day, cooldown, per-book & desk daily loss stops + day profit lock. Validate in paper.',
       dailyBand: LIVE_GREEN_DNA.dailyBand,
     },
     defaults: DAILY_3K_PRESET,

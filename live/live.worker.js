@@ -27,7 +27,11 @@ const {
   moneyTotals,
   publicTrades,
 } = require('./live-trades');
-const { LIVE_GREEN_DNA, liveGreenTrapExtras } = require('./dna-live-green');
+const {
+  LIVE_GREEN_DNA,
+  liveGreenTrapExtras,
+  liveGreenBankTrapExtras,
+} = require('./dna-live-green');
 const {
   LIVE_CRUDE_GREEN_DNA,
   liveCrudeGreenProfileOverrides,
@@ -168,11 +172,11 @@ function trapInitOverrides(config, instrumentId) {
       dayProfitLock: !!config.dayProfitLock,
       strictDayStop: !!config.strictDayStop,
     }) || {};
-  const extras = liveGreenTrapExtras();
+  const bank = /bank/i.test(String(instrumentId || ''));
+  const extras = bank ? liveGreenBankTrapExtras() : liveGreenTrapExtras();
   if (config.optionStandDownRs != null) {
     extras.optionStandDownRs = Number(config.optionStandDownRs);
   }
-  const bank = /bank/i.test(String(instrumentId || ''));
   const maxTrades = bank
     ? LIVE_GREEN_DNA.trap.bankMaxTradesPerDay || LIVE_GREEN_DNA.trap.maxTradesPerDay
     : LIVE_GREEN_DNA.trap.maxTradesPerDay;
@@ -578,7 +582,7 @@ class LiveWorker {
         const bankOpen = this.liveOpenForSync(
           BANK_NIFTY_INSTRUMENT.id,
           replay.open,
-          liveGreenTrapExtras(),
+          liveGreenBankTrapExtras(),
         );
         const bankPos = this.broker.positions?.get(BANK_NIFTY_INSTRUMENT.id);
         const bankAlreadyLive =
