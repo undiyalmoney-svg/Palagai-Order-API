@@ -65,9 +65,11 @@ const LIVE_CRUDE_GREEN_DNA = {
   research: {
     windowLiveMarks: '2026-07-01 → 2026-08-11',
     crudeZeroRed:
-      '11/11 green · avg ~₹839/day · sor SL20/TP60 · OR35–65 · confirm OFF · unlimited · trail on',
+      '11/11 green · net ₹9,227 · avg ₹839/day · sor SL20/TP60 · OR35–65 · confirm OFF · unlimited · trail on',
+    crudeDayTable:
+      'Jul2 +157 · 9 +264 · 17 +1187 · 20 +830 · 22 +1193 · 28 +708 · 30 +1160 · 31 +1287 · Aug5 +226 · 6 +901 · 10 +1314',
     all3ZeroRed:
-      '20/20 green · avg ~₹1,719/day with index treasure (pivot2 BOTH p20/B60 stand0)',
+      '20/20 green · net ₹34,379 · avg ₹1,719/day with index treasure (pivot2 BOTH p20/B60 stand0)',
     note:
       'After NSE only. OR35–65 beat OR40–60 (more crude days + higher All3 avg). Trail required (off → 1 red). No trade/profit caps.',
   },
