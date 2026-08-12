@@ -30,9 +30,9 @@ async function health(_req, res) {
     paperLivePath: true,
     bankOnlyAfterNifty: !!ops.bankOnlyAfterNifty,
     crudeDna: AUTOBOT_ALLOW_CRUDE
-      ? `Treasure · after NSE · OR${c.minOrWidth}–${c.maxOrWidth} · ${c.entryStart}–${c.entryEnd} · SL${c.stopPts}/TP${c.targetPts} · confirm ${c.requireConfirm ? 'ON' : 'OFF'} · trail ₹${c.profitLockArmRs}→₹${c.profitLockLockRs} · max${c.maxTradesDay || '∞'}`
+      ? `Professional · after NSE · OR${c.minOrWidth}–${c.maxOrWidth} · ${c.entryStart}–${c.entryEnd} · SL${c.stopPts}/TP${c.targetPts} · confirm ${c.requireConfirm ? 'ON' : 'OFF'} · trail ₹${c.profitLockArmRs}→₹${c.profitLockLockRs} · max${c.maxTradesDay || '∞'}`
       : 'OFF — Autobot will not trade Crude',
-    trapDna: `Treasure · Pivot${t.pivotStrength || 2} · perfectSL · ${t.trapMode || 'both'} · pierce ${t.piercePts}/B${t.bankPiercePts} · peak ₹${t.profitLockArmRs}/${t.profitLockLockRs}/${t.profitLockGivebackRs} · max${t.maxTradesPerDay || '∞'} · stand ₹${ops.optionStandDownRs}`,
+    trapDna: `Professional · Pivot${t.pivotStrength || 3} · perfectSL · ${t.trapMode || 'trap'} · pierce ${t.piercePts}/B${t.bankPiercePts} · confirm≥${t.minConfirmBody || 0}pt · risk ${t.minRiskPts || 0}-${t.maxRiskPts || 0}pt · ${t.targetRMultiple || 0}R · max${t.maxTradesPerDay || '∞'}/book`,
     dayProfitLockRsBase: DAY_PROFIT_LOCK_RS,
     strictDayStopRsBase: STRICT_DAY_STOP_RS,
     liveOps: { ...ops, ...LIVE_CRUDE_GREEN_DNA.liveOps },
