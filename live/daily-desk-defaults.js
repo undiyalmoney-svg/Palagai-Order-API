@@ -3,8 +3,8 @@
  * Capital: UI capitalRs → shared deskLots. Stop→Start to apply.
  */
 
-const APP_VERSION = '1.3.129';
-const APP_BUILD = '2026.08.12-treasure-zero-red';
+const APP_VERSION = '1.3.130';
+const APP_BUILD = '2026.08.12-all3-treasure';
 const { LIVE_GREEN_DNA } = require('./dna-live-green');
 const { LIVE_CRUDE_GREEN_DNA } = require('./dna-live-crude-green');
 
@@ -87,7 +87,7 @@ const DAILY_3K_PRESET = {
   paperLivePath: true,
   bankOnlyAfterNifty: false,
   researchNote:
-    'Pivot S/R · perfect SL · unlimited · stand0 · 18/18 zero-red live-path',
+    'All3 Treasure · Index Pivot S/R + Crude SOR SL20/TP60 · unlimited · zero-red live-path',
   dnaId: LIVE_GREEN_DNA.id,
 };
 

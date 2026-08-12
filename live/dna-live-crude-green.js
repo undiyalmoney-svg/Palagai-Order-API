@@ -1,19 +1,20 @@
 /**
- * LIVE_CRUDE_GREEN DNA v3 — after NSE close only.
+ * CRUDE TREASURE DNA v4 — pairs with index treasure (Nifty+Bank).
  *
- * Never enters before 15:15 IST. Entries start 16:00 IST (after index cash).
+ * Hunt + refine 2026-08-12 (live-path · reject estimated · dust ₹10):
+ *   Session-OR · SL20/TP60 · OR width 35–65 · confirm OFF · unlimited
+ *   · trail ₹350→₹180 · after NSE 16:00–21:00 · no day lock/stop
  *
- * Engine-validated May–Aug 2026 @ 1 lot (charge-aware):
- *   13/14 green (92.9%) · net ≈ ₹2.6k · 0 entries before 15:30
+ * Crude-only (Jul 1 → Aug 11 marks): 11/11 green · avg ~₹839/day
+ * All3 with index treasure: 20/20 green · avg ~₹1,719/day
  *
- * Method: session-OR · OR width 40–60 · 16:00–21:00 · SL30/TP80
- *   trail ₹350→₹180 · max 1/day · first-win · confirm ON
+ * Hard worker gate: no new Crude before 15:15 IST.
  */
 
 const LIVE_CRUDE_GREEN_DNA = {
-  id: 'live-crude-green-v3',
-  label: 'Live Crude Green · after NSE close',
-  version: '2026.08.10-after-nse',
+  id: 'live-crude-treasure-v4',
+  label: 'Crude Treasure · Session-OR · Unlimited · Zero-red',
+  version: '2026.08.12-crude-treasure',
   profileId: 'live-crude-green',
 
   enableNifty: false,
@@ -22,10 +23,11 @@ const LIVE_CRUDE_GREEN_DNA = {
   crudeLots: 1,
   crudeStrategy: 'live-crude-green',
 
-  dayProfitLock: true,
-  dayProfitLockRs: 1500,
-  strictDayStop: true,
-  strictDayStopRs: 300,
+  /** No profit/stop caps — S/R-OR + trail carry the edge */
+  dayProfitLock: false,
+  dayProfitLockRs: 0,
+  strictDayStop: false,
+  strictDayStopRs: 0,
 
   signal: {
     entryMode: 'session-or',
@@ -34,13 +36,15 @@ const LIVE_CRUDE_GREEN_DNA = {
     /** After Bank/Nifty cash close — no overlap with index session. */
     entryStart: '16:00',
     entryEnd: '21:00',
-    stopPts: 30,
-    targetPts: 80,
-    requireConfirm: true,
-    firstWinLock: true,
-    maxTradesDay: 1,
-    minOrWidth: 40,
-    maxOrWidth: 60,
+    stopPts: 20,
+    targetPts: 60,
+    /** Hunt winner: confirm OFF */
+    requireConfirm: false,
+    firstWinLock: false,
+    /** 0 = unlimited */
+    maxTradesDay: 0,
+    minOrWidth: 35,
+    maxOrWidth: 65,
     breakBufferPts: 0,
     profitLockArmRs: 350,
     profitLockLockRs: 180,
@@ -59,13 +63,13 @@ const LIVE_CRUDE_GREEN_DNA = {
   },
 
   research: {
-    window: '2026-05-01 → 2026-08-10',
-    greenDays: '13/14 (92.9%)',
-    engineValidated: true,
-    netRsApprox: 2641,
-    earlyEntriesBefore1515: 0,
+    windowLiveMarks: '2026-07-01 → 2026-08-11',
+    crudeZeroRed:
+      '11/11 green · avg ~₹839/day · sor SL20/TP60 · OR35–65 · confirm OFF · unlimited · trail on',
+    all3ZeroRed:
+      '20/20 green · avg ~₹1,719/day with index treasure (pivot2 BOTH p20/B60 stand0)',
     note:
-      'Entry window 16:00–21:00 + hard worker gate 15:15. No Crude before 3:15pm IST.',
+      'After NSE only. OR35–65 beat OR40–60 (more crude days + higher All3 avg). Trail required (off → 1 red). No trade/profit caps.',
   },
 };
 
@@ -78,9 +82,9 @@ function liveCrudeGreenProfileOverrides() {
     morningTargetPts: s.targetPts,
     eveningTargetPts: s.targetPts,
     targetRMultiple: 0,
-    dayLossStopPts: Math.round(LIVE_CRUDE_GREEN_DNA.strictDayStopRs / 10),
-    strictDayLossPts: Math.round(LIVE_CRUDE_GREEN_DNA.strictDayStopRs / 10),
-    dayProfitLockPts: Math.round(LIVE_CRUDE_GREEN_DNA.dayProfitLockRs / 10),
+    dayLossStopPts: 0,
+    strictDayLossPts: 0,
+    dayProfitLockPts: 0,
     entryMode: s.entryMode,
     requireConfirm: s.requireConfirm,
     firstWinLock: s.firstWinLock,
@@ -95,7 +99,7 @@ function liveCrudeGreenProfileOverrides() {
     defaultEnableMorning: false,
     defaultEnableEvening: true,
     dailyBandLabel:
-      'After NSE · OR40–60 · 16:00–21:00 · SL30/TP80 · trail ₹350→₹180 · max1 · first-win',
+      'Treasure · after NSE · OR35–65 · 16:00–21:00 · SL20/TP60 · no confirm · trail ₹350→₹180 · unlimited',
     profitLockArmRs: s.profitLockArmRs,
     profitLockLockRs: s.profitLockLockRs,
     profitLockGivebackRs: s.profitLockGivebackRs,
@@ -118,12 +122,12 @@ function liveCrudeGreenStartConfig(opts = {}) {
     niftyStrategy: 'trap',
     bankStrategy: 'trap',
     crudeStrategy: LIVE_CRUDE_GREEN_DNA.crudeStrategy,
-    dayProfitLock: true,
-    strictDayStop: true,
+    dayProfitLock: false,
+    strictDayStop: false,
     enableKutty: false,
     kuttyAlone: false,
     realOrders: true,
-    dnaId: withIndex ? 'live-green+crude-v3' : LIVE_CRUDE_GREEN_DNA.id,
+    dnaId: withIndex ? 'live-green-treasure+crude-v4' : LIVE_CRUDE_GREEN_DNA.id,
     maxOpenLegs: LIVE_CRUDE_GREEN_DNA.liveOps.maxOpenLegs,
     crudeAfterIndexClose: true,
   };

@@ -280,7 +280,11 @@ async function runBacktest({ authorization, fromDate, toDate, config }, deps = {
         toDate,
       );
       const profile = cfg.crudeStrategy || 'live-crude-green';
-      const tradeParams = resolveCrudeStrategyProfile(profile);
+      let tradeParams = resolveCrudeStrategyProfile(profile);
+      if (profile === 'live-crude-green') {
+        const { liveCrudeGreenProfileOverrides } = require('./dna-live-crude-green');
+        tradeParams = { ...tradeParams, ...liveCrudeGreenProfileOverrides() };
+      }
       const dayLossStopPts = resolveCrudeProfileDayLossPts(tradeParams, !!cfg.strictDayStop);
       const crudeBase = {
         instrumentId: CRUDE_OIL_MINI_INSTRUMENT.id,

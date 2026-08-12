@@ -19,7 +19,7 @@ async function health(_req, res) {
   res.json({
     status: 'ok',
     service: 'palagai-live-control',
-    note: 'Server Live — Treasure · Pivot S/R · Perfect SL · Unlimited · Zero-red path · Paper≡Live',
+    note: 'Server Live — All3 Treasure · Nifty+Bank Pivot S/R + Crude Session-OR · Unlimited · Zero-red · Paper≡Live',
     version: APP_VERSION,
     appBuild: APP_BUILD,
     dnaId: LIVE_GREEN_DNA.id,
@@ -30,7 +30,7 @@ async function health(_req, res) {
     paperLivePath: true,
     bankOnlyAfterNifty: !!ops.bankOnlyAfterNifty,
     crudeDna: AUTOBOT_ALLOW_CRUDE
-      ? `after NSE · OR${c.minOrWidth}–${c.maxOrWidth} · ${c.entryStart}–${c.entryEnd} · SL${c.stopPts}/TP${c.targetPts} · trail ₹${c.profitLockArmRs}→₹${c.profitLockLockRs} · max${c.maxTradesDay} · first-win · no index-session overlap`
+      ? `Treasure · after NSE · OR${c.minOrWidth}–${c.maxOrWidth} · ${c.entryStart}–${c.entryEnd} · SL${c.stopPts}/TP${c.targetPts} · confirm ${c.requireConfirm ? 'ON' : 'OFF'} · trail ₹${c.profitLockArmRs}→₹${c.profitLockLockRs} · max${c.maxTradesDay || '∞'}`
       : 'OFF — Autobot will not trade Crude',
     trapDna: `Treasure · Pivot${t.pivotStrength || 2} · perfectSL · ${t.trapMode || 'both'} · pierce ${t.piercePts}/B${t.bankPiercePts} · peak ₹${t.profitLockArmRs}/${t.profitLockLockRs}/${t.profitLockGivebackRs} · max${t.maxTradesPerDay || '∞'} · stand ₹${ops.optionStandDownRs}`,
     dayProfitLockRsBase: DAY_PROFIT_LOCK_RS,
@@ -40,7 +40,7 @@ async function health(_req, res) {
       index: LIVE_GREEN_DNA.research,
       crude: LIVE_CRUDE_GREEN_DNA.research,
       greenPath:
-        'Treasure: Pivot2 BOTH pierce20/B60 · perfectSweepSl · stand0 · unlimited · one-leg · reject estimated · no day lock/band/bank gate.',
+        'All3 Treasure: Index Pivot2 BOTH p20/B60 stand0 + Crude SOR SL20/TP60 OR35–65 confirm OFF · unlimited · no day lock/band.',
       dailyBand: LIVE_GREEN_DNA.dailyBand,
     },
     defaults: DAILY_3K_PRESET,

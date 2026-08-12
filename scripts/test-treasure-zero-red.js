@@ -8,6 +8,7 @@ const assert = require('assert');
 const { filterTradesLivePath, DEFAULT_LIVE_PATH } = require('../live/live-path');
 const { indexEntryGate, bankEntryGate } = require('../live/desk-day-policy');
 const { LIVE_GREEN_DNA, liveGreenStartConfig } = require('../live/dna-live-green');
+const { LIVE_CRUDE_GREEN_DNA } = require('../live/dna-live-crude-green');
 const {
   APP_VERSION,
   APP_BUILD,
@@ -15,6 +16,7 @@ const {
   STRICT_DAY_STOP_RS,
   normalizeStartConfig,
 } = require('../live/daily-desk-defaults');
+const { resolveCrudeStrategyProfile } = require('../live/strategy-core.cjs');
 
 function t(partial) {
   return {
@@ -149,14 +151,34 @@ const bankGate = bankEntryGate(
 );
 assert.strictEqual(bankGate.allow, true, 'Bank free of Nifty gate');
 
-console.log('OK treasure zero-red DNA');
+// Crude treasure DNA (pairs with index for All3 demons).
+const crude = LIVE_CRUDE_GREEN_DNA;
+assert.strictEqual(crude.id, 'live-crude-treasure-v4');
+assert.strictEqual(crude.signal.stopPts, 20);
+assert.strictEqual(crude.signal.targetPts, 60);
+assert.strictEqual(crude.signal.minOrWidth, 35);
+assert.strictEqual(crude.signal.maxOrWidth, 65);
+assert.strictEqual(crude.signal.requireConfirm, false);
+assert.strictEqual(crude.signal.firstWinLock, false);
+assert.strictEqual(crude.signal.maxTradesDay, 0);
+assert.strictEqual(crude.dayProfitLock, false);
+assert.strictEqual(crude.strictDayStop, false);
+const crudeProf = resolveCrudeStrategyProfile('live-crude-green');
+assert.strictEqual(crudeProf.stopPts, 20);
+assert.strictEqual(crudeProf.eveningTargetPts, 60);
+assert.strictEqual(crudeProf.requireConfirm, false);
+assert.strictEqual(crudeProf.maxEveningTradesDay, 0);
+assert.strictEqual(crudeProf.dayProfitLockPts, 0);
+
+console.log('OK treasure zero-red DNA (index + crude)');
 console.log(
   JSON.stringify(
     {
       version: APP_VERSION,
       build: APP_BUILD,
       dna: dna.id,
-      research: dna.research,
+      crudeDna: crude.id,
+      research: { index: dna.research, crude: crude.research },
       unlimited: { kept: kept.length, net: 1800 },
       emptyStart: {
         dayProfitLock: empty.dayProfitLock,

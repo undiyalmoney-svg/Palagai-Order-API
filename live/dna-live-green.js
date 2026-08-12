@@ -98,6 +98,8 @@ const LIVE_GREEN_DNA = {
       'With estimated marks ~100/101 green · avg ~₹1,869 · 1 residual red (−₹62)',
     note:
       'Mar–mid Jul lack expired NFO option candles on Kite — live-path cannot mark those days. Treasure rules are the zero-red live-markable set.',
+    all3WithCrudeTreasure:
+      'With Crude Treasure (SOR SL20/TP60 OR35–65 confirm OFF): 20/20 green · avg ~₹1,719/day',
   },
 };
 

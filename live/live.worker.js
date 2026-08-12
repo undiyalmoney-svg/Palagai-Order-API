@@ -28,7 +28,10 @@ const {
   publicTrades,
 } = require('./live-trades');
 const { LIVE_GREEN_DNA, liveGreenTrapExtras } = require('./dna-live-green');
-const { LIVE_CRUDE_GREEN_DNA } = require('./dna-live-crude-green');
+const {
+  LIVE_CRUDE_GREEN_DNA,
+  liveCrudeGreenProfileOverrides,
+} = require('./dna-live-crude-green');
 const { livePathReplayOpts, isEstimatedOrSynthetic } = require('./live-path');
 const {
   summarizeIndexDay,
@@ -459,7 +462,10 @@ class LiveWorker {
 
         if (crudeEntryOk || crudeOpenLive) {
           const crudeProfile = config.crudeStrategy || 'live-crude-green';
-          const tradeParams = resolveCrudeStrategyProfile(crudeProfile);
+          let tradeParams = resolveCrudeStrategyProfile(crudeProfile);
+          if (crudeProfile === 'live-crude-green') {
+            tradeParams = { ...tradeParams, ...liveCrudeGreenProfileOverrides() };
+          }
           const dayLossStopPts = resolveCrudeProfileDayLossPts(
             tradeParams,
             !!config.strictDayStop,
