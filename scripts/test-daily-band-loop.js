@@ -139,6 +139,9 @@ assert.strictEqual(bankGate.allow, false);
 assert.strictEqual(LIVE_GREEN_DNA.dailyBand.minRs, 750);
 assert.strictEqual(LIVE_GREEN_DNA.dailyBand.maxRs, 2000);
 assert.strictEqual(DAY_PROFIT_LOCK_RS, 2000);
+assert.strictEqual(LIVE_GREEN_DNA.trap.trapMode, 'both');
+assert.strictEqual(LIVE_GREEN_DNA.trap.orConfluencePts, 0);
+assert.strictEqual(LIVE_GREEN_DNA.trap.piercePts, 20);
 
 console.log('OK daily band loop');
 console.log(

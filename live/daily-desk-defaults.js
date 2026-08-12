@@ -9,8 +9,8 @@
  * Stop→Start required to apply a new capital.
  */
 
-const APP_VERSION = '1.3.126';
-const APP_BUILD = '2026.08.12-daily-band-750-2000';
+const APP_VERSION = '1.3.127';
+const APP_BUILD = '2026.08.12-sr-band-750-2000';
 const { LIVE_GREEN_DNA } = require('./dna-live-green');
 const { LIVE_CRUDE_GREEN_DNA } = require('./dna-live-crude-green');
 

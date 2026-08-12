@@ -2,36 +2,29 @@
 
 Runs on the Order-API droplet. **Does not change** `/api/kite/*` handlers.
 
-## DNA — Daily Band Loop (`appBuild: 2026.08.12-daily-band-750-2000`)
+## DNA — S/R Daily Band (`appBuild: 2026.08.12-sr-band-750-2000`)
 
-**Target @ 1 lot: ₹750–₹2000/day when the loop is followed.**
+**Entry = Support / Resistance Trap** (droplet hunt winner):
 
-1. **Nifty Trap** — pierce20 / peak ₹100/50/50 / max3 / stand-down ₹350  
-2. **Bank Trap** — only after Nifty traded **and Nifty day net is green**  
-3. **Band lock** — keep win-streak while `dayNet < ₹750`; **LOCK at ₹750**; hard **LOCK ₹2000** / STOP **−₹2950**  
-4. **No dig** — a losing close after the desk was green stops further index entries  
-5. **Crude LIVE_CRUDE_GREEN** — after 15:15, only if desk still below ₹750  
+1. Swing lookback **5** → local S/R (high = resistance, low = support)  
+2. **Pierce** beyond level (Nifty 20 / Bank 60) + **close reclaim** + EMA side  
+3. **Next-bar confirm** · mode **both** (trap + bounce at swing)  
+4. OR-confluence **OFF** (hunt: it pulled Aug 10/11 out of the ₹750–2000 band)  
 
-### Capital from UI
-- Send `capital` / `capitalRs` on Start → server maps to shared `deskLots`
-- Band floor/ceiling scale with lots (₹750/₹2000 × lots)
-- One-leg desk: capital rotates across books
+**Desk loop → ₹750–₹2000 @ 1 lot:**
 
-### Paper ≡ Live
-- Reject estimated/synthetic premiums  
-- One open leg  
-- Fill friction  
-- Bank-after-Nifty(+green)  
-- Win-streak → band + no dig  
+5. Nifty → Bank only after Nifty day is green  
+6. Band lock **₹750** / hard **₹2000** / stop **−₹2950** · no dig after green  
+7. Crude after 15:15 only if still &lt; ₹750 · one-leg · stand-down ₹350  
 
-### Research (when loop followed)
-- Jul 2026 ≈ **23/23** · avg ~**₹1,496**/day  
-- 21 Jul–10 Aug paper **15/15** · ~**₹1.8k**/day  
-- Aug MTD All3 days mostly **₹1.2k–₹2.8k**  
-- Broken ops: 10 Aug live **−₹1,297** · 12 Aug re-hunt after +₹387 → **−₹582**  
+### Hunt proof (live-path option marks)
+| Config | Result |
+|---|---|
+| **BOTH pierce20/B60 swing5** | 10 Aug **+₹1,251** · 11 Aug **+₹1,149** (2/2 in band) |
+| Trap-only | **0** live-path days |
+| BOTH + OR40 confluence | +₹435 / +₹728 (below band) |
 
-## Ops
-- `POST /live/start` with UI capital/lots  
-- `POST /live/backtest` → Paper≡Live filtered trades  
-- After deploy: **Stop → Start**
-- Offline proof: `node scripts/test-daily-band-loop.js`
+### Ops
+- `POST /live/start` · After deploy: **Stop → Start**  
+- Offline: `node scripts/test-daily-band-loop.js`  
+- Droplet hunt: `node scripts/sr-band-hunt.js`

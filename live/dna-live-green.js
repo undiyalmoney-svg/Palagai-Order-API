@@ -1,30 +1,23 @@
 /**
- * LIVE_GREEN DNA — Daily Band Loop (₹750–₹2000 @ 1 lot).
+ * LIVE_GREEN DNA — S/R Daily Band (₹750–₹2000 @ 1 lot).
  *
- * THE LOOP (research → when followed prints the band; when broken → red):
- *   1) Trap signals: pierce20 / Bank60 · peak ₹100/50/50 · max3/2 · stand ₹350
- *      · 09:45–14:45 · 3.5R · next-bar confirm
- *   2) Sequence: Nifty → Bank only after Nifty (and Nifty day green) →
- *      Crude after 15:15 only if dayNet still < ₹750
- *   3) One open leg across the desk
- *   4) Band: keep trading while dayNet < ₹750; LOCK at ₹750; hard LOCK ₹2000;
- *      hard STOP −₹2950
- *   5) No dig: once dayNet was green, a losing close stops further INDEX
- *      (Crude may still finish the band after NSE)
- *   6) Live ops: reject estimated premiums · trail SL ratchet · cancel SL
- *      before EXIT · fill ledger · option stand-down
+ * ENTRY = Support / Resistance Trap (research winner 12 Aug hunt):
+ *   swingLb 5 → local S/R · pierce beyond level · close reclaim · EMA side
+ *   · next-bar confirm · mode BOTH (trap + bounce at swing) · pierce20/B60
+ *   OR-confluence OFF (hurt band) · trap-only OFF (zero live-path days)
  *
- * Evidence (Paper≡Live / live-path, 1 lot):
- *   Jul 2026 ≈ 23/23 · avg ~₹1,496/day
- *   21 Jul–10 Aug paper 15/15 · ~₹1.8k/day · friction-hard ~₹1.2k/day
- *   Aug MTD All3 days mostly ₹1.2k–₹2.8k (inside/above band)
- *   Broken ops: 10 Aug live −₹1,297 · 12 Aug re-hunt after +₹387 → −₹582
+ * DESK LOOP:
+ *   Nifty → Bank after Nifty green → band lock ₹750 / hard ₹2000 → no dig
+ *   → Crude after 15:15 only if still < ₹750 · one-leg · stand-down ₹350
+ *
+ * Live-path proof (option marks available): 10 Aug +₹1,251 · 11 Aug +₹1,149
+ * (both inside ₹750–2000). Broken S/R / ops → red (12 Aug re-hunt).
  */
 
 const LIVE_GREEN_DNA = {
-  id: 'live-green-daily-band-v4',
-  label: 'Daily Band ₹750–2000 · Nifty→Bank→Crude · Paper≡Live',
-  version: '2026.08.12-daily-band',
+  id: 'live-green-sr-band-v5',
+  label: 'S/R Trap · Daily Band ₹750–2000 · Paper≡Live',
+  version: '2026.08.12-sr-band',
 
   /** Target band @ 1 lot (scale with deskLots in worker risk). */
   dailyBand: {
@@ -48,17 +41,17 @@ const LIVE_GREEN_DNA = {
   strictDayStopRs: 2950,
 
   /**
-   * Trap = Support/Resistance engine:
+   * Trap = Support/Resistance engine (droplet hunt winner):
    *   swing lookback → S/R · pierce beyond level · reclaim close · next-bar confirm
-   *   optional OR / PDHL confluence so we only trade structural S/R
+   *   mode BOTH beats trap-only on live-path; OR confluence OFF (hurt ₹ band)
    */
   trap: {
     piercePts: 20,
     bankPiercePts: 60,
     swingLb: 5,
-    trapMode: 'trap',
-    /** Swing S/R must sit within N pts of morning OR hi/lo (0=off until hunt sets it) */
-    orConfluencePts: 40,
+    trapMode: 'both',
+    /** Hunt: OR confluence reduced Aug 10/11 out of ₹750–2000 band — keep 0 */
+    orConfluencePts: 0,
     pdhlConfluencePts: 0,
     profitLockArmRs: 100,
     profitLockLockRs: 50,
@@ -101,18 +94,17 @@ const LIVE_GREEN_DNA = {
 
   research: {
     window: '2026-07-13 → 2026-08-11',
-    dailyBand: '₹750–₹2000 @ 1 lot when loop followed',
-    july2026: '23/23 green · avg ~₹1,496/day',
-    paper21Jul10Aug: '15/15 · ~₹1.8k/day (friction-hard ~₹1.2k)',
+    srHunt:
+      'BOTH pierce20/B60 swing5 · live-path 10–11 Aug: +₹1251 / +₹1149 (2/2 in band). TRAP-only=0 days. OR40 confluence dropped days to ₹435/₹728.',
+    dailyBand: '₹750–₹2000 @ 1 lot when S/R loop followed',
+    july2026: '23/23 green · avg ~₹1,496/day (paper family)',
     allThreeZeroRed: '9/9 green · net ≈ ₹13.0k · bankOnlyAfterNifty',
-    augMtdAll3:
-      '≈ ₹12.1k / 7 days · daily ≈ ₹1.2k–₹2.8k (11 Aug +₹1,211 @ 1 lot)',
     breakExamples:
       '10 Aug live ops miss → −₹1,297 · 12 Aug re-hunt after +₹387 → −₹582',
     loop:
-      'Nifty→Bank(after Nifty green)→band lock ₹750/₹2000→no dig after green→Crude if still <₹750',
+      'S/R trap at swing → confirm → Nifty→Bank(after Nifty green)→band ₹750/₹2000→no dig→Crude if <₹750',
     note:
-      'Band is the researched average zone at 1 lot — not a calendar-day guarantee if signals skip or fills diverge.',
+      'Entry is S/R liquidity sweep + reclaim. Desk band protects the ₹750–2000 zone.',
   },
 };
 
