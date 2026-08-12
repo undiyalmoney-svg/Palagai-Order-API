@@ -290,13 +290,17 @@ class LiveWorker {
 
   antiChurnCfg(config = {}) {
     const d = ANTI_CHURN_DEFAULTS;
+    // Loss stops scale with lots so worst-case daily loss is proportional and
+    // predictable when you expand capital (never a fixed cap that gets sloppy).
+    const lots = Math.max(1, Math.floor(Number(config.deskLots || config.niftyLots || 1)) || 1);
     return {
       crudeCooldownMin: numOr(config.crudeCooldownMin, d.crudeCooldownMin),
       indexCooldownMin: numOr(config.indexCooldownMin, d.indexCooldownMin),
       crudeMaxTradesDay: numOr(config.crudeMaxTradesDay, d.crudeMaxTradesDay),
       indexMaxTradesDay: numOr(config.indexMaxTradesDay, d.indexMaxTradesDay),
-      bookDayLossStopRs: numOr(config.bookDayLossStopRs, d.bookDayLossStopRs),
-      deskDayLossStopRs: numOr(config.deskDayLossStopRs, d.deskDayLossStopRs),
+      bookDayLossStopRs: numOr(config.bookDayLossStopRs, d.bookDayLossStopRs) * lots,
+      deskDayLossStopRs: numOr(config.deskDayLossStopRs, d.deskDayLossStopRs) * lots,
+      lots,
     };
   }
 

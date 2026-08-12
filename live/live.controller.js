@@ -41,9 +41,9 @@ async function health(_req, res) {
       indexCooldownMin: 12,
       crudeMaxTradesDay: 3,
       indexMaxTradesDay: 3,
-      bookDayLossStopRs: 500,
-      deskDayLossStopRs: 900,
-      note: 'Live re-runs every 60s; guards block re-entry churn + hard-stop on day loss.',
+      bookDayLossStopRs: '500 × lots',
+      deskDayLossStopRs: '900 × lots',
+      note: 'Loss stops scale with lots → worst-case daily loss is bounded & predictable when you expand. Guards also block 60s re-entry churn.',
     },
     research: {
       index: LIVE_GREEN_DNA.research,
