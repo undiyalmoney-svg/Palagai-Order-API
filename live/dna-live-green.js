@@ -45,8 +45,8 @@ const LIVE_GREEN_DNA = {
   strictDayStop: true,
   strictDayStopRs: 1500,
 
-  /** ₹1,000/day desk target — once combined net ≥ this (× lots), lock the day. */
-  dailyTargetRs: 1000,
+  /** No profit lock — let winners run (only loss stops + anti-churn caps apply). */
+  dailyTargetRs: 0,
 
   trap: {
     piercePts: 20,
@@ -98,11 +98,11 @@ const LIVE_GREEN_DNA = {
     bankOnlyAfterNifty: false,
     bankOnlyAfterNiftyGreen: false,
     winStreakToBand: false,
-    /** ₹1,000/day target lock (× lots): index stops, crude stands down when hit. */
-    deskGreenLockRs: 1000,
+    /** No profit lock — let winners run. Loss stops + trade caps still protect. */
+    deskGreenLockRs: 0,
     indexFirstWinLock: false,
     recoveryMaxExtra: 0,
-    crudeOnlyBelowBand: true,
+    crudeOnlyBelowBand: false,
     dustTradeRs: 10,
     /** Anti-churn (enforced in worker): cooldown + trade caps + loss stops. */
     cooldownMin: 12,
@@ -112,9 +112,9 @@ const LIVE_GREEN_DNA = {
 
   research: {
     approach:
-      'Pivot-2 both-direction S/R (index) + confirmed OR breakout (crude). Max 3/book/day + cooldown + daily loss stop. ₹1,000/day desk target lock (× lots): book the target and protect it.',
+      'Pivot-2 both-direction S/R (index) + confirmed OR breakout (crude). No profit lock — winners run. Max 3/book/day + cooldown + daily loss stop still cap risk/churn.',
     measuredJulAug:
-      '2026-07-01→08-12 live-path, 1 lot, guarded, WITH ₹1,000/day lock: all-3 20/20 green · net ₹19,778 · avg ₹989/day · 13/20 days hit ₹1,000+ (Bank-led ₹17,589 · Nifty ₹1,139 · Crude ₹1,050).',
+      '2026-07-01→08-12 live-path, 1 lot, guarded, NO lock: all-3 20/20 green · avg ~₹1,166/day (Bank ₹19,995 · Crude ₹2,052 · Nifty ₹1,274). Locked variant averaged ~₹989/day.',
     note:
       'Backtest on a favorable window; live can differ (intra-bar fills). Anti-churn caps make it far more live-faithful than before. Validate in PAPER — targets ₹1,000/day, does not guarantee it.',
   },
