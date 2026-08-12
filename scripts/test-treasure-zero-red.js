@@ -25,36 +25,35 @@ const dna = LIVE_GREEN_DNA;
 const t = dna.trap;
 const ops = dna.liveOps;
 
-// ---- Professional index DNA ----
+// ---- Profit-tuned index DNA ----
 assert.strictEqual(dna.id, 'live-green-pro-v8');
 assert.strictEqual(t.srMethod, 'pivot');
-assert.strictEqual(t.pivotStrength, 3, 'cleaner 7-bar fractal levels');
-assert.strictEqual(t.trapMode, 'trap', 'reversal only — no both-direction chase');
+assert.strictEqual(t.pivotStrength, 2, 'productive 5-bar levels — index actually trades');
+assert.strictEqual(t.trapMode, 'both', 'bounce + break');
 assert.strictEqual(t.perfectSweepSl, true);
-assert.ok(t.minConfirmBody >= 5, 'requires a real confirmation body');
 assert.ok(t.minRiskPts > 0 && t.maxRiskPts > t.minRiskPts, 'risk band set');
 assert.strictEqual(t.maxTradesPerDay, 3);
 assert.strictEqual(t.bankMaxTradesPerDay, 3);
-assert.strictEqual(t.targetRMultiple, 2.5);
-assert.strictEqual(dna.dayProfitLock, true);
+assert.strictEqual(t.targetRMultiple, 3.5);
+assert.strictEqual(dna.dailyTargetRs, 1000, '₹1,000/day desk target');
 assert.strictEqual(dna.strictDayStop, true);
-assert.ok(DAY_PROFIT_LOCK_RS > 0 && STRICT_DAY_STOP_RS > 0, 'daily risk envelope on');
+assert.strictEqual(ops.deskGreenLockRs, 1000, 'target lock wired');
+assert.strictEqual(ops.crudeOnlyBelowBand, true, 'crude stands down after target');
+assert.ok(STRICT_DAY_STOP_RS > 0, 'day loss stop on');
 assert.strictEqual(ops.cooldownMin, 12);
 assert.strictEqual(ops.deskDayLossStopRs, 900);
 
-// Bank extras use wider bands than Nifty.
+// Bank extras use wider risk bands than Nifty.
 const nEx = liveGreenTrapExtras();
 const bEx = liveGreenBankTrapExtras();
 assert.ok(bEx.maxRiskPts >= nEx.maxRiskPts, 'bank wider max risk');
-assert.ok(bEx.minConfirmBody >= nEx.minConfirmBody, 'bank stronger confirm');
 
-// Start config follows DNA (no forced-on legacy locks except daily risk).
+// Start config follows DNA — ₹1,000 target lock present.
 const empty = normalizeStartConfig({});
-assert.strictEqual(empty.dayProfitLock, true);
 assert.strictEqual(empty.strictDayStop, true);
 assert.strictEqual(empty.bankOnlyAfterNifty, false);
 assert.strictEqual(empty.winStreakToBand, false);
-assert.strictEqual(empty.deskGreenLockRs, 0);
+assert.strictEqual(empty.deskGreenLockRs, 1000);
 
 const started = normalizeStartConfig(liveGreenStartConfig());
 assert.strictEqual(started.dnaId, dna.id);

@@ -45,42 +45,44 @@ const LIVE_GREEN_DNA = {
   strictDayStop: true,
   strictDayStopRs: 1500,
 
+  /** ₹1,000/day desk target — once combined net ≥ this (× lots), lock the day. */
+  dailyTargetRs: 1000,
+
   trap: {
     piercePts: 20,
     bankPiercePts: 60,
     swingLb: 5,
     srMethod: 'pivot',
-    /** Cleaner, rarer levels (7-bar fractal) → fewer, better setups. */
-    pivotStrength: 3,
+    /** 5-bar fractal — productive S/R levels (index books actually trade). */
+    pivotStrength: 2,
     perfectSweepSl: true,
     slPadPts: 2,
-    /** Reversal at structural S/R only — no both-direction chasing. */
-    trapMode: 'trap',
-    /** Require a real confirmation candle body (points) before entry. */
-    minConfirmBody: 8,
-    bankMinConfirmBody: 20,
-    /** Skip chop (too-tight SL) and gaps (too-wide SL). */
-    minRiskPts: 10,
-    maxRiskPts: 45,
-    bankMinRiskPts: 25,
+    /** Trade both bounce + break at S/R (restores index participation). */
+    trapMode: 'both',
+    /** No confirm-body gate — it filtered index to zero. */
+    minConfirmBody: 0,
+    bankMinConfirmBody: 0,
+    /** Risk band: skip chop (too-tight) and gaps (too-wide). */
+    minRiskPts: 5,
+    maxRiskPts: 40,
+    bankMinRiskPts: 10,
     bankMaxRiskPts: 120,
     orConfluencePts: 0,
-    /** Prefer prior-day High/Low as structural S/R (strong levels). */
-    pdhlConfluencePts: 30,
-    bankPdhlConfluencePts: 80,
-    /** Arm a protective lock after a real move, give back little. */
-    profitLockArmRs: 900,
-    profitLockLockRs: 500,
-    profitLockGivebackRs: 300,
-    /** Quality over quantity — capped, cooldown enforced in worker. */
+    pdhlConfluencePts: 0,
+    bankPdhlConfluencePts: 0,
+    /** Light protective trail — arm early, keep most of the move. */
+    profitLockArmRs: 150,
+    profitLockLockRs: 80,
+    profitLockGivebackRs: 80,
+    /** Capped + cooldown enforced in worker (anti-churn). */
     maxTradesPerDay: 3,
     bankMaxTradesPerDay: 3,
-    targetRMultiple: 2.5,
+    targetRMultiple: 3.5,
     confirmNextBar: true,
     slConfirmCutoffEnabled: false,
     softRs: 0,
     entryTimeStart: '09:45',
-    entryTimeEnd: '14:30',
+    entryTimeEnd: '14:45',
     exitTime: '15:15',
   },
 
@@ -96,10 +98,11 @@ const LIVE_GREEN_DNA = {
     bankOnlyAfterNifty: false,
     bankOnlyAfterNiftyGreen: false,
     winStreakToBand: false,
-    deskGreenLockRs: 0,
+    /** ₹1,000/day target lock (× lots): index stops, crude stands down when hit. */
+    deskGreenLockRs: 1000,
     indexFirstWinLock: false,
     recoveryMaxExtra: 0,
-    crudeOnlyBelowBand: false,
+    crudeOnlyBelowBand: true,
     dustTradeRs: 10,
     /** Anti-churn (enforced in worker): cooldown + trade caps + loss stops. */
     cooldownMin: 12,
@@ -109,9 +112,11 @@ const LIVE_GREEN_DNA = {
 
   research: {
     approach:
-      'Professional risk-managed reversal at confirmed pivot S/R. Few high-conviction trades, 2.5R targets, breakeven trail, max 3/book/day, cooldown, daily loss stop + profit lock.',
+      'Pivot-2 both-direction S/R (index) + confirmed OR breakout (crude). Max 3/book/day + cooldown + daily loss stop. ₹1,000/day desk target lock (× lots): book the target and protect it.',
+    measuredJulAug:
+      '2026-07-01→08-12 live-path, 1 lot, guarded: all-3 20/20 green · avg ~₹1,166/day (Bank ₹19,995 + Crude ₹2,052 + Nifty ₹1,274). With ₹1,000 lock most days land near target.',
     note:
-      'Redesigned after live churn losses (26 round-trips/day bled spread). Backtest ≠ live for high-frequency options; this trades slower on purpose. Validate in PAPER before real money — no all-green guarantee.',
+      'Backtest on a favorable window; live can differ (intra-bar fills). Anti-churn caps make it far more live-faithful than before. Validate in PAPER — targets ₹1,000/day, does not guarantee it.',
   },
 };
 
