@@ -108,6 +108,14 @@ const LIVE_GREEN_DNA = {
     cooldownMin: 12,
     bookDayLossStopRs: 500,
     deskDayLossStopRs: 900,
+    /**
+     * Protect-green (× lots): once the desk day peak reaches arm, stop new
+     * entries if it gives back to floor — a green day stays green, no upside cap.
+     * This is the "discipline" that keeps EOD green (data: stopping early only
+     * cut profit; not giving back a green day is what matters).
+     */
+    deskGreenProtectArmRs: 500,
+    deskGreenProtectFloorRs: 150,
   },
 
   research: {

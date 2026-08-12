@@ -102,6 +102,9 @@ const ANTI_CHURN_DEFAULTS = {
   indexMaxTradesDay: 3,
   bookDayLossStopRs: 500,
   deskDayLossStopRs: 900,
+  /** Protect-green: arm at +arm, lock the day if it retraces to +floor. */
+  deskGreenProtectArmRs: 500,
+  deskGreenProtectFloorRs: 150,
 };
 
 function numOr(v, d) {
@@ -288,6 +291,26 @@ class LiveWorker {
     };
   }
 
+  /** Max running cumulative desk net over today's closed trades (realized peak). */
+  deskDayPeak(today) {
+    const day = String(today || '').slice(0, 10);
+    const rows = (this.liveTrades || [])
+      .filter(
+        (t) =>
+          String(t.entryTime || '').slice(0, 10) === day &&
+          t.exitTime &&
+          (t.optionPnlRs != null || t.netOptionPnlRs != null),
+      )
+      .sort((a, b) => String(a.exitTime).localeCompare(String(b.exitTime)));
+    let cum = 0;
+    let peak = 0;
+    for (const t of rows) {
+      cum += tradeNetRsOf(t);
+      if (cum > peak) peak = cum;
+    }
+    return peak;
+  }
+
   antiChurnCfg(config = {}) {
     const d = ANTI_CHURN_DEFAULTS;
     // Loss stops scale with lots so worst-case daily loss is proportional and
@@ -300,6 +323,10 @@ class LiveWorker {
       indexMaxTradesDay: numOr(config.indexMaxTradesDay, d.indexMaxTradesDay),
       bookDayLossStopRs: numOr(config.bookDayLossStopRs, d.bookDayLossStopRs) * lots,
       deskDayLossStopRs: numOr(config.deskDayLossStopRs, d.deskDayLossStopRs) * lots,
+      deskGreenProtectArmRs:
+        numOr(config.deskGreenProtectArmRs, LIVE_GREEN_DNA.liveOps.deskGreenProtectArmRs ?? d.deskGreenProtectArmRs) * lots,
+      deskGreenProtectFloorRs:
+        numOr(config.deskGreenProtectFloorRs, LIVE_GREEN_DNA.liveOps.deskGreenProtectFloorRs ?? d.deskGreenProtectFloorRs) * lots,
       lots,
     };
   }
@@ -312,6 +339,21 @@ class LiveWorker {
     const g = this.antiChurnCfg(config);
     const stats = bookDayStats(this.liveTrades, book, today);
     const deskNet = summarizeDeskDay(this.liveTrades, today).dayNet;
+
+    // True intraday realized peak from the closed-trade path (restart-safe).
+    const peak = this.deskDayPeak(today);
+
+    // Protect-green: once solidly green, don't give it back → EOD stays green.
+    if (
+      g.deskGreenProtectArmRs > 0 &&
+      peak >= g.deskGreenProtectArmRs &&
+      deskNet <= g.deskGreenProtectFloorRs
+    ) {
+      return {
+        allow: false,
+        reason: `protect green — locked ₹${Math.round(deskNet)} (peaked ₹${Math.round(peak)})`,
+      };
+    }
 
     if (g.deskDayLossStopRs > 0 && deskNet <= -g.deskDayLossStopRs) {
       return { allow: false, reason: `desk loss stop ₹${Math.round(deskNet)} (≥ −₹${g.deskDayLossStopRs})` };
