@@ -32,7 +32,7 @@ async function health(_req, res) {
     crudeDna: AUTOBOT_ALLOW_CRUDE
       ? `after NSE · OR${c.minOrWidth}–${c.maxOrWidth} · ${c.entryStart}–${c.entryEnd} · SL${c.stopPts}/TP${c.targetPts} · trail ₹${c.profitLockArmRs}→₹${c.profitLockLockRs} · max${c.maxTradesDay} · first-win · no index-session overlap`
       : 'OFF — Autobot will not trade Crude',
-    trapDna: `S/R Trap · swing${t.swingLb || 5} · mode ${t.trapMode || 'both'} · pierce ${t.piercePts}/B${t.bankPiercePts} · peak ₹${t.profitLockArmRs}/${t.profitLockLockRs}/${t.profitLockGivebackRs} · max${t.maxTradesPerDay} · ${t.targetRMultiple}R · stand-down ₹${ops.optionStandDownRs} · one-leg`,
+    trapDna: `Pivot S/R · ${t.srMethod || 'pivot'}${t.pivotStrength || 2} · perfectSL · mode ${t.trapMode || 'both'} · pierce ${t.piercePts}/B${t.bankPiercePts} · peak ₹${t.profitLockArmRs}/${t.profitLockLockRs}/${t.profitLockGivebackRs} · max${t.maxTradesPerDay} · stand-down ₹${ops.optionStandDownRs}`,
     dayProfitLockRsBase: DAY_PROFIT_LOCK_RS,
     strictDayStopRsBase: STRICT_DAY_STOP_RS,
     liveOps: { ...ops, ...LIVE_CRUDE_GREEN_DNA.liveOps },
