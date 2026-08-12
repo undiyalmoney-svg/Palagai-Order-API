@@ -1,23 +1,21 @@
 /**
- * LIVE_GREEN DNA — S/R Daily Band (₹750–₹2000 @ 1 lot).
+ * LIVE_GREEN DNA — Pivot S/R + perfect sweep SL · Daily Band ₹750–₹2000.
  *
- * ENTRY = Support / Resistance Trap (research winner 12 Aug hunt):
- *   swingLb 5 → local S/R · pierce beyond level · close reclaim · EMA side
- *   · next-bar confirm · mode BOTH (trap + bounce at swing) · pierce20/B60
- *   OR-confluence OFF (hurt band) · trap-only OFF (zero live-path days)
+ * ENTRY (paper≡live):
+ *   Confirmed pivot S/R (fractal) → pierce beyond level → reclaim → confirm
+ *   Perfect SL = 1pt beyond liquidity-sweep extreme (same index stop live uses
+ *   for protective option SL) → paper marks match broker risk.
+ *   mode BOTH · pierce20/B60 · OR confluence OFF
  *
  * DESK LOOP:
  *   Nifty → Bank after Nifty green → band lock ₹750 / hard ₹2000 → no dig
  *   → Crude after 15:15 only if still < ₹750 · one-leg · stand-down ₹350
- *
- * Live-path proof (option marks available): 10 Aug +₹1,251 · 11 Aug +₹1,149
- * (both inside ₹750–2000). Broken S/R / ops → red (12 Aug re-hunt).
  */
 
 const LIVE_GREEN_DNA = {
-  id: 'live-green-sr-band-v5',
-  label: 'S/R Trap · Daily Band ₹750–2000 · Paper≡Live',
-  version: '2026.08.12-sr-band',
+  id: 'live-green-sr-perfect-v6',
+  label: 'Pivot S/R · Perfect SL · Band ₹750–2000',
+  version: '2026.08.12-sr-perfect-sl',
 
   /** Target band @ 1 lot (scale with deskLots in worker risk). */
   dailyBand: {
@@ -41,14 +39,18 @@ const LIVE_GREEN_DNA = {
   strictDayStopRs: 2950,
 
   /**
-   * Trap = Support/Resistance engine (droplet hunt winner):
-   *   swing lookback → S/R · pierce beyond level · reclaim close · next-bar confirm
-   *   mode BOTH beats trap-only on live-path; OR confluence OFF (hurt ₹ band)
+   * Trap = Pivot S/R + perfect sweep SL:
+   *   pivot strength 2 (confirmed fractal) · SL at sweep extreme ±1pt
+   *   mode BOTH · pierce20/B60 · OR confluence OFF
    */
   trap: {
     piercePts: 20,
     bankPiercePts: 60,
     swingLb: 5,
+    srMethod: 'pivot',
+    pivotStrength: 2,
+    perfectSweepSl: true,
+    slPadPts: 1,
     trapMode: 'both',
     /** Hunt: OR confluence reduced Aug 10/11 out of ₹750–2000 band — keep 0 */
     orConfluencePts: 0,
@@ -95,16 +97,16 @@ const LIVE_GREEN_DNA = {
   research: {
     window: '2026-07-13 → 2026-08-11',
     srHunt:
-      'BOTH pierce20/B60 swing5 · live-path 10–11 Aug: +₹1251 / +₹1149 (2/2 in band). TRAP-only=0 days. OR40 confluence dropped days to ₹435/₹728.',
+      'BOTH pierce20/B60 · live-path 10–11 Aug +₹1251/+₹1149 in band. Pivot S/R + perfect sweep SL = same index stop paper & live.',
     dailyBand: '₹750–₹2000 @ 1 lot when S/R loop followed',
-    july2026: '23/23 green · avg ~₹1,496/day (paper family)',
-    allThreeZeroRed: '9/9 green · net ≈ ₹13.0k · bankOnlyAfterNifty',
+    paperLiveMatch:
+      'reject estimated · one-leg · fill ledger · trail SL · cancel SL before EXIT · SL at sweep extreme',
     breakExamples:
-      '10 Aug live ops miss → −₹1,297 · 12 Aug re-hunt after +₹387 → −₹582',
+      'Missed S/R/SL ops → paper≠live (10 Aug −₹1,297 · 12 Aug re-hunt)',
     loop:
-      'S/R trap at swing → confirm → Nifty→Bank(after Nifty green)→band ₹750/₹2000→no dig→Crude if <₹750',
+      'Pivot S/R → pierce/reclaim → confirm → SL@sweep → band ₹750/₹2000 → no dig → Crude if <₹750',
     note:
-      'Entry is S/R liquidity sweep + reclaim. Desk band protects the ₹750–2000 zone.',
+      'Correct S/R + perfect SL is the paper≡live contract. Band is researched zone @ 1 lot.',
   },
 };
 
@@ -115,12 +117,16 @@ function liveGreenTrapExtras(overrides = {}) {
     piercePts: t.piercePts,
     bankPiercePts: t.bankPiercePts,
     swingLb: t.swingLb || 5,
+    srMethod: t.srMethod || 'pivot',
+    pivotStrength: t.pivotStrength || 2,
+    perfectSweepSl: t.perfectSweepSl !== false,
+    slPadPts: t.slPadPts != null ? t.slPadPts : 1,
     profitLockArmRs: t.profitLockArmRs,
     profitLockLockRs: t.profitLockLockRs,
     profitLockGivebackRs: t.profitLockGivebackRs,
     slConfirmCutoffEnabled: t.slConfirmCutoffEnabled,
     slConfirmSoftRs: t.softRs,
-    trapMode: t.trapMode || 'trap',
+    trapMode: t.trapMode || 'both',
     orConfluencePts: t.orConfluencePts || 0,
     pdhlConfluencePts: t.pdhlConfluencePts || 0,
     bounceOrPierceMult: 0,

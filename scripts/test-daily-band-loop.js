@@ -142,6 +142,8 @@ assert.strictEqual(DAY_PROFIT_LOCK_RS, 2000);
 assert.strictEqual(LIVE_GREEN_DNA.trap.trapMode, 'both');
 assert.strictEqual(LIVE_GREEN_DNA.trap.orConfluencePts, 0);
 assert.strictEqual(LIVE_GREEN_DNA.trap.piercePts, 20);
+assert.strictEqual(LIVE_GREEN_DNA.trap.srMethod, 'pivot');
+assert.strictEqual(LIVE_GREEN_DNA.trap.perfectSweepSl, true);
 
 console.log('OK daily band loop');
 console.log(

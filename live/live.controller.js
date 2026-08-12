@@ -19,7 +19,7 @@ async function health(_req, res) {
   res.json({
     status: 'ok',
     service: 'palagai-live-control',
-    note: 'Server Live — S/R Trap · Daily Band ₹750–2000 · Paper≡Live',
+    note: 'Server Live — Pivot S/R · Perfect SL · Band ₹750–2000 · Paper≡Live',
     version: APP_VERSION,
     appBuild: APP_BUILD,
     dnaId: LIVE_GREEN_DNA.id,
