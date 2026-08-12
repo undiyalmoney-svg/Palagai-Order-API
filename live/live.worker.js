@@ -27,15 +27,12 @@ const {
   moneyTotals,
   publicTrades,
 } = require('./live-trades');
-const {
-  LIVE_GREEN_DNA,
-  liveGreenTrapExtras,
-  liveGreenRecoveryTrailExtras,
-} = require('./dna-live-green');
+const { LIVE_GREEN_DNA, liveGreenTrapExtras } = require('./dna-live-green');
 const { LIVE_CRUDE_GREEN_DNA } = require('./dna-live-crude-green');
 const { livePathReplayOpts, isEstimatedOrSynthetic } = require('./live-path');
 const {
   summarizeIndexDay,
+  summarizeDeskDay,
   indexEntryGate,
   bankEntryGate,
 } = require('./desk-day-policy');
@@ -97,7 +94,7 @@ function toLiveOpen(replayOpen, trailExtras) {
   };
 }
 
-function trapInitOverrides(config, instrumentId, opts = {}) {
+function trapInitOverrides(config, instrumentId) {
   const risk =
     indexDayRiskOverrides({
       instrumentId,
@@ -106,18 +103,14 @@ function trapInitOverrides(config, instrumentId, opts = {}) {
       dayProfitLock: !!config.dayProfitLock,
       strictDayStop: !!config.strictDayStop,
     }) || {};
-  const extras = opts.recovery
-    ? liveGreenRecoveryTrailExtras()
-    : liveGreenTrapExtras();
-  if (config.optionStandDownRs != null && !opts.recovery) {
+  const extras = liveGreenTrapExtras();
+  if (config.optionStandDownRs != null) {
     extras.optionStandDownRs = Number(config.optionStandDownRs);
   }
   const bank = /bank/i.test(String(instrumentId || ''));
-  const baseMax = bank
+  const maxTrades = bank
     ? LIVE_GREEN_DNA.trap.bankMaxTradesPerDay || LIVE_GREEN_DNA.trap.maxTradesPerDay
     : LIVE_GREEN_DNA.trap.maxTradesPerDay;
-  // Recovery shot may need one slot beyond the normal day cap.
-  const maxTrades = opts.recovery ? Math.max(baseMax, Number(opts.indexTrades || 0) + 1) : baseMax;
   return {
     ...risk,
     maxTradesPerDay: maxTrades,
@@ -151,27 +144,26 @@ class LiveWorker {
     this.reconciled = false;
     this.tickBusy = false;
     this.lastSignals = { nifty: '', bank: '', crude: '' };
-    /** Session recovery shots used under first-win policy (resets each IST day). */
-    this.recoveryShotsUsed = 0;
-    this.recoveryDay = null;
-    this.recoveryEntryKey = null;
   }
 
   deskOps(config = {}) {
     const dna = LIVE_GREEN_DNA.liveOps || {};
+    const band = LIVE_GREEN_DNA.dailyBand || {};
+    const lots = Math.max(1, Number(config.deskLots || config.niftyLots || 1) || 1);
+    const bandMin1 = dna.deskGreenLockRs ?? band.minRs ?? 750;
     return {
+      winStreakToBand:
+        config.winStreakToBand != null
+          ? !!config.winStreakToBand
+          : dna.winStreakToBand !== false,
       indexFirstWinLock:
         config.indexFirstWinLock != null
           ? !!config.indexFirstWinLock
-          : dna.indexFirstWinLock !== false,
+          : dna.indexFirstWinLock === true,
       deskGreenLockRs:
         config.deskGreenLockRs != null
           ? Number(config.deskGreenLockRs)
-          : dna.deskGreenLockRs ?? 50,
-      recoveryMaxExtra:
-        config.recoveryMaxExtra != null
-          ? Number(config.recoveryMaxExtra)
-          : dna.recoveryMaxExtra ?? 1,
+          : bandMin1 * lots,
       bankOnlyAfterNifty:
         config.bankOnlyAfterNifty != null
           ? !!config.bankOnlyAfterNifty
@@ -180,19 +172,18 @@ class LiveWorker {
         config.bankOnlyAfterNiftyGreen != null
           ? !!config.bankOnlyAfterNiftyGreen
           : dna.bankOnlyAfterNiftyGreen === true,
+      crudeOnlyBelowBand:
+        config.crudeOnlyBelowBand != null
+          ? !!config.crudeOnlyBelowBand
+          : dna.crudeOnlyBelowBand !== false,
     };
   }
 
   indexDaySummary(today) {
-    if (this.recoveryDay !== today) {
-      this.recoveryDay = today;
-      this.recoveryShotsUsed = 0;
-    }
     const base = summarizeIndexDay(this.liveTrades, today);
     return {
       ...base,
       niftyTaken: this.niftyTakenToday(today),
-      recoveryShotsUsed: this.recoveryShotsUsed,
     };
   }
 
@@ -364,12 +355,7 @@ class LiveWorker {
           livePath,
           makeStrategy: () => {
             const s = createTrapStrategy();
-            s.initialize(
-              trapInitOverrides(config, NIFTY_50_INSTRUMENT.id, {
-                recovery: niftyGate.recovery,
-                indexTrades: daySummary.indexTrades,
-              }),
-            );
+            s.initialize(trapInitOverrides(config, NIFTY_50_INSTRUMENT.id));
             return s;
           },
         });
@@ -380,19 +366,11 @@ class LiveWorker {
         let niftySyncOpen = this.liveOpenForSync(
           NIFTY_50_INSTRUMENT.id,
           replay.open,
-          niftyGate.recovery ? liveGreenRecoveryTrailExtras() : liveGreenTrapExtras(),
+          liveGreenTrapExtras(),
         );
-        // First-win / recovery gate: still manage an already-open leg.
+        // Daily-band gate: still manage an already-open leg.
         if (niftySyncOpen && !niftyAlreadyLive && !niftyGate.allow) {
           niftySyncOpen = null;
-        }
-        if (niftySyncOpen && !niftyAlreadyLive && niftyGate.recovery) {
-          const rKey = `${NIFTY_50_INSTRUMENT.id}|${niftySyncOpen.entryTime}`;
-          if (this.recoveryEntryKey !== rKey) {
-            this.recoveryEntryKey = rKey;
-            this.recoveryShotsUsed += 1;
-            this.pushEvent('SIGNAL', `Nifty recovery shot · ${niftyGate.reason}`);
-          }
         }
         await this.broker.syncInstrument({
           authorization,
@@ -432,38 +410,22 @@ class LiveWorker {
           makeStrategy: () => {
             const s = genie ? createGenieStrategy() : createTrapStrategy();
             if (genie) s.initialize();
-            else {
-              s.initialize(
-                trapInitOverrides(config, BANK_NIFTY_INSTRUMENT.id, {
-                  recovery: idxGate.recovery,
-                  indexTrades: bankSummary.indexTrades,
-                }),
-              );
-            }
+            else s.initialize(trapInitOverrides(config, BANK_NIFTY_INSTRUMENT.id));
             return s;
           },
         });
         ingestReplayTrades(this.liveTrades, replay.trades, { rejectEstimated: true });
-        // Zero-red + first-win: new Bank entries only when gates allow.
-        // Still manage/exit an already-open Bank leg.
+        // Daily-band + Bank-after-Nifty-green: new entries only when gates allow.
         const bankOpen = this.liveOpenForSync(
           BANK_NIFTY_INSTRUMENT.id,
           replay.open,
-          idxGate.recovery ? liveGreenRecoveryTrailExtras() : liveGreenTrapExtras(),
+          liveGreenTrapExtras(),
         );
         const bankPos = this.broker.positions?.get(BANK_NIFTY_INSTRUMENT.id);
         const bankAlreadyLive =
           bankPos && (bankPos.status === 'open' || bankPos.status === 'exiting');
         let bankSyncOpen = bankAlreadyLive || bankAllowed ? bankOpen : null;
         if (bankSyncOpen && !bankAlreadyLive && !bankAllowed) bankSyncOpen = null;
-        if (bankSyncOpen && !bankAlreadyLive && idxGate.recovery) {
-          const rKey = `${BANK_NIFTY_INSTRUMENT.id}|${bankSyncOpen.entryTime}`;
-          if (this.recoveryEntryKey !== rKey) {
-            this.recoveryEntryKey = rKey;
-            this.recoveryShotsUsed += 1;
-            this.pushEvent('SIGNAL', `Bank recovery shot · ${idxGate.reason}`);
-          }
-        }
         await this.broker.syncInstrument({
           authorization,
           instrumentId: BANK_NIFTY_INSTRUMENT.id,
@@ -488,7 +450,10 @@ class LiveWorker {
         const dnaGate =
           LIVE_CRUDE_GREEN_DNA.liveOps.crudeAfterIndexCloseTime || CRUDE_NOT_BEFORE;
         const gateTime = dnaGate > CRUDE_NOT_BEFORE ? dnaGate : CRUDE_NOT_BEFORE;
-        const crudeEntryOk = now >= gateTime;
+        const deskDay = summarizeDeskDay(this.liveTrades, today);
+        const bandMin = deskOps.deskGreenLockRs || 750;
+        const belowBand = !deskOps.crudeOnlyBelowBand || deskDay.dayNet < bandMin;
+        const crudeEntryOk = now >= gateTime && belowBand;
         const crudeOpen = this.broker?.positions?.get(CRUDE_OIL_MINI_INSTRUMENT.id);
         const crudeOpenLive = crudeOpen?.status === 'open';
 
@@ -544,14 +509,25 @@ class LiveWorker {
             open: crudeSyncOpen,
             lots: crudeLots,
           });
+          const bandSkip =
+            deskOps.crudeOnlyBelowBand && deskDay.dayNet >= bandMin
+              ? ` · band locked ₹${Math.round(deskDay.dayNet)}`
+              : '';
           const crudeSig =
             `${crudeLabel} · ${replay.lastSignal}` +
             (crudeSyncOpen ? ` · OPEN ${crudeSyncOpen.direction}` : '') +
             (replay.open && !crudeSyncOpen ? ' · paper-only (no live entry)' : '') +
-            (!crudeEntryOk ? ` · gated until ${gateTime}` : '');
+            (now < gateTime ? ` · gated until ${gateTime}` : '') +
+            bandSkip;
           if (crudeSig !== this.lastSignals.crude) {
             this.lastSignals.crude = crudeSig;
             this.pushEvent('SIGNAL', crudeSig);
+          }
+        } else if (now >= gateTime && !belowBand) {
+          const skip = `Crude · daily band locked ₹${Math.round(deskDay.dayNet)} (≥₹${bandMin})`;
+          if (skip !== this.lastSignals.crude) {
+            this.lastSignals.crude = skip;
+            this.pushEvent('SIGNAL', skip);
           }
         }
       }
@@ -727,9 +703,6 @@ class LiveWorker {
     this.broker.clear();
     this.liveTrades = [];
     this.lastSignals = { nifty: '', bank: '', crude: '' };
-    this.recoveryShotsUsed = 0;
-    this.recoveryDay = null;
-    this.recoveryEntryKey = null;
   }
 }
 

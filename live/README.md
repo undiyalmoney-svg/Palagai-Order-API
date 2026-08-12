@@ -2,34 +2,36 @@
 
 Runs on the Order-API droplet. **Does not change** `/api/kite/*` handlers.
 
-## DNA — All3 daily (`appBuild: 2026.08.12-first-win-green-lock`)
+## DNA — Daily Band Loop (`appBuild: 2026.08.12-daily-band-750-2000`)
 
-1. **Nifty Trap** — primary index session  
+**Target @ 1 lot: ₹750–₹2000/day when the loop is followed.**
+
+1. **Nifty Trap** — pierce20 / peak ₹100/50/50 / max3 / stand-down ₹350  
 2. **Bank Trap** — only after Nifty traded **and Nifty day net is green**  
-3. **Index first-win green lock** — after first green Nifty/Bank close, stop index hunting (prevents giveback). One recovery shot if desk is red after a prior green leg.  
-4. **Smart exit trail** — arm ₹80 / lock ₹70 / giveback ₹30 (tightens further as MFE stretches)  
-5. **Crude LIVE_CRUDE_GREEN** — after NSE close (16:00–21:00, gate 15:15)
+3. **Band lock** — keep win-streak while `dayNet < ₹750`; **LOCK at ₹750**; hard **LOCK ₹2000** / STOP **−₹2950**  
+4. **No dig** — a losing close after the desk was green stops further index entries  
+5. **Crude LIVE_CRUDE_GREEN** — after 15:15, only if desk still below ₹750  
 
 ### Capital from UI
-- Send `capital` / `capitalRs` on Start → server maps to `niftyLots` / `bankLots` / `crudeLots`
-- One-leg desk: same capital rotates across books (only one open at a time)
-- Explicit lot fields still override when provided
-- ₹12k+ → 1/1/1 · ₹75k+ → 2/2/2
+- Send `capital` / `capitalRs` on Start → server maps to shared `deskLots`
+- Band floor/ceiling scale with lots (₹750/₹2000 × lots)
+- One-leg desk: capital rotates across books
 
 ### Paper ≡ Live
 - Reject estimated/synthetic premiums  
 - One open leg  
-- Option-₹ day lock/stop  
 - Fill friction  
-- Bank-after-Nifty (+ Nifty green) desk filter  
-- Index first-win green lock + one recovery shot  
+- Bank-after-Nifty(+green)  
+- Win-streak → band + no dig  
 
-### Research (13 Jul–11 Aug, live-path)
-- **bankOnlyAfterNifty**: **9/9 green**, ~₹13k, all three books present  
-- Unconstrained all-three: 20/22 green but 2 Bank-alone red days  
-- **12 Aug live giveback**: first-win lock would keep ~+₹387 and skip later red legs  
+### Research (when loop followed)
+- Jul 2026 ≈ **23/23** · avg ~**₹1,496**/day  
+- 21 Jul–10 Aug paper **15/15** · ~**₹1.8k**/day  
+- Aug MTD All3 days mostly **₹1.2k–₹2.8k**  
+- Broken ops: 10 Aug live **−₹1,297** · 12 Aug re-hunt after +₹387 → **−₹582**  
 
 ## Ops
 - `POST /live/start` with UI capital/lots  
 - `POST /live/backtest` → Paper≡Live filtered trades  
 - After deploy: **Stop → Start**
+- Offline proof: `node scripts/test-daily-band-loop.js`

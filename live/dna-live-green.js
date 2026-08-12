@@ -1,19 +1,36 @@
 /**
- * LIVE_GREEN DNA — multi-strategy daily desk (2026-08-12).
+ * LIVE_GREEN DNA — Daily Band Loop (₹750–₹2000 @ 1 lot).
  *
- * Research + live fix:
- *   Bank only AFTER Nifty has traded that day.
- *   Index first-win green lock — stop re-hunting after first green Nifty/Bank
- *   close (12 Aug failure mode: +₹387 then −₹673/−₹26/Bank −₹270).
- *   One recovery shot if desk is red after a prior green leg.
- *   Tighter option peak trail (smart exit) — arm sooner, less giveback.
- *   Crude LIVE_CRUDE_GREEN after NSE (second session).
+ * THE LOOP (research → when followed prints the band; when broken → red):
+ *   1) Trap signals: pierce20 / Bank60 · peak ₹100/50/50 · max3/2 · stand ₹350
+ *      · 09:45–14:45 · 3.5R · next-bar confirm
+ *   2) Sequence: Nifty → Bank only after Nifty (and Nifty day green) →
+ *      Crude after 15:15 only if dayNet still < ₹750
+ *   3) One open leg across the desk
+ *   4) Band: keep trading while dayNet < ₹750; LOCK at ₹750; hard LOCK ₹2000;
+ *      hard STOP −₹2950
+ *   5) No dig: once dayNet was green, a losing close stops further INDEX
+ *      (Crude may still finish the band after NSE)
+ *   6) Live ops: reject estimated premiums · trail SL ratchet · cancel SL
+ *      before EXIT · fill ledger · option stand-down
+ *
+ * Evidence (Paper≡Live / live-path, 1 lot):
+ *   Jul 2026 ≈ 23/23 · avg ~₹1,496/day
+ *   21 Jul–10 Aug paper 15/15 · ~₹1.8k/day · friction-hard ~₹1.2k/day
+ *   Aug MTD All3 days mostly ₹1.2k–₹2.8k (inside/above band)
+ *   Broken ops: 10 Aug live −₹1,297 · 12 Aug re-hunt after +₹387 → −₹582
  */
 
 const LIVE_GREEN_DNA = {
-  id: 'live-green-all3-v3',
-  label: 'Live Green · First-win lock · Smart exit · Paper≡Live',
-  version: '2026.08.12-first-win',
+  id: 'live-green-daily-band-v4',
+  label: 'Daily Band ₹750–2000 · Nifty→Bank→Crude · Paper≡Live',
+  version: '2026.08.12-daily-band',
+
+  /** Target band @ 1 lot (scale with deskLots in worker risk). */
+  dailyBand: {
+    minRs: 750,
+    maxRs: 2000,
+  },
 
   /** Books */
   enableNifty: true,
@@ -24,20 +41,19 @@ const LIVE_GREEN_DNA = {
   niftyStrategy: 'trap',
   bankStrategy: 'trap',
 
-  /** Day risk (₹ band @ 1 lot) — measured on option ₹, not index pts */
+  /** Day risk — upper band = profit lock */
   dayProfitLock: true,
-  dayProfitLockRs: 2500,
+  dayProfitLockRs: 2000,
   strictDayStop: true,
   strictDayStopRs: 2950,
 
-  /** Trap signal DNA — tighter trail = smart exit on winners */
+  /** Trap signal DNA — research winner; do not loosen */
   trap: {
     piercePts: 20,
     bankPiercePts: 60,
-    /** Arm earlier, lock more, give back less — protect green legs */
-    profitLockArmRs: 80,
-    profitLockLockRs: 70,
-    profitLockGivebackRs: 30,
+    profitLockArmRs: 100,
+    profitLockLockRs: 50,
+    profitLockGivebackRs: 50,
     maxTradesPerDay: 3,
     bankMaxTradesPerDay: 2,
     targetRMultiple: 3.5,
@@ -58,28 +74,36 @@ const LIVE_GREEN_DNA = {
     trailProtectiveSl: true,
     fillFrictionPremium: 0.5,
     optionRsDayRisk: true,
-    /** Zero-red all-three rule */
     bankOnlyAfterNifty: true,
-    /** Do not add Bank risk onto a red Nifty day */
     bankOnlyAfterNiftyGreen: true,
-    /** Stop index hunting after first green Nifty/Bank close */
-    indexFirstWinLock: true,
-    /** Treat dayNet ≥ ₹50 as green for lock / recovery target */
-    deskGreenLockRs: 50,
-    /** One extra index trade if desk is red after a prior green leg */
-    recoveryMaxExtra: 1,
+    /**
+     * Win-streak → band:
+     *  - LOCK when dayNet ≥ bandMin (₹750)
+     *  - LOCK index after a loss that followed a green dayNet (no dig)
+     *  - Crude still allowed after NSE while dayNet < bandMin
+     */
+    winStreakToBand: true,
+    deskGreenLockRs: 750,
+    /** Off — band loop replaces first-win + recovery patch */
+    indexFirstWinLock: false,
+    recoveryMaxExtra: 0,
+    crudeOnlyBelowBand: true,
   },
 
   research: {
     window: '2026-07-13 → 2026-08-11',
+    dailyBand: '₹750–₹2000 @ 1 lot when loop followed',
+    july2026: '23/23 green · avg ~₹1,496/day',
+    paper21Jul10Aug: '15/15 · ~₹1.8k/day (friction-hard ~₹1.2k)',
     allThreeZeroRed: '9/9 green · net ≈ ₹13.0k · bankOnlyAfterNifty',
-    liveFix12Aug:
-      'indexFirstWinLock — would keep +₹387 and skip giveback legs (desk was −₹582)',
-    unconstrainedBest:
-      '20/22 green · 2 red · net ≈ ₹25.4k (Bank-alone reds 13 Jul / 24 Jul)',
-    crudeAfterNse: 'LIVE_CRUDE_GREEN · hard gate 15:15 · entries 16:00–21:00',
+    augMtdAll3:
+      '≈ ₹12.1k / 7 days · daily ≈ ₹1.2k–₹2.8k (11 Aug +₹1,211 @ 1 lot)',
+    breakExamples:
+      '10 Aug live ops miss → −₹1,297 · 12 Aug re-hunt after +₹387 → −₹582',
+    loop:
+      'Nifty→Bank(after Nifty green)→band lock ₹750/₹2000→no dig after green→Crude if still <₹750',
     note:
-      'First-win green lock + one recovery shot. Not a guarantee of every calendar day.',
+      'Band is the researched average zone at 1 lot — not a calendar-day guarantee if signals skip or fills diverge.',
   },
 };
 
@@ -102,17 +126,13 @@ function liveGreenTrapExtras(overrides = {}) {
   };
 }
 
-/** Tighter trail used on the live recovery shot. */
 function liveGreenRecoveryTrailExtras() {
-  return liveGreenTrapExtras({
-    profitLockArmRs: 60,
-    profitLockLockRs: 80,
-    profitLockGivebackRs: 25,
-    optionStandDownRs: 300,
-  });
+  // Kept for API compat — band loop does not use a separate recovery trail.
+  return liveGreenTrapExtras();
 }
 
 function liveGreenStartConfig() {
+  const ops = LIVE_GREEN_DNA.liveOps;
   return {
     enableNifty: LIVE_GREEN_DNA.enableNifty,
     enableBank: LIVE_GREEN_DNA.enableBank,
@@ -127,16 +147,18 @@ function liveGreenStartConfig() {
     kuttyAlone: false,
     realOrders: true,
     dnaId: LIVE_GREEN_DNA.id,
-    maxOpenLegs: LIVE_GREEN_DNA.liveOps.maxOpenLegs,
-    optionStandDownRs: LIVE_GREEN_DNA.liveOps.optionStandDownRs,
+    maxOpenLegs: ops.maxOpenLegs,
+    optionStandDownRs: ops.optionStandDownRs,
     paperLivePath: true,
-    fillFrictionPremium: LIVE_GREEN_DNA.liveOps.fillFrictionPremium,
+    fillFrictionPremium: ops.fillFrictionPremium,
     crudeAfterIndexClose: true,
-    bankOnlyAfterNifty: LIVE_GREEN_DNA.liveOps.bankOnlyAfterNifty,
-    bankOnlyAfterNiftyGreen: LIVE_GREEN_DNA.liveOps.bankOnlyAfterNiftyGreen,
-    indexFirstWinLock: LIVE_GREEN_DNA.liveOps.indexFirstWinLock,
-    deskGreenLockRs: LIVE_GREEN_DNA.liveOps.deskGreenLockRs,
-    recoveryMaxExtra: LIVE_GREEN_DNA.liveOps.recoveryMaxExtra,
+    bankOnlyAfterNifty: ops.bankOnlyAfterNifty,
+    bankOnlyAfterNiftyGreen: ops.bankOnlyAfterNiftyGreen,
+    winStreakToBand: ops.winStreakToBand,
+    indexFirstWinLock: ops.indexFirstWinLock,
+    deskGreenLockRs: ops.deskGreenLockRs,
+    recoveryMaxExtra: ops.recoveryMaxExtra,
+    crudeOnlyBelowBand: ops.crudeOnlyBelowBand,
   };
 }
 

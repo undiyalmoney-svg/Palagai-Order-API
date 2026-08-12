@@ -1,9 +1,14 @@
 /**
- * Desk day policy — stop giving back winners; one recovery shot if already red.
+ * Daily Band Loop — desk day policy.
  *
- * Root cause of 12 Aug red: Nifty took a green leg (~+₹387) then re-hunted into
- * −₹673 / −₹26 and Bank −₹270. Research prototype `firstWinIndex` (all3-red-kill)
- * locks index after the first green Nifty/Bank close; Crude evening still runs.
+ * When followed (research): day nets cluster in ₹750–₹2000 @ 1 lot.
+ * When broken (re-hunt after green / Bank on red Nifty / live ops miss): red.
+ *
+ * Index gate:
+ *   - LOCK when dayNet ≥ bandMin (default ₹750)
+ *   - LOCK after a losing close that happened while dayNet was already green
+ *     (no dig / no giveback spiral)
+ * Crude may still run after NSE while dayNet < bandMin.
  */
 
 function tradeNetRs(t) {
@@ -40,13 +45,16 @@ function summarizeIndexDay(trades, today) {
   let bankNet = 0;
   let indexTrades = 0;
   let hadIndexWin = false;
+  let lostAfterGreen = false;
   let tradesAfterFirstWin = 0;
   let sawFirstWin = false;
 
   for (const t of rows) {
     const net = tradeNetRs(t);
     const kind = bookKind(t.instrumentId);
+    const before = dayNet;
     if (sawFirstWin) tradesAfterFirstWin += 1;
+    if (before > 0 && net < 0) lostAfterGreen = true;
     dayNet += net;
     indexTrades += 1;
     if (kind === 'nifty') niftyNet += net;
@@ -64,6 +72,7 @@ function summarizeIndexDay(trades, today) {
     bankNet,
     indexTrades,
     hadIndexWin,
+    lostAfterGreen,
     tradesAfterFirstWin,
   };
 }
@@ -71,32 +80,29 @@ function summarizeIndexDay(trades, today) {
 /**
  * Decide whether a NEW index entry is allowed right now.
  * Existing open legs are always managed/exited elsewhere.
- *
- * `recoveryShotsUsed` is session-counted (live worker) so a mid-day deploy can
- * still take one recovery trade after an old-policy giveback day.
  */
 function indexEntryGate(summary, ops = {}) {
-  const firstWin = ops.indexFirstWinLock !== false;
-  const greenLockRs = Math.max(0, Number(ops.deskGreenLockRs) || 0);
-  const recoveryMax = Math.max(0, Math.floor(Number(ops.recoveryMaxExtra) || 0));
+  const bandMin = Math.max(
+    0,
+    Number(ops.deskGreenLockRs != null ? ops.deskGreenLockRs : ops.bandMinRs) || 0,
+  );
+  const winStreak = ops.winStreakToBand !== false;
+  const firstWin = ops.indexFirstWinLock === true;
   const net = Number(summary?.dayNet) || 0;
   const hadWin = !!summary?.hadIndexWin;
-  const shotsUsed =
-    summary?.recoveryShotsUsed != null
-      ? Math.max(0, Math.floor(Number(summary.recoveryShotsUsed) || 0))
-      : Math.max(0, Math.floor(Number(summary?.tradesAfterFirstWin) || 0));
+  const lostAfterGreen = !!summary?.lostAfterGreen;
 
-  const greenFloor = greenLockRs > 0 ? greenLockRs : 1;
-
-  if (!firstWin) {
-    if (net >= greenFloor) {
-      return { allow: false, reason: `desk green lock ₹${Math.round(net)}`, recovery: false };
-    }
-    return { allow: true, reason: '', recovery: false };
+  // In-band → hard lock (the ₹750 floor of the daily band).
+  if (bandMin > 0 && net >= bandMin) {
+    return {
+      allow: false,
+      reason: `daily band lock ₹${Math.round(net)} (≥₹${bandMin})`,
+      recovery: false,
+    };
   }
 
-  // Any green desk after a win → lock (do not re-hunt winners away).
-  if (hadWin && net > 0) {
+  // Legacy first-win (off by default in daily-band DNA).
+  if (firstWin && hadWin && net > 0) {
     return {
       allow: false,
       reason: `first-win green lock (₹${Math.round(net)})`,
@@ -104,31 +110,23 @@ function indexEntryGate(summary, ops = {}) {
     };
   }
 
-  // Red after a prior green leg → one recovery shot aimed at greenFloor.
-  if (hadWin && net <= 0) {
-    if (shotsUsed >= recoveryMax) {
-      return {
-        allow: false,
-        reason: `recovery shot used (${shotsUsed}/${recoveryMax})`,
-        recovery: false,
-      };
-    }
+  // No dig: a loss after the desk was green ends the index session.
+  if (winStreak && lostAfterGreen) {
     return {
-      allow: true,
-      reason: `recovery until ≥ ₹${greenFloor}`,
-      recovery: true,
+      allow: false,
+      reason: 'no dig — loss after green',
+      recovery: false,
     };
   }
 
-  // No win yet — keep hunting (subject to max trades / signals).
   return { allow: true, reason: '', recovery: false };
 }
 
 function bankEntryGate(summary, ops = {}) {
   const afterNifty = ops.bankOnlyAfterNifty !== false;
   const afterNiftyGreen = ops.bankOnlyAfterNiftyGreen === true;
-  const niftyTaken = (Number(summary?.indexTrades) || 0) > 0 || (summary?.niftyTaken === true);
-  // Prefer explicit niftyTaken from live worker when provided.
+  const niftyTaken =
+    (Number(summary?.indexTrades) || 0) > 0 || summary?.niftyTaken === true;
   const niftyReady = summary?.niftyTaken != null ? !!summary.niftyTaken : niftyTaken;
   if (afterNifty && !niftyReady) {
     return { allow: false, reason: 'wait Nifty first' };
@@ -139,10 +137,24 @@ function bankEntryGate(summary, ops = {}) {
   return { allow: true, reason: '' };
 }
 
+/** Desk-wide day net (index + crude) for Crude-below-band gate. */
+function summarizeDeskDay(trades, today) {
+  const day = String(today || '').slice(0, 10);
+  let dayNet = 0;
+  let n = 0;
+  for (const t of trades || []) {
+    if (String(t.entryTime || '').slice(0, 10) !== day) continue;
+    dayNet += tradeNetRs(t);
+    n += 1;
+  }
+  return { day, dayNet, trades: n };
+}
+
 module.exports = {
   bookKind,
   isIndexBook,
   summarizeIndexDay,
+  summarizeDeskDay,
   indexEntryGate,
   bankEntryGate,
 };

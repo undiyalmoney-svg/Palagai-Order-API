@@ -1,17 +1,16 @@
 /**
  * Daily desk DNA — Autobot multi-strategy Paper≡Live.
  *
- * 1) Nifty Trap (primary)
- * 2) Bank Trap — after Nifty traded AND Nifty day net green
- * 3) Index first-win green lock (+ one recovery shot if desk red after a win)
- * 4) Crude LIVE_CRUDE_GREEN after NSE (second session)
+ * Daily Band Loop (₹750–₹2000 @ 1 lot):
+ * 1) Nifty Trap → 2) Bank after Nifty green → 3) lock at ₹750 / hard ₹2000
+ * 4) no dig after a green-then-loss → 5) Crude after NSE only if still < ₹750
  *
  * Capital: UI `capitalRs` / `capital` → one shared deskLots for Nifty+Bank+Crude.
- * Crude never keeps a private lot size. Stop→Start required to apply a new capital.
+ * Stop→Start required to apply a new capital.
  */
 
-const APP_VERSION = '1.3.125';
-const APP_BUILD = '2026.08.12-first-win-green-lock';
+const APP_VERSION = '1.3.126';
+const APP_BUILD = '2026.08.12-daily-band-750-2000';
 const { LIVE_GREEN_DNA } = require('./dna-live-green');
 const { LIVE_CRUDE_GREEN_DNA } = require('./dna-live-crude-green');
 
@@ -254,18 +253,28 @@ function normalizeStartConfig(config = {}) {
       config.bankOnlyAfterNiftyGreen != null
         ? !!config.bankOnlyAfterNiftyGreen
         : LIVE_GREEN_DNA.liveOps.bankOnlyAfterNiftyGreen === true,
+    winStreakToBand:
+      config.winStreakToBand != null
+        ? !!config.winStreakToBand
+        : LIVE_GREEN_DNA.liveOps.winStreakToBand !== false,
     indexFirstWinLock:
       config.indexFirstWinLock != null
         ? !!config.indexFirstWinLock
-        : LIVE_GREEN_DNA.liveOps.indexFirstWinLock !== false,
+        : LIVE_GREEN_DNA.liveOps.indexFirstWinLock === true,
     deskGreenLockRs:
       config.deskGreenLockRs != null
         ? Math.max(0, Number(config.deskGreenLockRs) || 0)
-        : LIVE_GREEN_DNA.liveOps.deskGreenLockRs ?? 50,
+        : LIVE_GREEN_DNA.liveOps.deskGreenLockRs ??
+          LIVE_GREEN_DNA.dailyBand?.minRs ??
+          750,
     recoveryMaxExtra:
       config.recoveryMaxExtra != null
         ? Math.max(0, Math.floor(Number(config.recoveryMaxExtra) || 0))
-        : LIVE_GREEN_DNA.liveOps.recoveryMaxExtra ?? 1,
+        : LIVE_GREEN_DNA.liveOps.recoveryMaxExtra ?? 0,
+    crudeOnlyBelowBand:
+      config.crudeOnlyBelowBand != null
+        ? !!config.crudeOnlyBelowBand
+        : LIVE_GREEN_DNA.liveOps.crudeOnlyBelowBand !== false,
   };
 }
 

@@ -329,18 +329,24 @@ async function runBacktest({ authorization, fromDate, toDate, config }, deps = {
           cfg.bankOnlyAfterNiftyGreen != null
             ? !!cfg.bankOnlyAfterNiftyGreen
             : LIVE_GREEN_DNA.liveOps.bankOnlyAfterNiftyGreen === true,
+        winStreakToBand:
+          cfg.winStreakToBand != null
+            ? !!cfg.winStreakToBand
+            : LIVE_GREEN_DNA.liveOps.winStreakToBand !== false,
         indexFirstWinLock:
           cfg.indexFirstWinLock != null
             ? !!cfg.indexFirstWinLock
-            : LIVE_GREEN_DNA.liveOps.indexFirstWinLock !== false,
+            : LIVE_GREEN_DNA.liveOps.indexFirstWinLock === true,
         deskGreenLockRs:
           cfg.deskGreenLockRs != null
             ? Number(cfg.deskGreenLockRs)
-            : LIVE_GREEN_DNA.liveOps.deskGreenLockRs ?? 50,
+            : LIVE_GREEN_DNA.liveOps.deskGreenLockRs ??
+              LIVE_GREEN_DNA.dailyBand?.minRs ??
+              750,
         recoveryMaxExtra:
           cfg.recoveryMaxExtra != null
             ? Number(cfg.recoveryMaxExtra)
-            : LIVE_GREEN_DNA.liveOps.recoveryMaxExtra ?? 1,
+            : LIVE_GREEN_DNA.liveOps.recoveryMaxExtra ?? 0,
       })
     : rawTrades;
 

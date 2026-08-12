@@ -19,7 +19,7 @@ async function health(_req, res) {
   res.json({
     status: 'ok',
     service: 'palagai-live-control',
-    note: 'Server Live — All3 daily: Nifty→Bank→Crude · Paper≡Live · capital→lots',
+    note: 'Server Live — Daily Band ₹750–2000 · Nifty→Bank→Crude · Paper≡Live',
     version: APP_VERSION,
     appBuild: APP_BUILD,
     dnaId: LIVE_GREEN_DNA.id,
@@ -40,7 +40,8 @@ async function health(_req, res) {
       index: LIVE_GREEN_DNA.research,
       crude: LIVE_CRUDE_GREEN_DNA.research,
       greenPath:
-        'All3 zero-red path: Nifty first, Bank only after Nifty, Crude after NSE. Paper≡Live.',
+        'Daily Band Loop: Nifty→Bank(after Nifty green)→lock ₹750/₹2000→no dig after green→Crude if still <₹750.',
+      dailyBand: LIVE_GREEN_DNA.dailyBand,
     },
     defaults: DAILY_3K_PRESET,
   });
