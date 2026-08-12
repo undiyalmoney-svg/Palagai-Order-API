@@ -27,12 +27,90 @@ const {
   moneyTotals,
   publicTrades,
 } = require('./live-trades');
-const { LIVE_GREEN_DNA, liveGreenTrapExtras } = require('./dna-live-green');
-const { LIVE_CRUDE_GREEN_DNA } = require('./dna-live-crude-green');
+const {
+  LIVE_GREEN_DNA,
+  liveGreenTrapExtras,
+  liveGreenBankTrapExtras,
+} = require('./dna-live-green');
+const {
+  LIVE_CRUDE_GREEN_DNA,
+  liveCrudeGreenProfileOverrides,
+} = require('./dna-live-crude-green');
 const { livePathReplayOpts, isEstimatedOrSynthetic } = require('./live-path');
+const {
+  summarizeIndexDay,
+  summarizeDeskDay,
+  indexEntryGate,
+  bankEntryGate,
+  bookKind,
+} = require('./desk-day-policy');
 
 const CRUDE_EXIT_BY = '23:10';
 const LOOKBACK_DAYS = 12;
+
+/** One trade = placed + closed (has entryTime and exitTime). */
+function countClosedTradesByBook(trades, today) {
+  const day = String(today || '').slice(0, 10);
+  const counts = { nifty: 0, bank: 0, crude: 0, other: 0, total: 0 };
+  for (const t of trades || []) {
+    if (String(t.entryTime || '').slice(0, 10) !== day) continue;
+    if (!t.exitTime) continue;
+    if (t.optionPnlRs == null && t.netOptionPnlRs == null) continue;
+    const k = bookKind(t.instrumentId);
+    counts[k] = (counts[k] || 0) + 1;
+    counts.total += 1;
+  }
+  return counts;
+}
+
+const tradeNetRsOf = (t) =>
+  Number(t?.netOptionPnlRs != null ? t.netOptionPnlRs : t?.optionPnlRs || 0) || 0;
+
+/**
+ * Per-book closed-trade stats today: count, net ₹, last exit epoch ms.
+ * Used by the anti-churn guard so live can't re-enter every 60s tick.
+ */
+function bookDayStats(trades, book, today) {
+  const day = String(today || '').slice(0, 10);
+  let count = 0;
+  let net = 0;
+  let lastExitMs = 0;
+  for (const t of trades || []) {
+    if (String(t.entryTime || '').slice(0, 10) !== day) continue;
+    if (bookKind(t.instrumentId) !== book) continue;
+    if (!t.exitTime) continue;
+    if (t.optionPnlRs == null && t.netOptionPnlRs == null) continue;
+    count += 1;
+    net += tradeNetRsOf(t);
+    const ms = Date.parse(t.exitTime);
+    if (Number.isFinite(ms) && ms > lastExitMs) lastExitMs = ms;
+  }
+  return { count, net, lastExitMs };
+}
+
+/**
+ * ANTI-CHURN defaults. Live re-runs every 60s and the real exchange SL fills
+ * intra-bar, so a naive strategy re-enters many times per 5m bar (18 crude
+ * round-trips on 2026-08-12, all bleeding spread+charges). These guards cap
+ * trades/book/day, force a cooldown after every exit, and hard-stop a book or
+ * the whole desk once the day loss crosses a floor.
+ */
+const ANTI_CHURN_DEFAULTS = {
+  crudeCooldownMin: 20,
+  indexCooldownMin: 12,
+  crudeMaxTradesDay: 3,
+  indexMaxTradesDay: 3,
+  bookDayLossStopRs: 500,
+  deskDayLossStopRs: 900,
+  /** Protect-green: arm at +arm, lock the day if it retraces to +floor. */
+  deskGreenProtectArmRs: 500,
+  deskGreenProtectFloorRs: 150,
+};
+
+function numOr(v, d) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : d;
+}
 
 function istParts(d = new Date()) {
   const fmt = new Intl.DateTimeFormat('en-CA', {
@@ -70,7 +148,7 @@ function mergeCandles(prev, next) {
   return [...map.values()].sort((a, b) => String(a.date).localeCompare(String(b.date)));
 }
 
-function toLiveOpen(replayOpen) {
+function toLiveOpen(replayOpen, trailExtras) {
   if (!replayOpen) return null;
   return {
     direction: replayOpen.direction,
@@ -84,7 +162,7 @@ function toLiveOpen(replayOpen) {
     optionBarLow: replayOpen.optionBarLow ?? null,
     optionLotUnits: replayOpen.optionLotUnits ?? null,
     lotsMultiplier: replayOpen.lotsMultiplier ?? 1,
-    trailExtras: liveGreenTrapExtras(),
+    trailExtras: trailExtras || liveGreenTrapExtras(),
   };
 }
 
@@ -97,11 +175,11 @@ function trapInitOverrides(config, instrumentId) {
       dayProfitLock: !!config.dayProfitLock,
       strictDayStop: !!config.strictDayStop,
     }) || {};
-  const extras = liveGreenTrapExtras();
+  const bank = /bank/i.test(String(instrumentId || ''));
+  const extras = bank ? liveGreenBankTrapExtras() : liveGreenTrapExtras();
   if (config.optionStandDownRs != null) {
     extras.optionStandDownRs = Number(config.optionStandDownRs);
   }
-  const bank = /bank/i.test(String(instrumentId || ''));
   const maxTrades = bank
     ? LIVE_GREEN_DNA.trap.bankMaxTradesPerDay || LIVE_GREEN_DNA.trap.maxTradesPerDay
     : LIVE_GREEN_DNA.trap.maxTradesPerDay;
@@ -138,6 +216,163 @@ class LiveWorker {
     this.reconciled = false;
     this.tickBusy = false;
     this.lastSignals = { nifty: '', bank: '', crude: '' };
+    /** Last TRADE_COUNT log signature (avoid spam). */
+    this.lastTradeCountSig = '';
+  }
+
+  /**
+   * Log each newly closed round-trip and a running day count.
+   * Count rule: one trade = placed + closed.
+   */
+  noteClosedTrades(added, today) {
+    const day = String(today || istParts().date).slice(0, 10);
+    for (const t of added || []) {
+      if (!t?.exitTime) continue;
+      const book = bookKind(t.instrumentId);
+      const net = Math.round(
+        t.netOptionPnlRs != null ? t.netOptionPnlRs : t.optionPnlRs || 0,
+      );
+      const entry = String(t.entryTime || '').slice(11, 16);
+      const exit = String(t.exitTime || '').slice(11, 16);
+      this.pushEvent(
+        'TRADE_CLOSED',
+        `${book.toUpperCase()} ${entry}→${exit} · ₹${net} · ${String(t.exitReason || '').slice(0, 60)}`,
+      );
+    }
+    const c = countClosedTradesByBook(this.liveTrades, day);
+    const sig = `N${c.nifty}|B${c.bank}|C${c.crude}|T${c.total}`;
+    if (sig !== this.lastTradeCountSig || (added && added.length)) {
+      this.lastTradeCountSig = sig;
+      this.pushEvent(
+        'TRADE_COUNT',
+        `Today closed (placed+closed): Nifty ${c.nifty} · Bank ${c.bank} · Crude ${c.crude} · total ${c.total}`,
+      );
+    }
+    return c;
+  }
+
+  deskOps(config = {}) {
+    const dna = LIVE_GREEN_DNA.liveOps || {};
+    const lots = Math.max(1, Number(config.deskLots || config.niftyLots || 1) || 1);
+    const bandMin1 = Number(dna.deskGreenLockRs) || 0;
+    return {
+      winStreakToBand:
+        config.winStreakToBand != null
+          ? !!config.winStreakToBand
+          : dna.winStreakToBand === true,
+      indexFirstWinLock:
+        config.indexFirstWinLock != null
+          ? !!config.indexFirstWinLock
+          : dna.indexFirstWinLock === true,
+      deskGreenLockRs:
+        config.deskGreenLockRs != null
+          ? Number(config.deskGreenLockRs)
+          : bandMin1 * lots,
+      bankOnlyAfterNifty:
+        config.bankOnlyAfterNifty != null
+          ? !!config.bankOnlyAfterNifty
+          : dna.bankOnlyAfterNifty === true,
+      bankOnlyAfterNiftyGreen:
+        config.bankOnlyAfterNiftyGreen != null
+          ? !!config.bankOnlyAfterNiftyGreen
+          : dna.bankOnlyAfterNiftyGreen === true,
+      crudeOnlyBelowBand:
+        config.crudeOnlyBelowBand != null
+          ? !!config.crudeOnlyBelowBand
+          : dna.crudeOnlyBelowBand === true,
+    };
+  }
+
+  indexDaySummary(today) {
+    const base = summarizeIndexDay(this.liveTrades, today);
+    return {
+      ...base,
+      niftyTaken: this.niftyTakenToday(today),
+    };
+  }
+
+  /** Max running cumulative desk net over today's closed trades (realized peak). */
+  deskDayPeak(today) {
+    const day = String(today || '').slice(0, 10);
+    const rows = (this.liveTrades || [])
+      .filter(
+        (t) =>
+          String(t.entryTime || '').slice(0, 10) === day &&
+          t.exitTime &&
+          (t.optionPnlRs != null || t.netOptionPnlRs != null),
+      )
+      .sort((a, b) => String(a.exitTime).localeCompare(String(b.exitTime)));
+    let cum = 0;
+    let peak = 0;
+    for (const t of rows) {
+      cum += tradeNetRsOf(t);
+      if (cum > peak) peak = cum;
+    }
+    return peak;
+  }
+
+  antiChurnCfg(config = {}) {
+    const d = ANTI_CHURN_DEFAULTS;
+    // Loss stops scale with lots so worst-case daily loss is proportional and
+    // predictable when you expand capital (never a fixed cap that gets sloppy).
+    const lots = Math.max(1, Math.floor(Number(config.deskLots || config.niftyLots || 1)) || 1);
+    return {
+      crudeCooldownMin: numOr(config.crudeCooldownMin, d.crudeCooldownMin),
+      indexCooldownMin: numOr(config.indexCooldownMin, d.indexCooldownMin),
+      crudeMaxTradesDay: numOr(config.crudeMaxTradesDay, d.crudeMaxTradesDay),
+      indexMaxTradesDay: numOr(config.indexMaxTradesDay, d.indexMaxTradesDay),
+      bookDayLossStopRs: numOr(config.bookDayLossStopRs, d.bookDayLossStopRs) * lots,
+      deskDayLossStopRs: numOr(config.deskDayLossStopRs, d.deskDayLossStopRs) * lots,
+      deskGreenProtectArmRs:
+        numOr(config.deskGreenProtectArmRs, LIVE_GREEN_DNA.liveOps.deskGreenProtectArmRs ?? d.deskGreenProtectArmRs) * lots,
+      deskGreenProtectFloorRs:
+        numOr(config.deskGreenProtectFloorRs, LIVE_GREEN_DNA.liveOps.deskGreenProtectFloorRs ?? d.deskGreenProtectFloorRs) * lots,
+      lots,
+    };
+  }
+
+  /**
+   * Gate a NEW entry for one book. Existing open legs are always managed/exited
+   * elsewhere — this only blocks fresh entries to stop 60s-tick churn + bleed.
+   */
+  entryGuard(book, today, config = {}) {
+    const g = this.antiChurnCfg(config);
+    const stats = bookDayStats(this.liveTrades, book, today);
+    const deskNet = summarizeDeskDay(this.liveTrades, today).dayNet;
+
+    // True intraday realized peak from the closed-trade path (restart-safe).
+    const peak = this.deskDayPeak(today);
+
+    // Protect-green: once solidly green, don't give it back → EOD stays green.
+    if (
+      g.deskGreenProtectArmRs > 0 &&
+      peak >= g.deskGreenProtectArmRs &&
+      deskNet <= g.deskGreenProtectFloorRs
+    ) {
+      return {
+        allow: false,
+        reason: `protect green — locked ₹${Math.round(deskNet)} (peaked ₹${Math.round(peak)})`,
+      };
+    }
+
+    if (g.deskDayLossStopRs > 0 && deskNet <= -g.deskDayLossStopRs) {
+      return { allow: false, reason: `desk loss stop ₹${Math.round(deskNet)} (≥ −₹${g.deskDayLossStopRs})` };
+    }
+    if (g.bookDayLossStopRs > 0 && stats.net <= -g.bookDayLossStopRs) {
+      return { allow: false, reason: `${book} loss stop ₹${Math.round(stats.net)} (≥ −₹${g.bookDayLossStopRs})` };
+    }
+    const maxT = book === 'crude' ? g.crudeMaxTradesDay : g.indexMaxTradesDay;
+    if (maxT > 0 && stats.count >= maxT) {
+      return { allow: false, reason: `${book} max ${maxT} trades/day done` };
+    }
+    const cdMin = book === 'crude' ? g.crudeCooldownMin : g.indexCooldownMin;
+    if (cdMin > 0 && stats.lastExitMs > 0) {
+      const mins = (Date.now() - stats.lastExitMs) / 60000;
+      if (mins < cdMin) {
+        return { allow: false, reason: `${book} cooldown ${Math.ceil(cdMin - mins)}m after exit` };
+      }
+    }
+    return { allow: true, reason: '' };
   }
 
   handleBrokerFill(fill) {
@@ -154,14 +389,22 @@ class LiveWorker {
       'FILL',
       `${fill.instrumentName || fill.instrumentId || ''}: ${String(fill.side).toUpperCase()} ${fill.tradingSymbol} @ ${px.toFixed(2)}${pnl}`.trim(),
     );
+    // Exit fill completes a round-trip — bump day trade count in logs.
+    if (String(fill.side || '').toLowerCase() !== 'entry' && row.exitTime) {
+      const { date: today } = istParts();
+      this.noteClosedTrades([row], today);
+    }
   }
 
   /** Snapshot for GET /live/status — broker fills when real, else live-path paper. */
   moneySnapshot() {
     const real = !!this.getConfig()?.realOrders;
+    const { date: today } = istParts();
     return {
       trades: publicTrades(this.liveTrades),
       totals: moneyTotals(this.liveTrades, { brokerOnly: real }),
+      /** Closed round-trips today (placed + closed). */
+      tradeCounts: countClosedTradesByBook(this.liveTrades, today),
     };
   }
 
@@ -290,6 +533,10 @@ class LiveWorker {
           config.fillFrictionPremium != null ? config.fillFrictionPremium : 0.5,
       });
 
+      const deskOps = this.deskOps(config);
+      const daySummary = this.indexDaySummary(today);
+      const niftyGate = indexEntryGate(daySummary, deskOps);
+
       if (config.enableNifty && indexSession) {
         const replay = await this.replayIndexLive({
           authorization,
@@ -308,17 +555,40 @@ class LiveWorker {
             return s;
           },
         });
-        ingestReplayTrades(this.liveTrades, replay.trades, { rejectEstimated: true });
+        const niftyAdded = ingestReplayTrades(this.liveTrades, replay.trades, {
+          rejectEstimated: true,
+        });
+        this.noteClosedTrades(niftyAdded, today);
+        const niftyPos = this.broker.positions?.get(NIFTY_50_INSTRUMENT.id);
+        const niftyAlreadyLive =
+          niftyPos && (niftyPos.status === 'open' || niftyPos.status === 'exiting');
+        let niftySyncOpen = this.liveOpenForSync(
+          NIFTY_50_INSTRUMENT.id,
+          replay.open,
+          liveGreenTrapExtras(),
+        );
+        // Daily-band gate: still manage an already-open leg.
+        if (niftySyncOpen && !niftyAlreadyLive && !niftyGate.allow) {
+          niftySyncOpen = null;
+        }
+        // Anti-churn: block fresh Nifty entry on cooldown / caps / loss stop.
+        let niftyChurn = { allow: true, reason: '' };
+        if (niftySyncOpen && !niftyAlreadyLive) {
+          niftyChurn = this.entryGuard('nifty', today, config);
+          if (!niftyChurn.allow) niftySyncOpen = null;
+        }
         await this.broker.syncInstrument({
           authorization,
           instrumentId: NIFTY_50_INSTRUMENT.id,
           instrumentName: 'Nifty Trap',
-          open: this.liveOpenForSync(NIFTY_50_INSTRUMENT.id, replay.open),
+          open: niftySyncOpen,
           lots: config.deskLots || config.niftyLots || 1,
         });
         const niftySig =
           `Nifty Trap · ${replay.lastSignal}` +
-          (replay.open ? ` · OPEN ${replay.open.direction}` : '');
+          (niftySyncOpen ? ` · OPEN ${niftySyncOpen.direction}` : '') +
+          (!niftyGate.allow && !niftyAlreadyLive ? ` · ${niftyGate.reason}` : '') +
+          (!niftyChurn.allow && !niftyAlreadyLive ? ` · ${niftyChurn.reason}` : '');
         if (niftySig !== this.lastSignals.nifty) {
           this.lastSignals.nifty = niftySig;
           this.pushEvent('SIGNAL', niftySig);
@@ -327,8 +597,11 @@ class LiveWorker {
 
       if (config.enableBank && indexSession) {
         const genie = config.bankStrategy === 'genie';
-        const bankAfterNifty = config.bankOnlyAfterNifty !== false;
-        const niftyReady = !bankAfterNifty || this.niftyTakenToday(today);
+        // Recompute after Nifty ingest so Bank sees fresh day net / win flag.
+        const bankSummary = this.indexDaySummary(today);
+        const idxGate = indexEntryGate(bankSummary, deskOps);
+        const bGate = bankEntryGate(bankSummary, deskOps);
+        const bankAllowed = idxGate.allow && bGate.allow;
         const replay = await this.replayIndexLive({
           authorization,
           instrument: BANK_NIFTY_INSTRUMENT,
@@ -347,15 +620,27 @@ class LiveWorker {
             return s;
           },
         });
-        ingestReplayTrades(this.liveTrades, replay.trades, { rejectEstimated: true });
-        // Zero-red rule: new Bank entries only after Nifty has traded today.
-        // Still manage/exit an already-open Bank leg.
-        const bankOpen = this.liveOpenForSync(BANK_NIFTY_INSTRUMENT.id, replay.open);
+        const bankAdded = ingestReplayTrades(this.liveTrades, replay.trades, {
+          rejectEstimated: true,
+        });
+        this.noteClosedTrades(bankAdded, today);
+        // Daily-band + Bank-after-Nifty-green: new entries only when gates allow.
+        const bankOpen = this.liveOpenForSync(
+          BANK_NIFTY_INSTRUMENT.id,
+          replay.open,
+          liveGreenBankTrapExtras(),
+        );
         const bankPos = this.broker.positions?.get(BANK_NIFTY_INSTRUMENT.id);
         const bankAlreadyLive =
           bankPos && (bankPos.status === 'open' || bankPos.status === 'exiting');
-        const bankSyncOpen =
-          bankAlreadyLive || niftyReady ? bankOpen : null;
+        let bankSyncOpen = bankAlreadyLive || bankAllowed ? bankOpen : null;
+        if (bankSyncOpen && !bankAlreadyLive && !bankAllowed) bankSyncOpen = null;
+        // Anti-churn: block fresh Bank entry on cooldown / caps / loss stop.
+        let bankChurn = { allow: true, reason: '' };
+        if (bankSyncOpen && !bankAlreadyLive) {
+          bankChurn = this.entryGuard('bank', today, config);
+          if (!bankChurn.allow) bankSyncOpen = null;
+        }
         await this.broker.syncInstrument({
           authorization,
           instrumentId: BANK_NIFTY_INSTRUMENT.id,
@@ -363,10 +648,12 @@ class LiveWorker {
           open: bankSyncOpen,
           lots: config.deskLots || config.bankLots || 1,
         });
+        const waitReason = !bGate.allow ? bGate.reason : !idxGate.allow ? idxGate.reason : '';
         const bankSig =
           `Bank ${genie ? 'Genie' : 'Trap'} · ${replay.lastSignal}` +
           (bankSyncOpen ? ` · OPEN ${bankSyncOpen.direction}` : '') +
-          (bankAfterNifty && !niftyReady ? ' · wait Nifty first' : '');
+          (waitReason && !bankAlreadyLive ? ` · ${waitReason}` : '') +
+          (!bankChurn.allow && !bankAlreadyLive ? ` · ${bankChurn.reason}` : '');
         if (bankSig !== this.lastSignals.bank) {
           this.lastSignals.bank = bankSig;
           this.pushEvent('SIGNAL', bankSig);
@@ -379,13 +666,20 @@ class LiveWorker {
         const dnaGate =
           LIVE_CRUDE_GREEN_DNA.liveOps.crudeAfterIndexCloseTime || CRUDE_NOT_BEFORE;
         const gateTime = dnaGate > CRUDE_NOT_BEFORE ? dnaGate : CRUDE_NOT_BEFORE;
-        const crudeEntryOk = now >= gateTime;
+        const deskDay = summarizeDeskDay(this.liveTrades, today);
+        const bandMin = Math.max(0, Number(deskOps.deskGreenLockRs) || 0);
+        const belowBand =
+          !deskOps.crudeOnlyBelowBand || bandMin <= 0 || deskDay.dayNet < bandMin;
+        const crudeEntryOk = now >= gateTime && belowBand;
         const crudeOpen = this.broker?.positions?.get(CRUDE_OIL_MINI_INSTRUMENT.id);
         const crudeOpenLive = crudeOpen?.status === 'open';
 
         if (crudeEntryOk || crudeOpenLive) {
           const crudeProfile = config.crudeStrategy || 'live-crude-green';
-          const tradeParams = resolveCrudeStrategyProfile(crudeProfile);
+          let tradeParams = resolveCrudeStrategyProfile(crudeProfile);
+          if (crudeProfile === 'live-crude-green') {
+            tradeParams = { ...tradeParams, ...liveCrudeGreenProfileOverrides() };
+          }
           const dayLossStopPts = resolveCrudeProfileDayLossPts(
             tradeParams,
             !!config.strictDayStop,
@@ -411,12 +705,24 @@ class LiveWorker {
             enableEvening: crudeEntryOk && tradeParams.defaultEnableEvening,
             tradeParams,
           });
-          ingestReplayTrades(this.liveTrades, replay.trades, { rejectEstimated: true });
-          const crudeSyncOpen = this.liveOpenForSync(
+          const crudeAdded = ingestReplayTrades(this.liveTrades, replay.trades, {
+            rejectEstimated: true,
+          });
+          this.noteClosedTrades(crudeAdded, today);
+          let crudeSyncOpen = this.liveOpenForSync(
             CRUDE_OIL_MINI_INSTRUMENT.id,
             replay.open,
           );
-          if (replay.open && !crudeSyncOpen) {
+          // Anti-churn: block fresh Crude entry on cooldown / caps / loss stop.
+          let crudeChurn = { allow: true, reason: '' };
+          if (crudeSyncOpen && !crudeOpenLive) {
+            crudeChurn = this.entryGuard('crude', today, config);
+            if (!crudeChurn.allow) {
+              crudeSyncOpen = null;
+              this.pushEvent('SKIP', `${crudeLabel}: ${crudeChurn.reason}`);
+            }
+          }
+          if (replay.open && !crudeSyncOpen && crudeChurn.allow) {
             const why = isEstimatedOrSynthetic({
               option: replay.open.option,
               premiumEstimated: replay.open.premiumEstimated,
@@ -435,14 +741,27 @@ class LiveWorker {
             open: crudeSyncOpen,
             lots: crudeLots,
           });
+          const bandSkip =
+            deskOps.crudeOnlyBelowBand &&
+            bandMin > 0 &&
+            deskDay.dayNet >= bandMin
+              ? ` · band locked ₹${Math.round(deskDay.dayNet)}`
+              : '';
           const crudeSig =
             `${crudeLabel} · ${replay.lastSignal}` +
             (crudeSyncOpen ? ` · OPEN ${crudeSyncOpen.direction}` : '') +
             (replay.open && !crudeSyncOpen ? ' · paper-only (no live entry)' : '') +
-            (!crudeEntryOk ? ` · gated until ${gateTime}` : '');
+            (now < gateTime ? ` · gated until ${gateTime}` : '') +
+            bandSkip;
           if (crudeSig !== this.lastSignals.crude) {
             this.lastSignals.crude = crudeSig;
             this.pushEvent('SIGNAL', crudeSig);
+          }
+        } else if (now >= gateTime && !belowBand) {
+          const skip = `Crude · daily band locked ₹${Math.round(deskDay.dayNet)} (≥₹${bandMin})`;
+          if (skip !== this.lastSignals.crude) {
+            this.lastSignals.crude = skip;
+            this.pushEvent('SIGNAL', skip);
           }
         }
       }
@@ -596,8 +915,8 @@ class LiveWorker {
    * Only sync an entry the broker would accept — no phantom paper legs when
    * another book already holds the one-leg slot or premium is estimated.
    */
-  liveOpenForSync(instrumentId, replayOpen) {
-    const open = toLiveOpen(replayOpen);
+  liveOpenForSync(instrumentId, replayOpen, trailExtras) {
+    const open = toLiveOpen(replayOpen, trailExtras);
     if (!open) return null;
     if (isEstimatedOrSynthetic({ option: open.option, premiumEstimated: open.premiumEstimated })) {
       return null;

@@ -280,7 +280,11 @@ async function runBacktest({ authorization, fromDate, toDate, config }, deps = {
         toDate,
       );
       const profile = cfg.crudeStrategy || 'live-crude-green';
-      const tradeParams = resolveCrudeStrategyProfile(profile);
+      let tradeParams = resolveCrudeStrategyProfile(profile);
+      if (profile === 'live-crude-green') {
+        const { liveCrudeGreenProfileOverrides } = require('./dna-live-crude-green');
+        tradeParams = { ...tradeParams, ...liveCrudeGreenProfileOverrides() };
+      }
       const dayLossStopPts = resolveCrudeProfileDayLossPts(tradeParams, !!cfg.strictDayStop);
       const crudeBase = {
         instrumentId: CRUDE_OIL_MINI_INSTRUMENT.id,
@@ -324,7 +328,34 @@ async function runBacktest({ authorization, fromDate, toDate, config }, deps = {
         dayProfitLockRs: cfg.dayProfitLock ? DAY_PROFIT_LOCK_RS : 0,
         dayStopRs: cfg.strictDayStop ? STRICT_DAY_STOP_RS : 0,
         rejectEstimatedPremium: true,
-        bankOnlyAfterNifty: cfg.bankOnlyAfterNifty !== false,
+        bankOnlyAfterNifty:
+          cfg.bankOnlyAfterNifty != null
+            ? !!cfg.bankOnlyAfterNifty
+            : LIVE_GREEN_DNA.liveOps.bankOnlyAfterNifty === true,
+        bankOnlyAfterNiftyGreen:
+          cfg.bankOnlyAfterNiftyGreen != null
+            ? !!cfg.bankOnlyAfterNiftyGreen
+            : LIVE_GREEN_DNA.liveOps.bankOnlyAfterNiftyGreen === true,
+        winStreakToBand:
+          cfg.winStreakToBand != null
+            ? !!cfg.winStreakToBand
+            : LIVE_GREEN_DNA.liveOps.winStreakToBand === true,
+        indexFirstWinLock:
+          cfg.indexFirstWinLock != null
+            ? !!cfg.indexFirstWinLock
+            : LIVE_GREEN_DNA.liveOps.indexFirstWinLock === true,
+        deskGreenLockRs:
+          cfg.deskGreenLockRs != null
+            ? Number(cfg.deskGreenLockRs)
+            : Number(LIVE_GREEN_DNA.liveOps.deskGreenLockRs) || 0,
+        recoveryMaxExtra:
+          cfg.recoveryMaxExtra != null
+            ? Number(cfg.recoveryMaxExtra)
+            : LIVE_GREEN_DNA.liveOps.recoveryMaxExtra ?? 0,
+        dustTradeRs:
+          cfg.dustTradeRs != null
+            ? Number(cfg.dustTradeRs)
+            : LIVE_GREEN_DNA.liveOps.dustTradeRs ?? 0,
       })
     : rawTrades;
 

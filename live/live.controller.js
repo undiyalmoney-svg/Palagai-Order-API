@@ -19,7 +19,7 @@ async function health(_req, res) {
   res.json({
     status: 'ok',
     service: 'palagai-live-control',
-    note: 'Server Live — All3 daily: Nifty→Bank→Crude · Paper≡Live · capital→lots',
+    note: 'Server Live — All3 Treasure · Nifty+Bank Pivot S/R + Crude Session-OR · Unlimited · Zero-red · Paper≡Live',
     version: APP_VERSION,
     appBuild: APP_BUILD,
     dnaId: LIVE_GREEN_DNA.id,
@@ -28,19 +28,29 @@ async function health(_req, res) {
     bankAllowed: AUTOBOT_ALLOW_BANK,
     crudeAllowed: AUTOBOT_ALLOW_CRUDE,
     paperLivePath: true,
-    bankOnlyAfterNifty: true,
+    bankOnlyAfterNifty: !!ops.bankOnlyAfterNifty,
     crudeDna: AUTOBOT_ALLOW_CRUDE
-      ? `after NSE · OR${c.minOrWidth}–${c.maxOrWidth} · ${c.entryStart}–${c.entryEnd} · SL${c.stopPts}/TP${c.targetPts} · trail ₹${c.profitLockArmRs}→₹${c.profitLockLockRs} · max${c.maxTradesDay} · first-win · no index-session overlap`
+      ? `Professional · after NSE · OR${c.minOrWidth}–${c.maxOrWidth} · ${c.entryStart}–${c.entryEnd} · SL${c.stopPts}/TP${c.targetPts} · confirm ${c.requireConfirm ? 'ON' : 'OFF'} · trail ₹${c.profitLockArmRs}→₹${c.profitLockLockRs} · max${c.maxTradesDay || '∞'}`
       : 'OFF — Autobot will not trade Crude',
-    trapDna: `SR Trap · pierce ${t.piercePts}/B${t.bankPiercePts} · peak ₹${t.profitLockArmRs}/${t.profitLockLockRs}/${t.profitLockGivebackRs} · max${t.maxTradesPerDay} · ${t.targetRMultiple}R · stand-down ₹${ops.optionStandDownRs} · one-leg · option-₹ lock`,
+    trapDna: `Professional · Pivot${t.pivotStrength || 3} · perfectSL · ${t.trapMode || 'trap'} · pierce ${t.piercePts}/B${t.bankPiercePts} · confirm≥${t.minConfirmBody || 0}pt · risk ${t.minRiskPts || 0}-${t.maxRiskPts || 0}pt · ${t.targetRMultiple || 0}R · max${t.maxTradesPerDay || '∞'}/book`,
     dayProfitLockRsBase: DAY_PROFIT_LOCK_RS,
     strictDayStopRsBase: STRICT_DAY_STOP_RS,
     liveOps: { ...ops, ...LIVE_CRUDE_GREEN_DNA.liveOps },
+    antiChurn: {
+      crudeCooldownMin: 20,
+      indexCooldownMin: 12,
+      crudeMaxTradesDay: 3,
+      indexMaxTradesDay: 3,
+      bookDayLossStopRs: '500 × lots',
+      deskDayLossStopRs: '900 × lots',
+      note: 'Loss stops scale with lots → worst-case daily loss is bounded & predictable when you expand. Guards also block 60s re-entry churn.',
+    },
     research: {
       index: LIVE_GREEN_DNA.research,
       crude: LIVE_CRUDE_GREEN_DNA.research,
       greenPath:
-        'All3 zero-red path: Nifty first, Bank only after Nifty, Crude after NSE. Paper≡Live.',
+        'Professional DNA: confirmed pivot S/R reversal (index) + confirmed OR breakout (crude), 2–2.5R targets, breakeven trail, max 2–3 trades/book/day, cooldown, per-book & desk daily loss stops + day profit lock. Validate in paper.',
+      dailyBand: LIVE_GREEN_DNA.dailyBand,
     },
     defaults: DAILY_3K_PRESET,
   });
@@ -66,7 +76,10 @@ async function defaults(_req, res) {
     preset: DAILY_3K_PRESET,
     dayProfitLockRsBase: DAY_PROFIT_LOCK_RS,
     strictDayStopRsBase: STRICT_DAY_STOP_RS,
-    checkboxHint: `₹${DAY_PROFIT_LOCK_RS.toLocaleString('en-IN')} × lots (1→₹3k · 3→₹9k)`,
+    checkboxHint:
+      DAY_PROFIT_LOCK_RS > 0
+        ? `₹${DAY_PROFIT_LOCK_RS.toLocaleString('en-IN')} × lots (1→₹3k · 3→₹9k)`
+        : 'Treasure DNA — no day profit lock / stop (S/R + perfect SL)',
     /** Autobot UI should render these books (Crude is server-forced ON). */
     books: {
       nifty: true,
@@ -77,8 +90,8 @@ async function defaults(_req, res) {
       deskLots: DAILY_3K_PRESET.niftyLots,
       crudeStrategy: 'live-crude-green',
       crudeWindow: '16:00–21:00 IST (hard gate 15:15)',
-      bankOnlyAfterNifty: true,
-      label: 'Nifty → Bank (after Nifty) → Crude after NSE',
+      bankOnlyAfterNifty: !!LIVE_GREEN_DNA.liveOps.bankOnlyAfterNifty,
+      label: 'Treasure · Nifty + Bank + Crude (unlimited · no band)',
       capitalLots: {
         under75k: 1,
         from75k: 2,
@@ -89,7 +102,7 @@ async function defaults(_req, res) {
       },
     },
     uiHint:
-      'Capital ladder → shared deskLots (Nifty=Bank=Crude): <₹75k→1, ₹75k+→2, then ≈₹1L per lot (₹6L→6, max 10). Auto-update all lot fields when capital changes; send capitalRs; Stop→Start.',
+      'Treasure DNA: Pivot S/R + perfect SL, unlimited trades, no day lock/band. Capital ladder → shared deskLots. Send capitalRs; Stop→Start.',
   });
 }
 

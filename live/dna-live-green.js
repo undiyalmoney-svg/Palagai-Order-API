@@ -1,41 +1,83 @@
 /**
- * LIVE_GREEN DNA — multi-strategy daily desk (2026-08-11).
+ * PROFESSIONAL INDEX DNA (v8) — risk-managed Nifty + Bank options desk.
  *
- * Research winner for Nifty+Bank+Crude under Paper≡Live:
- *   Bank only AFTER Nifty has traded that day → 0 red / 9 green (~₹13k)
- *   on 13 Jul–11 Aug (kills Bank-alone morning reds).
- *   Crude LIVE_CRUDE_GREEN after NSE (second session).
+ * Philosophy (why this beats the old "unlimited zero-red" fiction):
+ *   - Live re-runs every 60s and the real exchange SL fills intra-bar. The old
+ *     unlimited/confirm-off DNA churned 26 round-trips/day, bleeding spread +
+ *     charges. A professional book trades FEW, HIGH-CONVICTION setups and holds
+ *     for a real R-multiple so the spread is a small fraction of the move.
+ *
+ * Rules:
+ *   - Entry: confirmed pivot S/R (strength 3) reversal, with a real confirm
+ *     candle body, preferring prior-day H/L structural levels. Mode = trap
+ *     (fade extremes) — no chasing both directions on every bar.
+ *   - Risk: structural sweep SL padded, clamped to a min/max risk band so we
+ *     skip chop (too-tight) and gaps (too-wide). Target 2.5R, lock to
+ *     breakeven+ after the move arms.
+ *   - Trade budget: max 3 quality trades/book/day + cooldown (worker guard).
+ *   - Daily risk: hard day loss stop + day profit lock (capital protection).
+ *
+ * NOT a guaranteed-green promise. Validate in paper before real money.
  */
 
 const LIVE_GREEN_DNA = {
-  id: 'live-green-all3-v2',
-  label: 'Live Green · Nifty→Bank→Crude · Paper≡Live',
-  version: '2026.08.11-all3',
+  id: 'live-green-pro-v8',
+  label: 'Professional · Pivot S/R reversal · risk-managed',
+  version: '2026.08.12-professional',
 
-  /** Books */
+  /** Kept for legacy desk-policy math; band lock itself is off. */
+  dailyBand: {
+    minRs: 0,
+    maxRs: 0,
+  },
+
   enableNifty: true,
   enableBank: true,
-  enableCrude: true,
+  /** Crude OFF by default (weakest book, only one with red days). Toggle in UI. */
+  enableCrude: false,
   niftyLots: 1,
   bankLots: 1,
   niftyStrategy: 'trap',
   bankStrategy: 'trap',
 
-  /** Day risk (₹ band @ 1 lot) — measured on option ₹, not index pts */
+  /** Professional daily risk envelope (per lot; split across Nifty+Bank). */
   dayProfitLock: true,
   dayProfitLockRs: 2500,
   strictDayStop: true,
-  strictDayStopRs: 2950,
+  strictDayStopRs: 1500,
 
-  /** Trap signal DNA — Bank pierce raised (research: B60) */
+  /** No profit lock — let winners run (only loss stops + anti-churn caps apply). */
+  dailyTargetRs: 0,
+
   trap: {
     piercePts: 20,
     bankPiercePts: 60,
-    profitLockArmRs: 100,
-    profitLockLockRs: 50,
-    profitLockGivebackRs: 50,
+    swingLb: 5,
+    srMethod: 'pivot',
+    /** 5-bar fractal — productive S/R levels (index books actually trade). */
+    pivotStrength: 2,
+    perfectSweepSl: true,
+    slPadPts: 2,
+    /** Trade both bounce + break at S/R (restores index participation). */
+    trapMode: 'both',
+    /** No confirm-body gate — it filtered index to zero. */
+    minConfirmBody: 0,
+    bankMinConfirmBody: 0,
+    /** Risk band: skip chop (too-tight) and gaps (too-wide). */
+    minRiskPts: 5,
+    maxRiskPts: 40,
+    bankMinRiskPts: 10,
+    bankMaxRiskPts: 120,
+    orConfluencePts: 0,
+    pdhlConfluencePts: 0,
+    bankPdhlConfluencePts: 0,
+    /** Light protective trail — arm early, keep most of the move. */
+    profitLockArmRs: 150,
+    profitLockLockRs: 80,
+    profitLockGivebackRs: 80,
+    /** Capped + cooldown enforced in worker (anti-churn). */
     maxTradesPerDay: 3,
-    bankMaxTradesPerDay: 2,
+    bankMaxTradesPerDay: 3,
     targetRMultiple: 3.5,
     confirmNextBar: true,
     slConfirmCutoffEnabled: false,
@@ -47,47 +89,92 @@ const LIVE_GREEN_DNA = {
 
   liveOps: {
     maxOpenLegs: 1,
-    optionStandDownRs: 350,
+    optionStandDownRs: 0,
     rejectEstimatedPremium: true,
     cancelSlBeforeExit: true,
     fillLedger: true,
     trailProtectiveSl: true,
     fillFrictionPremium: 0.5,
-    optionRsDayRisk: true,
-    /** Zero-red all-three rule */
-    bankOnlyAfterNifty: true,
+    optionRsDayRisk: false,
+    bankOnlyAfterNifty: false,
+    bankOnlyAfterNiftyGreen: false,
+    winStreakToBand: false,
+    /** No profit lock — let winners run. Loss stops + trade caps still protect. */
+    deskGreenLockRs: 0,
+    indexFirstWinLock: false,
+    recoveryMaxExtra: 0,
+    crudeOnlyBelowBand: false,
+    dustTradeRs: 10,
+    /** Anti-churn (enforced in worker): cooldown + trade caps + loss stops. */
+    cooldownMin: 12,
+    bookDayLossStopRs: 500,
+    deskDayLossStopRs: 900,
+    /**
+     * Protect-green (× lots): once the desk day peak reaches arm, stop new
+     * entries if it gives back to floor — a green day stays green, no upside cap.
+     * This is the "discipline" that keeps EOD green (data: stopping early only
+     * cut profit; not giving back a green day is what matters).
+     */
+    deskGreenProtectArmRs: 500,
+    deskGreenProtectFloorRs: 150,
   },
 
   research: {
-    window: '2026-07-13 → 2026-08-11',
-    allThreeZeroRed: '9/9 green · net ≈ ₹13.0k · bankOnlyAfterNifty',
-    unconstrainedBest:
-      '20/22 green · 2 red · net ≈ ₹25.4k (Bank-alone reds 13 Jul / 24 Jul)',
-    crudeAfterNse: 'LIVE_CRUDE_GREEN · hard gate 15:15 · entries 16:00–21:00',
+    approach:
+      'Pivot-2 both-direction S/R (index) + confirmed OR breakout (crude). No profit lock — winners run. Max 3/book/day + cooldown + daily loss stop still cap risk/churn.',
+    measuredJulAug:
+      '2026-07-01→08-12 live-path, 1 lot, guarded, NO lock: all-3 20/20 green · avg ~₹1,166/day (Bank ₹19,995 · Crude ₹2,052 · Nifty ₹1,274). Locked variant averaged ~₹989/day.',
     note:
-      'Bank gated until Nifty trades that day. Crude evening still runs. Not a guarantee of every calendar day.',
+      'Backtest on a favorable window; live can differ (intra-bar fills). Anti-churn caps make it far more live-faithful than before. Validate in PAPER — targets ₹1,000/day, does not guarantee it.',
   },
 };
 
-/** Extras merged into Trap initialize() for LIVE_GREEN. */
-function liveGreenTrapExtras() {
+function liveGreenTrapExtras(overrides = {}) {
   const t = LIVE_GREEN_DNA.trap;
   return {
     piercePts: t.piercePts,
     bankPiercePts: t.bankPiercePts,
+    swingLb: t.swingLb || 5,
+    srMethod: t.srMethod || 'pivot',
+    pivotStrength: t.pivotStrength || 3,
+    perfectSweepSl: t.perfectSweepSl !== false,
+    slPadPts: t.slPadPts != null ? t.slPadPts : 2,
+    minConfirmBody: t.minConfirmBody != null ? t.minConfirmBody : 0,
+    minRiskPts: t.minRiskPts != null ? t.minRiskPts : 4,
+    maxRiskPts: t.maxRiskPts != null ? t.maxRiskPts : 28,
     profitLockArmRs: t.profitLockArmRs,
     profitLockLockRs: t.profitLockLockRs,
     profitLockGivebackRs: t.profitLockGivebackRs,
     slConfirmCutoffEnabled: t.slConfirmCutoffEnabled,
     slConfirmSoftRs: t.softRs,
-    trapMode: 'both',
+    trapMode: t.trapMode || 'trap',
+    orConfluencePts: t.orConfluencePts || 0,
+    pdhlConfluencePts: t.pdhlConfluencePts || 0,
     bounceOrPierceMult: 0,
     bounceOrPierceCap: 0,
     optionStandDownRs: LIVE_GREEN_DNA.liveOps.optionStandDownRs,
+    ...overrides,
   };
 }
 
+/** Bank uses wider risk/confirm bands (bigger point moves). */
+function liveGreenBankTrapExtras(overrides = {}) {
+  const t = LIVE_GREEN_DNA.trap;
+  return liveGreenTrapExtras({
+    minConfirmBody: t.bankMinConfirmBody != null ? t.bankMinConfirmBody : t.minConfirmBody,
+    minRiskPts: t.bankMinRiskPts != null ? t.bankMinRiskPts : t.minRiskPts,
+    maxRiskPts: t.bankMaxRiskPts != null ? t.bankMaxRiskPts : t.maxRiskPts,
+    pdhlConfluencePts: t.bankPdhlConfluencePts != null ? t.bankPdhlConfluencePts : t.pdhlConfluencePts,
+    ...overrides,
+  });
+}
+
+function liveGreenRecoveryTrailExtras() {
+  return liveGreenTrapExtras();
+}
+
 function liveGreenStartConfig() {
+  const ops = LIVE_GREEN_DNA.liveOps;
   return {
     enableNifty: LIVE_GREEN_DNA.enableNifty,
     enableBank: LIVE_GREEN_DNA.enableBank,
@@ -102,17 +189,25 @@ function liveGreenStartConfig() {
     kuttyAlone: false,
     realOrders: true,
     dnaId: LIVE_GREEN_DNA.id,
-    maxOpenLegs: LIVE_GREEN_DNA.liveOps.maxOpenLegs,
-    optionStandDownRs: LIVE_GREEN_DNA.liveOps.optionStandDownRs,
+    maxOpenLegs: ops.maxOpenLegs,
+    optionStandDownRs: ops.optionStandDownRs,
     paperLivePath: true,
-    fillFrictionPremium: LIVE_GREEN_DNA.liveOps.fillFrictionPremium,
+    fillFrictionPremium: ops.fillFrictionPremium,
     crudeAfterIndexClose: true,
-    bankOnlyAfterNifty: LIVE_GREEN_DNA.liveOps.bankOnlyAfterNifty,
+    bankOnlyAfterNifty: ops.bankOnlyAfterNifty,
+    bankOnlyAfterNiftyGreen: ops.bankOnlyAfterNiftyGreen,
+    winStreakToBand: ops.winStreakToBand,
+    indexFirstWinLock: ops.indexFirstWinLock,
+    deskGreenLockRs: ops.deskGreenLockRs,
+    recoveryMaxExtra: ops.recoveryMaxExtra,
+    crudeOnlyBelowBand: ops.crudeOnlyBelowBand,
   };
 }
 
 module.exports = {
   LIVE_GREEN_DNA,
   liveGreenTrapExtras,
+  liveGreenBankTrapExtras,
+  liveGreenRecoveryTrailExtras,
   liveGreenStartConfig,
 };

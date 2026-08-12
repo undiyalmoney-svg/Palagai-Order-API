@@ -135,8 +135,10 @@ function statusPayload(session) {
       crudeLots: cfg.crudeLots || 1,
       crudeStrategy: cfg.crudeStrategy || 'live-crude-green',
       crudeAfterIndexClose: cfg.crudeAfterIndexClose !== false,
-      bankOnlyAfterNifty: cfg.bankOnlyAfterNifty !== false,
-      label: 'Nifty → Bank (after Nifty) → Crude after NSE',
+      bankOnlyAfterNifty: !!cfg.bankOnlyAfterNifty,
+      label: cfg.bankOnlyAfterNifty
+        ? 'Nifty → Bank (after Nifty) → Crude after NSE'
+        : 'Treasure · Nifty + Bank + Crude (unlimited)',
     },
     risk: {
       dayProfitLockRsBase: DAY_PROFIT_LOCK_RS,
@@ -157,6 +159,8 @@ function statusPayload(session) {
     /** Money ledger: paper marks overwritten by broker fills when realOrders. */
     trades: money.trades,
     totals: money.totals,
+    /** Closed round-trips today — one trade = placed + closed. */
+    tradeCounts: money.tradeCounts || { nifty: 0, bank: 0, crude: 0, other: 0, total: 0 },
     mongo: !!mongoDb,
     userId: session.userId,
   };

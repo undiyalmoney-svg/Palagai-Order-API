@@ -1,16 +1,10 @@
 /**
- * Daily desk DNA — Autobot multi-strategy Paper≡Live.
- *
- * 1) Nifty Trap (primary)
- * 2) Bank Trap — only AFTER Nifty traded that day (zero-red all-three rule)
- * 3) Crude LIVE_CRUDE_GREEN after NSE (second session)
- *
- * Capital: UI `capitalRs` / `capital` → one shared deskLots for Nifty+Bank+Crude.
- * Crude never keeps a private lot size. Stop→Start required to apply a new capital.
+ * Treasure DNA — Pivot S/R · unlimited trades · zero-red live-path.
+ * Capital: UI capitalRs → shared deskLots. Stop→Start to apply.
  */
 
-const APP_VERSION = '1.3.124';
-const APP_BUILD = '2026.08.11-standdown-scale-lots';
+const APP_VERSION = '1.4.0';
+const APP_BUILD = '2026.08.12-professional-dna';
 const { LIVE_GREEN_DNA } = require('./dna-live-green');
 const { LIVE_CRUDE_GREEN_DNA } = require('./dna-live-crude-green');
 
@@ -33,9 +27,11 @@ function normalizeCrudeStrategy(raw) {
   return 'selective';
 }
 
-/** Research desk lock band (option ₹). */
-const DAY_PROFIT_LOCK_RS = LIVE_GREEN_DNA.dayProfitLockRs || 2500;
-const STRICT_DAY_STOP_RS = LIVE_GREEN_DNA.strictDayStopRs || 2950;
+/** Desk lock band (0 = off for treasure DNA). */
+const DAY_PROFIT_LOCK_RS =
+  LIVE_GREEN_DNA.dayProfitLockRs != null ? LIVE_GREEN_DNA.dayProfitLockRs : 0;
+const STRICT_DAY_STOP_RS =
+  LIVE_GREEN_DNA.strictDayStopRs != null ? LIVE_GREEN_DNA.strictDayStopRs : 0;
 
 const NIFTY_RS_PER_POINT = 65;
 const BANK_RS_PER_POINT = 30;
@@ -71,27 +67,28 @@ function lotsFromCapitalRs(capitalRs) {
 }
 
 const DAILY_3K_PRESET = {
-  id: 'daily-all3',
-  label: 'All3 · Nifty→Bank→Crude',
+  id: 'daily-index-core',
+  label: 'Professional · Nifty+Bank core (Crude optional) · risk-managed',
   niftyLots: 1,
   bankLots: 1,
   crudeLots: 1,
   enableNifty: true,
   enableBank: true,
-  enableCrude: true,
+  /** Crude optional (off by default) — index N+B is the reliable engine. */
+  enableCrude: false,
   enableNatGas: false,
   enableKutty: false,
   kuttyAlone: false,
   niftyStrategy: 'trap',
   bankStrategy: 'trap',
   crudeStrategy: 'live-crude-green',
-  dayProfitLock: true,
-  strictDayStop: true,
+  dayProfitLock: false,
+  strictDayStop: false,
   crudeAfterIndexClose: true,
   paperLivePath: true,
-  bankOnlyAfterNifty: true,
+  bankOnlyAfterNifty: false,
   researchNote:
-    'Nifty first · Bank after Nifty · Crude after NSE · Paper≡Live · 0-red research path',
+    'Nifty+Bank core (17/17 green ~₹1,251/day). Crude optional — weakest book, only one with red days. Charges ~9% of gross (net figures). Lots auto from capital.',
   dnaId: LIVE_GREEN_DNA.id,
 };
 
@@ -162,7 +159,7 @@ function riskStatusLabels(config) {
   if (config?.dayProfitLock) {
     parts.push(`profit lock +₹${profitLockMoneyRs(lots).toLocaleString('en-IN')} (option ₹)`);
   }
-  if (config?.bankOnlyAfterNifty !== false) {
+  if (config?.bankOnlyAfterNifty) {
     parts.push('Bank after Nifty');
   }
   if (config?.paperLivePath !== false) {
@@ -210,7 +207,13 @@ function normalizeStartConfig(config = {}) {
   return {
     enableNifty: true,
     enableBank: AUTOBOT_ALLOW_BANK,
-    enableCrude: AUTOBOT_ALLOW_CRUDE,
+    /**
+     * Crude OFF by default — data shows it is the weakest book (avg ~₹187/day)
+     * and the only one with red days; index (Nifty+Bank) is 17/17 green at
+     * ~₹1,251/day. Still fully toggleable from the UI (send enableCrude:true).
+     */
+    enableCrude:
+      config.enableCrude != null ? !!config.enableCrude : false,
     deskLots,
     niftyLots,
     bankLots,
@@ -222,8 +225,14 @@ function normalizeStartConfig(config = {}) {
     crudeStrategy: AUTOBOT_ALLOW_CRUDE
       ? 'live-crude-green'
       : normalizeCrudeStrategy(config.crudeStrategy ?? preset.crudeStrategy),
-    dayProfitLock: config.dayProfitLock !== false,
-    strictDayStop: config.strictDayStop !== false,
+    dayProfitLock:
+      config.dayProfitLock != null
+        ? !!config.dayProfitLock
+        : !!LIVE_GREEN_DNA.dayProfitLock,
+    strictDayStop:
+      config.strictDayStop != null
+        ? !!config.strictDayStop
+        : !!LIVE_GREEN_DNA.strictDayStop,
     enableKutty: !!config.enableKutty,
     kuttyAlone: !!config.kuttyAlone,
     realOrders: !!config.realOrders,
@@ -248,7 +257,31 @@ function normalizeStartConfig(config = {}) {
     bankOnlyAfterNifty:
       config.bankOnlyAfterNifty != null
         ? !!config.bankOnlyAfterNifty
-        : LIVE_GREEN_DNA.liveOps.bankOnlyAfterNifty !== false,
+        : LIVE_GREEN_DNA.liveOps.bankOnlyAfterNifty === true,
+    bankOnlyAfterNiftyGreen:
+      config.bankOnlyAfterNiftyGreen != null
+        ? !!config.bankOnlyAfterNiftyGreen
+        : LIVE_GREEN_DNA.liveOps.bankOnlyAfterNiftyGreen === true,
+    winStreakToBand:
+      config.winStreakToBand != null
+        ? !!config.winStreakToBand
+        : LIVE_GREEN_DNA.liveOps.winStreakToBand === true,
+    indexFirstWinLock:
+      config.indexFirstWinLock != null
+        ? !!config.indexFirstWinLock
+        : LIVE_GREEN_DNA.liveOps.indexFirstWinLock === true,
+    deskGreenLockRs:
+      config.deskGreenLockRs != null
+        ? Math.max(0, Number(config.deskGreenLockRs) || 0)
+        : Number(LIVE_GREEN_DNA.liveOps.deskGreenLockRs) || 0,
+    recoveryMaxExtra:
+      config.recoveryMaxExtra != null
+        ? Math.max(0, Math.floor(Number(config.recoveryMaxExtra) || 0))
+        : LIVE_GREEN_DNA.liveOps.recoveryMaxExtra ?? 0,
+    crudeOnlyBelowBand:
+      config.crudeOnlyBelowBand != null
+        ? !!config.crudeOnlyBelowBand
+        : LIVE_GREEN_DNA.liveOps.crudeOnlyBelowBand === true,
   };
 }
 

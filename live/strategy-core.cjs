@@ -3064,31 +3064,31 @@ var CRUDE_ALL_GREEN_PARAMS = {
   dailyBandLabel: "OR 09:00\u201309:30 \xB7 SL\u20B9150 \xB7 trail \u20B9500\u2192\u20B9240 \xB7 no OR skip",
   ...PROTECT_TRADE_CUTOFF
 };
-/** After-NSE selective All-Green — no overlap with Nifty/Bank session (entries 16:00+). */
+/** Crude Treasure — after NSE · zero-red live-path (hunt 2026-08-12). */
 var CRUDE_LIVE_GREEN_PARAMS = {
   profileId: "live-crude-green",
-  label: "Live Crude Green (after NSE close)",
-  stopPts: 30,
-  morningTargetPts: 80,
-  eveningTargetPts: 80,
+  label: "Crude Treasure (after NSE)",
+  stopPts: 20,
+  morningTargetPts: 60,
+  eveningTargetPts: 60,
   targetRMultiple: 0,
-  dayLossStopPts: 30,
-  strictDayLossPts: 30,
-  dayProfitLockPts: 150,
+  dayLossStopPts: 0,
+  strictDayLossPts: 0,
+  dayProfitLockPts: 0,
   entryMode: "session-or",
-  requireConfirm: true,
-  firstWinLock: true,
+  requireConfirm: false,
+  firstWinLock: false,
   eveningEntryStart: "16:00",
   eveningEntryEnd: "21:00",
   sessionOrStart: CRUDE_SOR_OR_START,
   sessionOrEnd: CRUDE_SOR_OR_END,
-  minOrWidth: 40,
-  maxOrWidth: 60,
+  minOrWidth: 35,
+  maxOrWidth: 65,
   breakBufferPts: 0,
-  maxEveningTradesDay: 1,
+  maxEveningTradesDay: 0,
   defaultEnableMorning: false,
   defaultEnableEvening: true,
-  dailyBandLabel: "After NSE \xB7 OR40\u201360 \xB7 16:00\u201321:00 \xB7 SL30/TP80 \xB7 trail \u20B9350\u2192\u20B9180 \xB7 max1 \xB7 first-win",
+  dailyBandLabel: "Treasure \xB7 after NSE \xB7 OR35\u201365 \xB7 16:00\u201321:00 \xB7 SL20/TP60 \xB7 no confirm \xB7 trail \u20B9350\u2192\u20B9180 \xB7 unlimited",
   profitLockArmRs: 350,
   profitLockLockRs: 180,
   profitLockGivebackRs: 170,
@@ -3958,7 +3958,7 @@ function replayPaperOnCrude(params) {
 var TRAP_1LOT_DAILY_DNA_EXTRAS = {
   piercePts: 20,
   bankPiercePts: 60,
-  /** 1-lot bands — Paper/Live multiply by lotsMultiplier. */
+  /** 1-lot bands — Paper/Live multiply by lotsMultiplier. Research trail. */
   profitLockArmRs: 100,
   profitLockLockRs: 50,
   profitLockGivebackRs: 50,
@@ -4663,10 +4663,20 @@ function readTrapExtras(settings) {
     slPad: num2(x["slPadPts"], 2),
     minConfirmBody: num2(x["minConfirmBody"], 0),
     bounceOrPierceMult: Math.max(0, num2(x["bounceOrPierceMult"], 0)),
-    bounceOrPierceCap: Math.max(0, num2(x["bounceOrPierceCap"], 0))
+    bounceOrPierceCap: Math.max(0, num2(x["bounceOrPierceCap"], 0)),
+    /** 0 = off. If >0, swing S/R must sit within N pts of morning OR hi/lo. */
+    orConfluencePts: Math.max(0, num2(x["orConfluencePts"], 0)),
+    /** Prefer prior-day high/low as structural S/R when within this many pts (0=off). */
+    pdhlConfluencePts: Math.max(0, num2(x["pdhlConfluencePts"], 0)),
+    /** window = rolling max/min · pivot = confirmed fractal S/R (cleaner levels). */
+    srMethod: x["srMethod"] === "pivot" ? "pivot" : "window",
+    /** Bars each side for pivot confirmation (2 → 5-bar fractal). */
+    pivotStrength: Math.max(1, Math.floor(num2(x["pivotStrength"], 2))),
+    /** true → SL exactly at liquidity-sweep extreme (perfect S/R stop). */
+    perfectSweepSl: x["perfectSweepSl"] !== false
   };
 }
-function morningOrWidth(dayBars, orEnd) {
+function morningOrLevels(dayBars, orEnd) {
   let hi = -Infinity;
   let lo = Infinity;
   for (const b of dayBars) {
@@ -4678,20 +4688,87 @@ function morningOrWidth(dayBars, orEnd) {
     lo = Math.min(lo, b.low);
   }
   if (!Number.isFinite(hi) || !Number.isFinite(lo) || hi < lo) {
-    return 0;
+    return null;
   }
-  return hi - lo;
+  return { hi, lo, width: hi - lo };
+}
+function morningOrWidth(dayBars, orEnd) {
+  const or = morningOrLevels(dayBars, orEnd);
+  return or ? or.width : 0;
+}
+function priorDayHl(series, day) {
+  let last = null;
+  let hi = -Infinity;
+  let lo = Infinity;
+  for (const b of series) {
+    const d = extractTradeDate(b.date);
+    if (d >= day) break;
+    if (d !== last) {
+      last = d;
+      hi = -Infinity;
+      lo = Infinity;
+    }
+    hi = Math.max(hi, b.high);
+    lo = Math.min(lo, b.low);
+  }
+  if (last == null || !Number.isFinite(hi) || !Number.isFinite(lo) || hi < lo) return null;
+  return { hi, lo };
+}
+function levelNear(level, anchors, pts) {
+  if (!(pts > 0) || !anchors?.length || !(level > 0)) return false;
+  return anchors.some((a) => a > 0 && Math.abs(level - a) <= pts);
 }
 function swingHL3(dayBars, i, lb) {
   const start = Math.max(0, i - lb);
   const window = dayBars.slice(start, i);
   if (!window.length) {
-    return { sh: dayBars[i].high, sl: dayBars[i].low };
+    return { sh: dayBars[i].high, sl: dayBars[i].low, source: "window" };
   }
   return {
     sh: Math.max(...window.map((b) => b.high)),
-    sl: Math.min(...window.map((b) => b.low))
+    sl: Math.min(...window.map((b) => b.low)),
+    source: "window"
   };
+}
+/**
+ * Confirmed pivot S/R — a bar is resistance/support only after `strength`
+ * bars on each side have failed to break it. Falls back to window swing.
+ */
+function pivotHL(dayBars, i, strength) {
+  const s = Math.max(1, Math.floor(strength) || 2);
+  let sh = null;
+  let sl = null;
+  // Need j+s < i so the pivot is confirmed before the signal bar.
+  for (let j = i - s - 1; j >= s; j--) {
+    const h = dayBars[j].high;
+    const l = dayBars[j].low;
+    let isPH = true;
+    let isPL = true;
+    for (let k = j - s; k <= j + s; k++) {
+      if (k === j) continue;
+      if (dayBars[k].high > h) isPH = false;
+      if (dayBars[k].low < l) isPL = false;
+      if (!isPH && !isPL) break;
+    }
+    if (isPH && sh == null) sh = h;
+    if (isPL && sl == null) sl = l;
+    if (sh != null && sl != null) break;
+  }
+  if (sh == null || sl == null) {
+    const w = swingHL3(dayBars, i, s * 2 + 1);
+    return {
+      sh: sh != null ? sh : w.sh,
+      sl: sl != null ? sl : w.sl,
+      source: "pivot-fallback"
+    };
+  }
+  return { sh, sl, source: "pivot" };
+}
+function resolveSrLevels(dayBars, i, extras) {
+  if (extras.srMethod === "pivot") {
+    return pivotHL(dayBars, i, extras.pivotStrength);
+  }
+  return swingHL3(dayBars, i, extras.swingLb);
 }
 function runSrTrapConfirm(ctx, state, settings) {
   const candle = ctx.candle5m;
@@ -4741,8 +4818,10 @@ function runSrTrapConfirm(ctx, state, settings) {
   }
   const dayBars = barsOnDay(series, day);
   const i = dayBars.findIndex((b) => b.date === candle.date);
-  if (i < extras.swingLb) {
-    return wait6("Warming swing lookback");
+  const warmBars =
+    extras.srMethod === "pivot" ? extras.pivotStrength * 2 + 2 : extras.swingLb;
+  if (i < warmBars) {
+    return wait6("Warming S/R lookback");
   }
   if (state.pending) {
     const p = state.pending;
@@ -4760,7 +4839,10 @@ function runSrTrapConfirm(ctx, state, settings) {
       return wait6("Confirm body too small");
     }
     const fill = candle.open;
-    const stop2 = p.dir === 1 ? Math.min(p.stop, fill - 1) : Math.max(p.stop, fill + 1);
+    // Perfect SL: keep the sweep-extreme stop from the signal bar (do not widen).
+    let stop2 = p.stop;
+    if (p.dir === 1) stop2 = Math.min(stop2, fill - 1);
+    else stop2 = Math.max(stop2, fill + 1);
     const risk2 = Math.abs(fill - stop2);
     const bank2 = /bank/i.test(ctx.instrumentId ?? "");
     const maxRisk2 = bank2 ? Math.max(extras.maxRisk, 50) : extras.maxRisk;
@@ -4776,10 +4858,13 @@ function runSrTrapConfirm(ctx, state, settings) {
       stopLoss: stop2,
       target,
       riskRewardRatio: rr,
-      reason: `S/R trap confirm ${p.dir === 1 ? "BUY" : "SELL"} \xB7 ${rr}R`,
+      reason: `S/R ${p.setup || "trap"} confirm ${p.dir === 1 ? "BUY" : "SELL"} \xB7 SL@sweep \xB7 ${rr}R`,
       analysis: {
         strategy: "sr-trap-confirm",
-        setup: "trap_next_confirm",
+        setup: p.setup || "trap_next_confirm",
+        srLevel: p.srLevel,
+        srSource: p.srSource,
+        sweepExtreme: p.sweepExtreme,
         risk: risk2,
         rr
       }
@@ -4796,12 +4881,14 @@ function runSrTrapConfirm(ctx, state, settings) {
   if (ema == null) {
     return wait6(`EMA-${settings.emaLength} warming up`);
   }
-  const { sh, sl } = swingHL3(dayBars, i, extras.swingLb);
+  const { sh, sl, source: srSource } = resolveSrLevels(dayBars, i, extras);
   const isBank = /bank/i.test(ctx.instrumentId ?? "");
   const trapPierce = isBank && extras.bankPiercePts > 0 ? extras.bankPiercePts : extras.piercePts;
   let bouncePierce = trapPierce;
+  const orEnd = settings.orEnd || "09:45";
+  const orLevels = morningOrLevels(dayBars, orEnd);
   if (extras.bounceOrPierceMult > 0) {
-    const orW = morningOrWidth(dayBars, settings.orEnd || "09:45");
+    const orW = orLevels ? orLevels.width : 0;
     if (orW > 0) {
       bouncePierce = Math.max(trapPierce, orW * extras.bounceOrPierceMult);
       if (extras.bounceOrPierceCap > 0) {
@@ -4813,6 +4900,7 @@ function runSrTrapConfirm(ctx, state, settings) {
   const oo = candle.open;
   const hh = candle.high;
   const ll = candle.low;
+  // Classic S/R trap: liquidity sweep beyond swing support/resistance + reclaim.
   const trapBuy = ll < sl - trapPierce && cc > sl && cc > oo;
   const trapSell = hh > sh + trapPierce && cc < sh && cc < oo;
   const rng = Math.max(hh - ll, 1e-9);
@@ -4820,19 +4908,63 @@ function runSrTrapConfirm(ctx, state, settings) {
   const bounceSell = hh >= sh - bouncePierce && hh <= sh + bouncePierce * 2 && cc < oo && cc <= sh && (cc - ll) / rng < 0.35;
   let dir = 0;
   let stop = 0;
-  if (trapBuy || extras.mode === "both" && bounceBuy) {
+  let setup = "";
+  let sweepExtreme = 0;
+  const pad = extras.perfectSweepSl ? Math.min(extras.slPad, 1) : extras.slPad;
+  if (trapBuy) {
     if (cc > ema) {
       dir = 1;
-      stop = ll - extras.slPad;
+      sweepExtreme = ll;
+      // Perfect SL = beyond the swept liquidity extreme under support.
+      stop = extras.perfectSweepSl ? ll - pad : ll - extras.slPad;
+      setup = "sr_trap";
     }
-  } else if (trapSell || extras.mode === "both" && bounceSell) {
+  } else if (trapSell) {
     if (cc < ema) {
       dir = -1;
-      stop = hh + extras.slPad;
+      sweepExtreme = hh;
+      stop = extras.perfectSweepSl ? hh + pad : hh + extras.slPad;
+      setup = "sr_trap";
+    }
+  } else if (extras.mode === "both" && bounceBuy) {
+    if (cc > ema) {
+      dir = 1;
+      sweepExtreme = ll;
+      stop = extras.perfectSweepSl ? ll - pad : ll - extras.slPad;
+      setup = "sr_bounce";
+    }
+  } else if (extras.mode === "both" && bounceSell) {
+    if (cc < ema) {
+      dir = -1;
+      sweepExtreme = hh;
+      stop = extras.perfectSweepSl ? hh + pad : hh + extras.slPad;
+      setup = "sr_bounce";
     }
   }
   if (!dir) {
-    return wait6("No S/R trap / bounce", { sh, sl, ema });
+    return wait6("No S/R trap / bounce", { sh, sl, ema, or: orLevels, srSource });
+  }
+  // Structural S/R filter: swing level must align with morning OR and/or PDH/PDL.
+  const anchors = [];
+  if (orLevels) anchors.push(orLevels.hi, orLevels.lo);
+  if (extras.pdhlConfluencePts > 0) {
+    const pd = priorDayHl(series, day);
+    if (pd) anchors.push(pd.hi, pd.lo);
+  }
+  const level = dir === 1 ? sl : sh;
+  if (extras.orConfluencePts > 0) {
+    const orAnchors = orLevels ? [orLevels.hi, orLevels.lo] : [];
+    if (!levelNear(level, orAnchors, extras.orConfluencePts)) {
+      return wait6("S/R not at opening-range level", { sh, sl, ema, or: orLevels, setup });
+    }
+  }
+  if (extras.pdhlConfluencePts > 0) {
+    const pd = priorDayHl(series, day);
+    const pdAnchors = pd ? [pd.hi, pd.lo] : [];
+    // If OR confluence already required, PDHL is optional boost; when OR off, PDHL can stand alone.
+    if (extras.orConfluencePts <= 0 && !levelNear(level, pdAnchors, extras.pdhlConfluencePts)) {
+      return wait6("S/R not at prior-day high/low", { sh, sl, ema, pd, setup });
+    }
   }
   const risk = Math.abs(cc - stop);
   const bank = /bank/i.test(ctx.instrumentId ?? "");
@@ -4845,12 +4977,21 @@ function runSrTrapConfirm(ctx, state, settings) {
     dir,
     stop,
     signalClose: cc,
-    barSeq: state.barSeq
+    barSeq: state.barSeq,
+    setup,
+    srLevel: level,
+    srSource,
+    sweepExtreme
   };
-  return wait6(dir === 1 ? "Trap BUY armed \u2014 wait confirm" : "Trap SELL armed \u2014 wait confirm", {
+  return wait6(dir === 1 ? "S/R trap BUY armed \u2014 wait confirm" : "S/R trap SELL armed \u2014 wait confirm", {
     sh,
     sl,
     ema,
+    or: orLevels,
+    setup,
+    srSource,
+    sweepExtreme,
+    stop,
     armed: dir
   });
 }
