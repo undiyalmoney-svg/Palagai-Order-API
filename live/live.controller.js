@@ -36,11 +36,20 @@ async function health(_req, res) {
     dayProfitLockRsBase: DAY_PROFIT_LOCK_RS,
     strictDayStopRsBase: STRICT_DAY_STOP_RS,
     liveOps: { ...ops, ...LIVE_CRUDE_GREEN_DNA.liveOps },
+    antiChurn: {
+      crudeCooldownMin: 20,
+      indexCooldownMin: 12,
+      crudeMaxTradesDay: 3,
+      indexMaxTradesDay: 3,
+      bookDayLossStopRs: 500,
+      deskDayLossStopRs: 900,
+      note: 'Live re-runs every 60s; guards block re-entry churn + hard-stop on day loss.',
+    },
     research: {
       index: LIVE_GREEN_DNA.research,
       crude: LIVE_CRUDE_GREEN_DNA.research,
       greenPath:
-        'All3 Treasure: Index Pivot2 BOTH p20/B60 stand0 + Crude SOR SL20/TP60 OR35–65 confirm OFF · unlimited · no day lock/band.',
+        'Anti-churn guard: cooldown + max 3 trades/book/day + per-book ₹500 & desk ₹900 loss stops. Reduces (not guarantees) red. Validate in paper.',
       dailyBand: LIVE_GREEN_DNA.dailyBand,
     },
     defaults: DAILY_3K_PRESET,

@@ -59,6 +59,52 @@ function countClosedTradesByBook(trades, today) {
   return counts;
 }
 
+const tradeNetRsOf = (t) =>
+  Number(t?.netOptionPnlRs != null ? t.netOptionPnlRs : t?.optionPnlRs || 0) || 0;
+
+/**
+ * Per-book closed-trade stats today: count, net ₹, last exit epoch ms.
+ * Used by the anti-churn guard so live can't re-enter every 60s tick.
+ */
+function bookDayStats(trades, book, today) {
+  const day = String(today || '').slice(0, 10);
+  let count = 0;
+  let net = 0;
+  let lastExitMs = 0;
+  for (const t of trades || []) {
+    if (String(t.entryTime || '').slice(0, 10) !== day) continue;
+    if (bookKind(t.instrumentId) !== book) continue;
+    if (!t.exitTime) continue;
+    if (t.optionPnlRs == null && t.netOptionPnlRs == null) continue;
+    count += 1;
+    net += tradeNetRsOf(t);
+    const ms = Date.parse(t.exitTime);
+    if (Number.isFinite(ms) && ms > lastExitMs) lastExitMs = ms;
+  }
+  return { count, net, lastExitMs };
+}
+
+/**
+ * ANTI-CHURN defaults. Live re-runs every 60s and the real exchange SL fills
+ * intra-bar, so a naive strategy re-enters many times per 5m bar (18 crude
+ * round-trips on 2026-08-12, all bleeding spread+charges). These guards cap
+ * trades/book/day, force a cooldown after every exit, and hard-stop a book or
+ * the whole desk once the day loss crosses a floor.
+ */
+const ANTI_CHURN_DEFAULTS = {
+  crudeCooldownMin: 20,
+  indexCooldownMin: 12,
+  crudeMaxTradesDay: 3,
+  indexMaxTradesDay: 3,
+  bookDayLossStopRs: 500,
+  deskDayLossStopRs: 900,
+};
+
+function numOr(v, d) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : d;
+}
+
 function istParts(d = new Date()) {
   const fmt = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Kolkata',
@@ -236,6 +282,47 @@ class LiveWorker {
       ...base,
       niftyTaken: this.niftyTakenToday(today),
     };
+  }
+
+  antiChurnCfg(config = {}) {
+    const d = ANTI_CHURN_DEFAULTS;
+    return {
+      crudeCooldownMin: numOr(config.crudeCooldownMin, d.crudeCooldownMin),
+      indexCooldownMin: numOr(config.indexCooldownMin, d.indexCooldownMin),
+      crudeMaxTradesDay: numOr(config.crudeMaxTradesDay, d.crudeMaxTradesDay),
+      indexMaxTradesDay: numOr(config.indexMaxTradesDay, d.indexMaxTradesDay),
+      bookDayLossStopRs: numOr(config.bookDayLossStopRs, d.bookDayLossStopRs),
+      deskDayLossStopRs: numOr(config.deskDayLossStopRs, d.deskDayLossStopRs),
+    };
+  }
+
+  /**
+   * Gate a NEW entry for one book. Existing open legs are always managed/exited
+   * elsewhere — this only blocks fresh entries to stop 60s-tick churn + bleed.
+   */
+  entryGuard(book, today, config = {}) {
+    const g = this.antiChurnCfg(config);
+    const stats = bookDayStats(this.liveTrades, book, today);
+    const deskNet = summarizeDeskDay(this.liveTrades, today).dayNet;
+
+    if (g.deskDayLossStopRs > 0 && deskNet <= -g.deskDayLossStopRs) {
+      return { allow: false, reason: `desk loss stop ₹${Math.round(deskNet)} (≥ −₹${g.deskDayLossStopRs})` };
+    }
+    if (g.bookDayLossStopRs > 0 && stats.net <= -g.bookDayLossStopRs) {
+      return { allow: false, reason: `${book} loss stop ₹${Math.round(stats.net)} (≥ −₹${g.bookDayLossStopRs})` };
+    }
+    const maxT = book === 'crude' ? g.crudeMaxTradesDay : g.indexMaxTradesDay;
+    if (maxT > 0 && stats.count >= maxT) {
+      return { allow: false, reason: `${book} max ${maxT} trades/day done` };
+    }
+    const cdMin = book === 'crude' ? g.crudeCooldownMin : g.indexCooldownMin;
+    if (cdMin > 0 && stats.lastExitMs > 0) {
+      const mins = (Date.now() - stats.lastExitMs) / 60000;
+      if (mins < cdMin) {
+        return { allow: false, reason: `${book} cooldown ${Math.ceil(cdMin - mins)}m after exit` };
+      }
+    }
+    return { allow: true, reason: '' };
   }
 
   handleBrokerFill(fill) {
@@ -434,6 +521,12 @@ class LiveWorker {
         if (niftySyncOpen && !niftyAlreadyLive && !niftyGate.allow) {
           niftySyncOpen = null;
         }
+        // Anti-churn: block fresh Nifty entry on cooldown / caps / loss stop.
+        let niftyChurn = { allow: true, reason: '' };
+        if (niftySyncOpen && !niftyAlreadyLive) {
+          niftyChurn = this.entryGuard('nifty', today, config);
+          if (!niftyChurn.allow) niftySyncOpen = null;
+        }
         await this.broker.syncInstrument({
           authorization,
           instrumentId: NIFTY_50_INSTRUMENT.id,
@@ -444,7 +537,8 @@ class LiveWorker {
         const niftySig =
           `Nifty Trap · ${replay.lastSignal}` +
           (niftySyncOpen ? ` · OPEN ${niftySyncOpen.direction}` : '') +
-          (!niftyGate.allow && !niftyAlreadyLive ? ` · ${niftyGate.reason}` : '');
+          (!niftyGate.allow && !niftyAlreadyLive ? ` · ${niftyGate.reason}` : '') +
+          (!niftyChurn.allow && !niftyAlreadyLive ? ` · ${niftyChurn.reason}` : '');
         if (niftySig !== this.lastSignals.nifty) {
           this.lastSignals.nifty = niftySig;
           this.pushEvent('SIGNAL', niftySig);
@@ -491,6 +585,12 @@ class LiveWorker {
           bankPos && (bankPos.status === 'open' || bankPos.status === 'exiting');
         let bankSyncOpen = bankAlreadyLive || bankAllowed ? bankOpen : null;
         if (bankSyncOpen && !bankAlreadyLive && !bankAllowed) bankSyncOpen = null;
+        // Anti-churn: block fresh Bank entry on cooldown / caps / loss stop.
+        let bankChurn = { allow: true, reason: '' };
+        if (bankSyncOpen && !bankAlreadyLive) {
+          bankChurn = this.entryGuard('bank', today, config);
+          if (!bankChurn.allow) bankSyncOpen = null;
+        }
         await this.broker.syncInstrument({
           authorization,
           instrumentId: BANK_NIFTY_INSTRUMENT.id,
@@ -502,7 +602,8 @@ class LiveWorker {
         const bankSig =
           `Bank ${genie ? 'Genie' : 'Trap'} · ${replay.lastSignal}` +
           (bankSyncOpen ? ` · OPEN ${bankSyncOpen.direction}` : '') +
-          (waitReason && !bankAlreadyLive ? ` · ${waitReason}` : '');
+          (waitReason && !bankAlreadyLive ? ` · ${waitReason}` : '') +
+          (!bankChurn.allow && !bankAlreadyLive ? ` · ${bankChurn.reason}` : '');
         if (bankSig !== this.lastSignals.bank) {
           this.lastSignals.bank = bankSig;
           this.pushEvent('SIGNAL', bankSig);
@@ -558,11 +659,20 @@ class LiveWorker {
             rejectEstimated: true,
           });
           this.noteClosedTrades(crudeAdded, today);
-          const crudeSyncOpen = this.liveOpenForSync(
+          let crudeSyncOpen = this.liveOpenForSync(
             CRUDE_OIL_MINI_INSTRUMENT.id,
             replay.open,
           );
-          if (replay.open && !crudeSyncOpen) {
+          // Anti-churn: block fresh Crude entry on cooldown / caps / loss stop.
+          let crudeChurn = { allow: true, reason: '' };
+          if (crudeSyncOpen && !crudeOpenLive) {
+            crudeChurn = this.entryGuard('crude', today, config);
+            if (!crudeChurn.allow) {
+              crudeSyncOpen = null;
+              this.pushEvent('SKIP', `${crudeLabel}: ${crudeChurn.reason}`);
+            }
+          }
+          if (replay.open && !crudeSyncOpen && crudeChurn.allow) {
             const why = isEstimatedOrSynthetic({
               option: replay.open.option,
               premiumEstimated: replay.open.premiumEstimated,
