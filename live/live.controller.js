@@ -32,7 +32,7 @@ async function health(_req, res) {
     crudeDna: AUTOBOT_ALLOW_CRUDE
       ? `Professional · after NSE · OR${c.minOrWidth}–${c.maxOrWidth} · ${c.entryStart}–${c.entryEnd} · SL${c.stopPts}/TP${c.targetPts} · confirm ${c.requireConfirm ? 'ON' : 'OFF'} · trail ₹${c.profitLockArmRs}→₹${c.profitLockLockRs} · max${c.maxTradesDay || '∞'}`
       : 'OFF — Autobot will not trade Crude',
-    trapDna: `Professional · Pivot${t.pivotStrength || 3} · perfectSL · ${t.trapMode || 'trap'} · pierce ${t.piercePts}/B${t.bankPiercePts} · confirm≥${t.minConfirmBody || 0}pt · risk ${t.minRiskPts || 0}-${t.maxRiskPts || 0}pt · ${t.targetRMultiple || 0}R · max${t.maxTradesPerDay || '∞'}/book`,
+    trapDna: `Professional · Pivot${t.pivotStrength || 3} · perfectSL · ${t.trapMode || 'trap'} · pierce ${t.piercePts}/B${t.bankPiercePts} · confirm≥${t.minConfirmBody || 0}pt · risk ${t.minRiskPts || 0}-${t.maxRiskPts || 0}pt · ${t.targetRMultiple || 0}R · max${t.maxTradesPerDay || '∞'}/B${t.bankMaxTradesPerDay || t.maxTradesPerDay} · peak ₹${t.profitLockArmRs}/${t.profitLockLockRs} · ${ops.chargeCoverMultiple || 0}× charges`,
     dayProfitLockRsBase: DAY_PROFIT_LOCK_RS,
     strictDayStopRsBase: STRICT_DAY_STOP_RS,
     liveOps: { ...ops, ...LIVE_CRUDE_GREEN_DNA.liveOps },

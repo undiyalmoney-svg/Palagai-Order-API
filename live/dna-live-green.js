@@ -23,7 +23,7 @@
 const LIVE_GREEN_DNA = {
   id: 'live-green-pro-v8',
   label: 'Professional · Pivot S/R reversal · risk-managed',
-  version: '2026.08.12-professional',
+  version: '2026.08.13-charge-cover',
 
   /** Kept for legacy desk-policy math; band lock itself is off. */
   dailyBand: {
@@ -71,13 +71,13 @@ const LIVE_GREEN_DNA = {
     orConfluencePts: 0,
     pdhlConfluencePts: 0,
     bankPdhlConfluencePts: 0,
-    /** Light protective trail — arm early, keep most of the move. */
-    profitLockArmRs: 150,
-    profitLockLockRs: 80,
-    profitLockGivebackRs: 80,
-    /** Capped + cooldown enforced in worker (anti-churn). */
-    maxTradesPerDay: 3,
-    bankMaxTradesPerDay: 3,
+    /** Trail only after ~4× typical F&O round-trip charges (was ₹150/₹80 scalp lock). */
+    profitLockArmRs: 400,
+    profitLockLockRs: 200,
+    profitLockGivebackRs: 150,
+    /** Fewer tickets so charges cannot eat the day. Worker cooldown still applies. */
+    maxTradesPerDay: 2,
+    bankMaxTradesPerDay: 1,
     targetRMultiple: 3.5,
     confirmNextBar: true,
     slConfirmCutoffEnabled: false,
@@ -117,6 +117,11 @@ const LIVE_GREEN_DNA = {
      */
     deskGreenProtectArmRs: 500,
     deskGreenProtectFloorRs: 150,
+    /** 0 = off. Charge-cover (not a hard premium cap) kills fat-ATM scalps. */
+    maxBankEntryPremium: 0,
+    maxNiftyEntryPremium: 0,
+    /** Expected option ₹ must cover this many round-trip charge estimates. */
+    chargeCoverMultiple: 4,
   },
 
   research: {
@@ -125,7 +130,7 @@ const LIVE_GREEN_DNA = {
     measuredJulAug:
       '2026-07-01→08-12 live-path, 1 lot, guarded, NO lock: all-3 20/20 green · avg ~₹1,166/day (Bank ₹19,995 · Crude ₹2,052 · Nifty ₹1,274). Locked variant averaged ~₹989/day.',
     note:
-      'Backtest on a favorable window; live can differ (intra-bar fills). Anti-churn caps make it far more live-faithful than before. Validate in PAPER — targets ₹1,000/day, does not guarantee it.',
+      'Charge-cover 13 Aug: trail ₹400/₹200, max 2 Nifty + 1 Bank, skip unless expected ₹ ≥ 4× charges. Backtest on a favorable window; live can differ (intra-bar fills). Validate in PAPER — does not guarantee every calendar day.',
   },
 };
 

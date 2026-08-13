@@ -155,6 +155,7 @@ function toLiveOpen(replayOpen, trailExtras) {
     entryTime: replayOpen.entryTime,
     indexEntry: replayOpen.entry,
     indexStop: effectiveProtectiveStop(replayOpen),
+    indexTarget: replayOpen.target ?? null,
     option: replayOpen.option,
     optionEntryPremium: replayOpen.optionEntryPremium ?? null,
     premiumEstimated: !!replayOpen.premiumEstimated,
