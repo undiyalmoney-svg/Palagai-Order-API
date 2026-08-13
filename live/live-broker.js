@@ -11,7 +11,8 @@ const {
   BANK_NIFTY_INSTRUMENT,
   CRUDE_OIL_MINI_INSTRUMENT,
 } = require('./strategy-core.cjs');
-const { liveGreenTrapExtras } = require('./dna-live-green');
+const { LIVE_GREEN_DNA, liveGreenTrapExtras } = require('./dna-live-green');
+const { evaluateChargeEntryGate } = require('./charge-entry-gate');
 const { fetchQuotes } = require('./kite-market');
 
 const TICK = 0.05;
@@ -401,6 +402,20 @@ class LiveBroker {
     const lotsMult = this.lotsFor(instrumentId);
     const quantity = lotSize * lotsMult;
     const product = 'MIS';
+    const chargeGate = evaluateChargeEntryGate({
+      instrumentId,
+      entryPremium: open.optionEntryPremium,
+      quantity,
+      indexEntry: open.indexEntry,
+      indexStop: open.indexStop,
+      indexTarget: open.indexTarget,
+      targetRMultiple: LIVE_GREEN_DNA.trap.targetRMultiple,
+      ops: LIVE_GREEN_DNA.liveOps,
+    });
+    if (chargeGate.skip) {
+      this.pushEvent('SKIP', `${instrumentName}: ${chargeGate.reason}`);
+      return;
+    }
 
     const response = await kiteService.placeOrder(authorization, 'regular', {
       exchange,
