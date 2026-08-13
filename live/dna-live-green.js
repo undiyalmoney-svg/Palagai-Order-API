@@ -5,12 +5,15 @@
  *   Bank only AFTER Nifty has traded that day → 0 red / 9 green (~₹13k)
  *   on 13 Jul–11 Aug (kills Bank-alone morning reds).
  *   Crude LIVE_CRUDE_GREEN after NSE (second session).
+ *
+ * 13 Aug charge-cover: fewer tickets, trail only after costs are covered,
+ * skip entries whose expected option ₹ cannot pay 4× round-trip charges.
  */
 
 const LIVE_GREEN_DNA = {
   id: 'live-green-all3-v2',
   label: 'Live Green · Nifty→Bank→Crude · Paper≡Live',
-  version: '2026.08.11-all3',
+  version: '2026.08.13-charge-cover',
 
   /** Books */
   enableNifty: true,
@@ -31,11 +34,12 @@ const LIVE_GREEN_DNA = {
   trap: {
     piercePts: 20,
     bankPiercePts: 60,
-    profitLockArmRs: 100,
-    profitLockLockRs: 50,
-    profitLockGivebackRs: 50,
-    maxTradesPerDay: 3,
-    bankMaxTradesPerDay: 2,
+    /** Arm only after ~4× typical F&O round-trip charges (was ₹100/₹50/₹50 scalp lock). */
+    profitLockArmRs: 400,
+    profitLockLockRs: 200,
+    profitLockGivebackRs: 150,
+    maxTradesPerDay: 2,
+    bankMaxTradesPerDay: 1,
     targetRMultiple: 3.5,
     confirmNextBar: true,
     slConfirmCutoffEnabled: false,
@@ -56,6 +60,11 @@ const LIVE_GREEN_DNA = {
     optionRsDayRisk: true,
     /** Zero-red all-three rule */
     bankOnlyAfterNifty: true,
+    /** 0 = off. Charge-cover (not a hard premium cap) kills fat-ATM scalps. */
+    maxBankEntryPremium: 0,
+    maxNiftyEntryPremium: 0,
+    /** Expected option ₹ must cover this many round-trip charge estimates. */
+    chargeCoverMultiple: 4,
   },
 
   research: {
@@ -65,7 +74,7 @@ const LIVE_GREEN_DNA = {
       '20/22 green · 2 red · net ≈ ₹25.4k (Bank-alone reds 13 Jul / 24 Jul)',
     crudeAfterNse: 'LIVE_CRUDE_GREEN · hard gate 15:15 · entries 16:00–21:00',
     note:
-      'Bank gated until Nifty trades that day. Crude evening still runs. Not a guarantee of every calendar day.',
+      'Bank gated until Nifty trades that day. Charge-cover: max 2 Nifty + 1 Bank, trail ₹400/₹200, skip unless expected ₹ ≥ 4× charges. Crude evening still runs. Not a guarantee of every calendar day.',
   },
 };
 

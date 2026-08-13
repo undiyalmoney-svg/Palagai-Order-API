@@ -147,6 +147,18 @@ function livePathReplayOpts(config = {}) {
         ? Number(config.fillFrictionPremium)
         : DEFAULT_LIVE_PATH.fillFrictionPremium,
     deskGate: config.deskGate || null,
+    chargeCoverMultiple:
+      config.chargeCoverMultiple != null
+        ? Number(config.chargeCoverMultiple)
+        : ops.chargeCoverMultiple,
+    maxBankEntryPremium:
+      config.maxBankEntryPremium != null
+        ? Number(config.maxBankEntryPremium)
+        : ops.maxBankEntryPremium,
+    maxNiftyEntryPremium:
+      config.maxNiftyEntryPremium != null
+        ? Number(config.maxNiftyEntryPremium)
+        : ops.maxNiftyEntryPremium,
   };
 }
 

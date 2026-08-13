@@ -812,8 +812,8 @@ function estimateRoundTripCharges(input) {
   }
   const buyTurnover = entry * qty;
   const sellTurnover = exit * qty;
-  const brokerageBuy = Math.min(20, buyTurnover * 3e-4);
-  const brokerageSell = Math.min(20, sellTurnover * 3e-4);
+  const brokerageBuy = input.segment === "nse_equity" ? Math.min(20, buyTurnover * 3e-4) : 20;
+  const brokerageSell = input.segment === "nse_equity" ? Math.min(20, sellTurnover * 3e-4) : 20;
   const brokerageRs = roundPaise(brokerageBuy + brokerageSell);
   let exchangeRs = 0;
   let sttRs = 0;
@@ -2136,6 +2136,25 @@ function replayPaperOnIndex(params) {
     if (livePath && livePath.rejectEstimatedPremium !== false && premiumEstimated) {
       lastSignal = `Live-path skip \u2014 estimated/synthetic premium`;
       continue;
+    }
+    if (livePath && optionEntryPremium != null) {
+      const { evaluateChargeEntryGate } = require("./charge-entry-gate");
+      const lots = Math.max(1, Math.floor(lotsMultiplier ?? 1) || 1);
+      const qty = Math.max(1, Number(option.lotSize) || 1) * lots;
+      const gate = evaluateChargeEntryGate({
+        instrumentId,
+        entryPremium: optionEntryPremium,
+        quantity: qty,
+        indexEntry: entryPrice,
+        indexStop: entryStop,
+        indexTarget: entryTarget,
+        targetRMultiple: strategy?.getSettings?.()?.targetRMultiple,
+        ops: livePath
+      });
+      if (gate.skip) {
+        lastSignal = gate.reason;
+        continue;
+      }
     }
     if (livePath?.deskGate && !livePath.deskGate.tryOpen()) {
       lastSignal = `Live-path skip \u2014 maxOpenLegs ${livePath.deskGate.maxOpenLegs}`;
@@ -3959,9 +3978,9 @@ var TRAP_1LOT_DAILY_DNA_EXTRAS = {
   piercePts: 20,
   bankPiercePts: 60,
   /** 1-lot bands — Paper/Live multiply by lotsMultiplier. */
-  profitLockArmRs: 100,
-  profitLockLockRs: 50,
-  profitLockGivebackRs: 50,
+  profitLockArmRs: 400,
+  profitLockLockRs: 200,
+  profitLockGivebackRs: 150,
   slConfirmCutoffEnabled: false,
   slConfirmCutoffFracR: 0,
   slConfirmCutoffMaxMfeR: 0,
@@ -3976,7 +3995,7 @@ var TRAP_1LOT_DAILY_DNA_EXTRAS = {
 function dnaCapsForStrategy(strategyId, channel) {
   switch (strategyId) {
     case MANAGED_STRATEGY_IDS.SR_TRAP_CONFIRM:
-      return { maxTradesPerDay: 3, targetRMultiple: 3.5 };
+      return { maxTradesPerDay: 2, targetRMultiple: 3.5 };
     case MANAGED_STRATEGY_IDS.ALIGN_COMBO_GENIE:
       return channel === "bank" ? { maxTradesPerDay: 0, targetRMultiple: 1.5 } : { maxTradesPerDay: 0, targetRMultiple: 3 };
     case MANAGED_STRATEGY_IDS.SMART_PULLBACK_PRO:
@@ -5029,7 +5048,7 @@ function createTrapStrategy() {
     id: MANAGED_STRATEGY_IDS.SR_TRAP_CONFIRM,
     name: "Trap",
     version: "1.2.0",
-    description: "Server Live Trap \xB7 pierce20 \xB7 Bank40 \xB7 peak\u20B9100 \xB7 max3 \xB7 3.5R \xB7 Paper\u2261Live",
+    description: "Server Live Trap \xB7 pierce20 \xB7 Bank60 \xB7 peak\u20B9400 \xB7 max2 \xB7 3.5R \xB7 charge-cover \xB7 Paper\u2261Live",
     supports: ["nifty", "bank"],
     defaultSettings: TRAP_DEFAULTS,
     initialize(partial) {
