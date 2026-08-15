@@ -19,7 +19,7 @@ async function health(_req, res) {
   res.json({
     status: 'ok',
     service: 'palagai-live-control',
-    note: 'Server Live — All3 daily: Nifty→Bank→Crude · Paper≡Live · capital→lots',
+    note: 'Server Live — ₹1k @ ₹40k · Nifty→Bank→Crude · ≤3 trades · Paper≡Live',
     version: APP_VERSION,
     appBuild: APP_BUILD,
     dnaId: LIVE_GREEN_DNA.id,
@@ -32,7 +32,7 @@ async function health(_req, res) {
     crudeDna: AUTOBOT_ALLOW_CRUDE
       ? `after NSE · OR${c.minOrWidth}–${c.maxOrWidth} · ${c.entryStart}–${c.entryEnd} · SL${c.stopPts}/TP${c.targetPts} · trail ₹${c.profitLockArmRs}→₹${c.profitLockLockRs} · max${c.maxTradesDay} · first-win · no index-session overlap`
       : 'OFF — Autobot will not trade Crude',
-    trapDna: `SR Trap · pierce ${t.piercePts}/B${t.bankPiercePts} · peak ₹${t.profitLockArmRs}/${t.profitLockLockRs}/${t.profitLockGivebackRs} · max${t.maxTradesPerDay} · ${t.targetRMultiple}R · stand-down ₹${ops.optionStandDownRs} · one-leg · option-₹ lock`,
+    trapDna: `SR Trap · pierce ${t.piercePts}/B${t.bankPiercePts} · peak ₹${t.profitLockArmRs}/${t.profitLockLockRs}/${t.profitLockGivebackRs} · max N${t.maxTradesPerDay}/B${t.bankMaxTradesPerDay} · desk ${ops.deskMaxTradesDay} · ${t.targetRMultiple}R · stand-down ₹${ops.optionStandDownRs} · lock ₹${LIVE_GREEN_DNA.dayProfitLockRs} · one-leg`,
     dayProfitLockRsBase: DAY_PROFIT_LOCK_RS,
     strictDayStopRsBase: STRICT_DAY_STOP_RS,
     liveOps: { ...ops, ...LIVE_CRUDE_GREEN_DNA.liveOps },
@@ -40,7 +40,7 @@ async function health(_req, res) {
       index: LIVE_GREEN_DNA.research,
       crude: LIVE_CRUDE_GREEN_DNA.research,
       greenPath:
-        'All3 zero-red path: Nifty first, Bank only after Nifty, Crude after NSE. Paper≡Live.',
+        'Lots = capital/₹40k (Nifty=Bank). Always Nifty 2 + Bank 1. Floor ₹400 after arm. Bank after Nifty green. Crude off.',
     },
     defaults: DAILY_3K_PRESET,
   });
@@ -66,7 +66,7 @@ async function defaults(_req, res) {
     preset: DAILY_3K_PRESET,
     dayProfitLockRsBase: DAY_PROFIT_LOCK_RS,
     strictDayStopRsBase: STRICT_DAY_STOP_RS,
-    checkboxHint: `₹${DAY_PROFIT_LOCK_RS.toLocaleString('en-IN')} × lots (1→₹3k · 3→₹9k)`,
+    checkboxHint: `₹${DAY_PROFIT_LOCK_RS.toLocaleString('en-IN')} × lots (1 lot @ ₹40k → ₹1,000)`,
     /** Autobot UI should render these books (Crude is server-forced ON). */
     books: {
       nifty: true,
@@ -78,18 +78,18 @@ async function defaults(_req, res) {
       crudeStrategy: 'live-crude-green',
       crudeWindow: '16:00–21:00 IST (hard gate 15:15)',
       bankOnlyAfterNifty: true,
-      label: 'Nifty → Bank (after Nifty) → Crude after NSE',
+      label: '₹40k → 1 lot each · Nifty 2 + Bank 1 · floor ₹400',
       capitalLots: {
-        under75k: 1,
-        from75k: 2,
-        perLakhAbove: 1,
-        at6L: 6,
+        per40k: 1,
+        at40k: 1,
+        at80k: 2,
+        at120k: 3,
         cap: 10,
-        note: 'One deskLots for Nifty+Bank+Crude — Crude has no private lots',
+        note: 'Lots = floor(capitalRs / 40000). Nifty lots = Bank lots. Trades stay Nifty 2 + Bank 1.',
       },
     },
     uiHint:
-      'Capital ladder → shared deskLots (Nifty=Bank=Crude): <₹75k→1, ₹75k+→2, then ≈₹1L per lot (₹6L→6, max 10). Auto-update all lot fields when capital changes; send capitalRs; Stop→Start.',
+      'Capital ÷ ₹40k → lots (₹40k=1, ₹80k=2, ₹1.2L=3). Nifty 2 trades + Bank 1. Floor ₹400. Send capitalRs; Stop→Start.',
   });
 }
 

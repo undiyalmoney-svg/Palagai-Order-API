@@ -321,10 +321,23 @@ async function runBacktest({ authorization, fromDate, toDate, config }, deps = {
     ? filterTradesLivePath(rawTrades, {
         ...DEFAULT_LIVE_PATH,
         maxOpenLegs: cfg.maxOpenLegs != null ? cfg.maxOpenLegs : DEFAULT_LIVE_PATH.maxOpenLegs,
-        dayProfitLockRs: cfg.dayProfitLock ? DAY_PROFIT_LOCK_RS : 0,
-        dayStopRs: cfg.strictDayStop ? STRICT_DAY_STOP_RS : 0,
+        dayProfitLockRs: cfg.dayProfitLock
+          ? DAY_PROFIT_LOCK_RS * Math.max(1, cfg.deskLots || cfg.niftyLots || 1)
+          : 0,
+        dayStopRs: cfg.strictDayStop
+          ? STRICT_DAY_STOP_RS * Math.max(1, cfg.deskLots || cfg.niftyLots || 1)
+          : 0,
         rejectEstimatedPremium: true,
         bankOnlyAfterNifty: cfg.bankOnlyAfterNifty !== false,
+        bankOnlyAfterNiftyGreen: cfg.bankOnlyAfterNiftyGreen === true,
+        deskMaxTradesDay:
+          cfg.deskMaxTradesDay != null
+            ? cfg.deskMaxTradesDay
+            : DEFAULT_LIVE_PATH.deskMaxTradesDay,
+        deskGreenProtectRs:
+          cfg.deskGreenProtectRs != null
+            ? cfg.deskGreenProtectRs
+            : DEFAULT_LIVE_PATH.deskGreenProtectRs,
       })
     : rawTrades;
 

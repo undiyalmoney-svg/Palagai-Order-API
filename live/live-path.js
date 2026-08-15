@@ -18,10 +18,16 @@ const DEFAULT_LIVE_PATH = {
   /** Desk-wide concurrent opens (Nifty+Bank+Crude). */
   maxOpenLegs: LIVE_GREEN_DNA.liveOps.maxOpenLegs || 1,
   /** Desk option-₹ day lock / stop (0 = off; prefer over index-point lock). */
-  dayProfitLockRs: 3000,
-  dayStopRs: 2950,
+  dayProfitLockRs: LIVE_GREEN_DNA.dayProfitLockRs || 1000,
+  dayStopRs: LIVE_GREEN_DNA.strictDayStop ? LIVE_GREEN_DNA.strictDayStopRs || 0 : 0,
   /** Zero-red all-three: Bank only after Nifty traded that day. */
   bankOnlyAfterNifty: true,
+  /** Bank only after Nifty's closed trades today are net green. */
+  bankOnlyAfterNiftyGreen: true,
+  /** Cap round-trips so charges don't eat a ₹1k green. */
+  deskMaxTradesDay: LIVE_GREEN_DNA.liveOps.deskMaxTradesDay || 3,
+  /** Stop add-on trades once 50% of the ₹1k target is in hand. */
+  deskGreenProtectRs: LIVE_GREEN_DNA.liveOps.deskGreenProtectRs || 500,
 };
 
 function tradeNetRs(t) {
@@ -60,6 +66,9 @@ function filterTradesLivePath(trades, opts = {}) {
   const stopRs = Math.max(0, Number(cfg.dayStopRs) || 0);
   const rejectEst = cfg.rejectEstimatedPremium !== false;
   const bankAfterNifty = cfg.bankOnlyAfterNifty !== false;
+  const bankAfterNiftyGreen = cfg.bankOnlyAfterNiftyGreen === true;
+  const maxTradesDay = Math.max(0, Math.floor(Number(cfg.deskMaxTradesDay)) || 0);
+  const protectRs = Math.max(0, Number(cfg.deskGreenProtectRs) || 0);
 
   const sorted = [...(trades || [])].sort((a, b) =>
     String(a.entryTime).localeCompare(String(b.entryTime)),
@@ -73,6 +82,8 @@ function filterTradesLivePath(trades, opts = {}) {
   let dayNet = 0;
   let dayStopped = false;
   let niftyTaken = false;
+  let niftyNet = 0;
+  let dayTrades = 0;
 
   for (const t of sorted) {
     const d = String(t.entryTime || '').slice(0, 10);
@@ -82,6 +93,8 @@ function filterTradesLivePath(trades, opts = {}) {
       dayStopped = false;
       openUntil = null;
       niftyTaken = false;
+      niftyNet = 0;
+      dayTrades = 0;
     }
     if (dayStopped) continue;
     if (rejectEst && isEstimatedOrSynthetic(t)) continue;
@@ -92,17 +105,24 @@ function filterTradesLivePath(trades, opts = {}) {
     const isBank = id.includes('bank');
     const isNifty = id.includes('nifty') && !isBank;
     if (bankAfterNifty && isBank && !niftyTaken) continue;
+    if (bankAfterNiftyGreen && isBank && !(niftyNet > 0)) continue;
 
     const entry = String(t.entryTime || '');
     const exit = String(t.exitTime || t.entryTime || '');
     if (maxLegs > 0 && openUntil && entry < openUntil) continue;
+    if (maxTradesDay > 0 && dayTrades >= maxTradesDay) continue;
 
     const net = tradeNetRs(t);
     kept.push(t);
     openUntil = exit;
     dayNet += net;
-    if (isNifty) niftyTaken = true;
+    dayTrades += 1;
+    if (isNifty) {
+      niftyTaken = true;
+      niftyNet += net;
+    }
     if (lockRs > 0 && dayNet >= lockRs) dayStopped = true;
+    if (protectRs > 0 && dayNet >= protectRs) dayStopped = true;
     if (stopRs > 0 && dayNet <= -stopRs) dayStopped = true;
   }
   return kept;

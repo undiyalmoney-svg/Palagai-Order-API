@@ -2,19 +2,22 @@
  * Daily desk DNA — Autobot multi-strategy Paper≡Live.
  *
  * 1) Nifty Trap (primary)
- * 2) Bank Trap — only AFTER Nifty traded that day (zero-red all-three rule)
- * 3) Crude LIVE_CRUDE_GREEN after NSE (second session)
+ * 2) Bank Trap — only AFTER Nifty day net is green
+ * 3) Crude OFF (45d net red)
  *
- * Capital: UI `capitalRs` / `capital` → one shared deskLots for Nifty+Bank+Crude.
- * Crude never keeps a private lot size. Stop→Start required to apply a new capital.
+ * ₹40k → 1 lot Nifty + 1 lot Bank. ₹80k → 2+2. ₹1.2L → 3+3.
+ * Trade count stays Nifty 2 / Bank 1. Lock +₹1,000. Protect +₹500. Floor ₹400.
+ *
+ * Capital: UI `capitalRs` / `capital` → floor(capital / ₹40k), same lots both books.
+ * Stop→Start required to apply a new capital.
  */
 
-const APP_VERSION = '1.3.124';
-const APP_BUILD = '2026.08.11-standdown-scale-lots';
+const APP_VERSION = '1.3.126';
+const APP_BUILD = '2026.08.15-lot40k-floor400';
 const { LIVE_GREEN_DNA } = require('./dna-live-green');
 const { LIVE_CRUDE_GREEN_DNA } = require('./dna-live-crude-green');
 
-const AUTOBOT_ALLOW_CRUDE = true;
+const AUTOBOT_ALLOW_CRUDE = false;
 const AUTOBOT_ALLOW_BANK = true;
 
 const CRUDE_STRATEGY_IDS = new Set([
@@ -34,8 +37,10 @@ function normalizeCrudeStrategy(raw) {
 }
 
 /** Research desk lock band (option ₹). */
-const DAY_PROFIT_LOCK_RS = LIVE_GREEN_DNA.dayProfitLockRs || 2500;
-const STRICT_DAY_STOP_RS = LIVE_GREEN_DNA.strictDayStopRs || 2950;
+const DAY_PROFIT_LOCK_RS = LIVE_GREEN_DNA.dayProfitLockRs || 1000;
+const DESK_GREEN_PROTECT_RS = LIVE_GREEN_DNA.liveOps.deskGreenProtectRs || 500;
+const STRICT_DAY_STOP_RS =
+  LIVE_GREEN_DNA.strictDayStopRs != null ? Number(LIVE_GREEN_DNA.strictDayStopRs) : 0;
 
 const NIFTY_RS_PER_POINT = 65;
 const BANK_RS_PER_POINT = 30;
@@ -43,24 +48,20 @@ const CRUDE_RS_PER_POINT = 10;
 
 /** Hard cap — one-leg desk; raise only with intentional risk review. */
 const MAX_DESK_LOTS = 10;
+/** UI capital per shared desk lot (Nifty lots = Bank lots). */
+const CAPITAL_RS_PER_LOT = 40000;
 
 /**
- * Map UI capital → one shared desk lot size (Nifty = Bank = Crude).
- * Ladder (higher capital → higher lots):
- *   < ₹75k     → 1
- *   ₹75k–₹1.99L → 2
- *   ₹2L        → 2
- *   ₹3L        → 3
- *   …
- *   ₹6L        → 6
- *   ₹10L+      → 10 (cap)
- * Rule above ₹1L: floor(capital / ₹1L), minimum 2 once ≥ ₹75k.
+ * Map UI capital → one shared desk lot size (Nifty = Bank).
+ *   ₹40k  → 1 lot each · Nifty 2 trades · Bank 1 trade
+ *   ₹80k  → 2 lots each · same 2 + 1
+ *   ₹1.2L → 3 lots each · same 2 + 1
+ * Below ₹40k still 1 lot. Cap 10 lots (₹4L).
  */
 function deskLotsFromCapitalRs(capitalRs) {
   const c = Math.max(0, Number(capitalRs) || 0);
   if (!(c > 0)) return null;
-  if (c < 75000) return 1;
-  return Math.min(MAX_DESK_LOTS, Math.max(2, Math.floor(c / 100000)));
+  return Math.min(MAX_DESK_LOTS, Math.max(1, Math.floor(c / CAPITAL_RS_PER_LOT)));
 }
 
 /** @deprecated use deskLotsFromCapitalRs — kept for callers expecting {nifty,bank,crude} */
@@ -71,14 +72,15 @@ function lotsFromCapitalRs(capitalRs) {
 }
 
 const DAILY_3K_PRESET = {
-  id: 'daily-all3',
-  label: 'All3 · Nifty→Bank→Crude',
+  id: 'daily-1k-40k',
+  label: '₹1k @ ₹40k · Nifty→Bank · protect ₹500',
+  capitalRs: LIVE_GREEN_DNA.defaultCapitalRs || 40000,
   niftyLots: 1,
   bankLots: 1,
   crudeLots: 1,
   enableNifty: true,
   enableBank: true,
-  enableCrude: true,
+  enableCrude: false,
   enableNatGas: false,
   enableKutty: false,
   kuttyAlone: false,
@@ -86,12 +88,12 @@ const DAILY_3K_PRESET = {
   bankStrategy: 'trap',
   crudeStrategy: 'live-crude-green',
   dayProfitLock: true,
-  strictDayStop: true,
+  strictDayStop: false,
   crudeAfterIndexClose: true,
   paperLivePath: true,
   bankOnlyAfterNifty: true,
   researchNote:
-    'Nifty first · Bank after Nifty · Crude after NSE · Paper≡Live · 0-red research path',
+    '₹40k→1 lot both books · ₹80k→2 · ₹1.2L→3 · Nifty 2 + Bank 1 · floor ₹400 · Crude off',
   dnaId: LIVE_GREEN_DNA.id,
 };
 
@@ -115,6 +117,10 @@ function profitLockMoneyRs(lots) {
   return DAY_PROFIT_LOCK_RS * Math.max(1, Math.floor(Number(lots)) || 1);
 }
 
+function greenProtectMoneyRs(lots) {
+  return DESK_GREEN_PROTECT_RS * Math.max(1, Math.floor(Number(lots)) || 1);
+}
+
 function strictStopMoneyRs(lots) {
   return STRICT_DAY_STOP_RS * Math.max(1, Math.floor(Number(lots)) || 1);
 }
@@ -128,27 +134,30 @@ function indexDayRiskOverrides({
   useIndexPts = false,
 }) {
   if (!dayProfitLock && !strictDayStop) return null;
-  const share = enableNifty && enableBank ? 0.5 : 1;
+  // Full desk band on every book (do NOT split 50/50). A 50/50 split locked
+  // each book at ₹500 and kept taking charge-eaten extras past the ₹1k target.
+  void enableNifty;
+  void enableBank;
   if (!useIndexPts) {
     const out = {
       dayProfitLockPts: 0,
       dayStopPts: 0,
     };
     if (strictDayStop) {
-      out.dayStopRs = Math.max(1, Math.round(STRICT_DAY_STOP_RS * share));
+      out.dayStopRs = Math.max(1, Math.round(STRICT_DAY_STOP_RS));
     }
     if (dayProfitLock) {
-      out.dayProfitLockRs = Math.max(1, Math.round(DAY_PROFIT_LOCK_RS * share));
+      out.dayProfitLockRs = Math.max(1, Math.round(DAY_PROFIT_LOCK_RS));
     }
     return out;
   }
   const rs = rsPerPointForInstrument(instrumentId);
   const out = {};
   if (strictDayStop) {
-    out.dayStopPts = Math.max(1, Math.round((STRICT_DAY_STOP_RS * share) / rs));
+    out.dayStopPts = Math.max(1, Math.round(STRICT_DAY_STOP_RS / rs));
   }
   if (dayProfitLock) {
-    out.dayProfitLockPts = Math.max(1, Math.round((DAY_PROFIT_LOCK_RS * share) / rs));
+    out.dayProfitLockPts = Math.max(1, Math.round(DAY_PROFIT_LOCK_RS / rs));
   }
   return out;
 }
@@ -162,12 +171,26 @@ function riskStatusLabels(config) {
   if (config?.dayProfitLock) {
     parts.push(`profit lock +₹${profitLockMoneyRs(lots).toLocaleString('en-IN')} (option ₹)`);
   }
-  if (config?.bankOnlyAfterNifty !== false) {
+  const protect =
+    config?.deskGreenProtectRs != null
+      ? Number(config.deskGreenProtectRs)
+      : DESK_GREEN_PROTECT_RS;
+  if (protect > 0) {
+    parts.push(`protect +₹${(protect * lots).toLocaleString('en-IN')} (50%)`);
+  }
+  if (config?.bankOnlyAfterNiftyGreen) {
+    parts.push('Bank after Nifty green');
+  } else if (config?.bankOnlyAfterNifty !== false) {
     parts.push('Bank after Nifty');
   }
   if (config?.paperLivePath !== false) {
     parts.push('Paper≡Live');
   }
+  const maxT =
+    config?.deskMaxTradesDay != null
+      ? Math.max(0, Math.floor(Number(config.deskMaxTradesDay)) || 0)
+      : LIVE_GREEN_DNA.liveOps.deskMaxTradesDay || 0;
+  if (maxT > 0) parts.push(`max ${maxT} trades`);
   return parts;
 }
 
@@ -223,7 +246,10 @@ function normalizeStartConfig(config = {}) {
       ? 'live-crude-green'
       : normalizeCrudeStrategy(config.crudeStrategy ?? preset.crudeStrategy),
     dayProfitLock: config.dayProfitLock !== false,
-    strictDayStop: config.strictDayStop !== false,
+    strictDayStop:
+      config.strictDayStop != null
+        ? !!config.strictDayStop
+        : LIVE_GREEN_DNA.strictDayStop === true,
     enableKutty: !!config.enableKutty,
     kuttyAlone: !!config.kuttyAlone,
     realOrders: !!config.realOrders,
@@ -249,6 +275,18 @@ function normalizeStartConfig(config = {}) {
       config.bankOnlyAfterNifty != null
         ? !!config.bankOnlyAfterNifty
         : LIVE_GREEN_DNA.liveOps.bankOnlyAfterNifty !== false,
+    bankOnlyAfterNiftyGreen:
+      config.bankOnlyAfterNiftyGreen != null
+        ? !!config.bankOnlyAfterNiftyGreen
+        : LIVE_GREEN_DNA.liveOps.bankOnlyAfterNiftyGreen === true,
+    deskMaxTradesDay:
+      config.deskMaxTradesDay != null
+        ? Math.max(0, Math.floor(Number(config.deskMaxTradesDay)) || 0)
+        : LIVE_GREEN_DNA.liveOps.deskMaxTradesDay || 3,
+    deskGreenProtectRs:
+      config.deskGreenProtectRs != null
+        ? Math.max(0, Number(config.deskGreenProtectRs) || 0)
+        : LIVE_GREEN_DNA.liveOps.deskGreenProtectRs || 500,
   };
 }
 
@@ -258,9 +296,11 @@ module.exports = {
   deskLotsFromCapitalRs,
   resolveDeskLots,
   MAX_DESK_LOTS,
+  CAPITAL_RS_PER_LOT,
   AUTOBOT_ALLOW_CRUDE,
   AUTOBOT_ALLOW_BANK,
   DAY_PROFIT_LOCK_RS,
+  DESK_GREEN_PROTECT_RS,
   STRICT_DAY_STOP_RS,
   NIFTY_RS_PER_POINT,
   BANK_RS_PER_POINT,
@@ -274,6 +314,7 @@ module.exports = {
   rsPerPointForInstrument,
   deskRiskLots,
   profitLockMoneyRs,
+  greenProtectMoneyRs,
   strictStopMoneyRs,
   indexDayRiskOverrides,
   riskStatusLabels,

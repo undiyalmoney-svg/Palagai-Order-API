@@ -1,43 +1,51 @@
 /**
- * LIVE_GREEN DNA — multi-strategy daily desk (2026-08-11).
+ * LIVE_GREEN DNA — ₹1,000 / day desk @ ₹40k capital (1 lot).
  *
- * Research winner for Nifty+Bank+Crude under Paper≡Live:
- *   Bank only AFTER Nifty has traded that day → 0 red / 9 green (~₹13k)
- *   on 13 Jul–11 Aug (kills Bank-alone morning reds).
- *   Crude LIVE_CRUDE_GREEN after NSE (second session).
+ * Quality path (not a guarantee of every trade):
+ *   Entry: confirmed S/R trap only (no bounce), next-bar confirm, real premium
+ *   Bank: only after Nifty closed GREEN that day
+ *   Exit: arm ₹400 then lock ₹400 (no giveback). Stand-down ₹350 if wrong.
+ *   Desk: lock +₹1,000 · protect 50% at +₹500 · max 3 (Nifty 2 / Bank 1)
+ *   Lots: UI capital ÷ ₹40k (₹40k→1, ₹80k→2, ₹1.2L→3). Trade count does not scale.
+ *   Crude OFF
  */
 
 const LIVE_GREEN_DNA = {
-  id: 'live-green-all3-v2',
-  label: 'Live Green · Nifty→Bank→Crude · Paper≡Live',
-  version: '2026.08.11-all3',
+  id: 'live-green-1k-40k-v4',
+  label: 'Live Green · ₹1k @ ₹40k · floor ₹400 · lots÷40k',
+  version: '2026.08.15-lot40k-floor400',
 
-  /** Books */
+  /** Books — ₹40k capital maps to 1 shared desk lot */
   enableNifty: true,
   enableBank: true,
-  enableCrude: true,
+  enableCrude: false,
   niftyLots: 1,
   bankLots: 1,
   niftyStrategy: 'trap',
   bankStrategy: 'trap',
+  defaultCapitalRs: 40000,
 
   /** Day risk (₹ band @ 1 lot) — measured on option ₹, not index pts */
   dayProfitLock: true,
-  dayProfitLockRs: 2500,
-  strictDayStop: true,
-  strictDayStopRs: 2950,
+  dayProfitLockRs: 1000,
+  /** No desk day-loss kill. Stand-down ₹350 still cuts a bad leg. */
+  strictDayStop: false,
+  strictDayStopRs: 0,
 
-  /** Trap signal DNA — Bank pierce raised (research: B60) */
+  /** Trap — pierce + next-bar confirm only (bounce entries are noise). */
   trap: {
     piercePts: 20,
     bankPiercePts: 60,
-    profitLockArmRs: 100,
-    profitLockLockRs: 50,
-    profitLockGivebackRs: 50,
-    maxTradesPerDay: 3,
-    bankMaxTradesPerDay: 2,
+    /** Arm at ₹400 / lot, then keep ₹400 — do not drain ₹200. Scales with lots. */
+    profitLockArmRs: 400,
+    profitLockLockRs: 400,
+    profitLockGivebackRs: 0,
+    maxTradesPerDay: 2,
+    bankMaxTradesPerDay: 1,
     targetRMultiple: 3.5,
     confirmNextBar: true,
+    minConfirmBody: 4,
+    trapMode: 'trap',
     slConfirmCutoffEnabled: false,
     softRs: 0,
     entryTimeStart: '09:45',
@@ -54,18 +62,26 @@ const LIVE_GREEN_DNA = {
     trailProtectiveSl: true,
     fillFrictionPremium: 0.5,
     optionRsDayRisk: true,
-    /** Zero-red all-three rule */
+    /** Zero-red: Bank only after Nifty traded that day */
     bankOnlyAfterNifty: true,
+    /** Bank only if Nifty's closed trades today are net green */
+    bankOnlyAfterNiftyGreen: true,
+    /** Desk-wide cap so fees don't eat a green day (2–3 trades) */
+    deskMaxTradesDay: 3,
+    chargeCoverMultiple: 4,
+    /**
+     * 50/50 of the ₹1,000 target: once day net ≥ ₹500, stop new entries.
+     * Stops Bank/Nifty #2 from giving back a made day (13 Aug Nifty +₹600 then Bank −₹487).
+     */
+    deskGreenProtectRs: 500,
   },
 
   research: {
-    window: '2026-07-13 → 2026-08-11',
-    allThreeZeroRed: '9/9 green · net ≈ ₹13.0k · bankOnlyAfterNifty',
-    unconstrainedBest:
-      '20/22 green · 2 red · net ≈ ₹25.4k (Bank-alone reds 13 Jul / 24 Jul)',
-    crudeAfterNse: 'LIVE_CRUDE_GREEN · hard gate 15:15 · entries 16:00–21:00',
+    window: '2026-07-15 → 2026-08-13',
+    target: '₹1,000 net @ 1 lot (₹40k) in ≤3 trades',
+    allThreeZeroRed: 'Bank-after-Nifty kills 15 Jul / 21 Jul / 06 Aug Bank-alone reds',
     note:
-      'Bank gated until Nifty trades that day. Crude evening still runs. Not a guarantee of every calendar day.',
+      'Floor ₹400 after arm (no giveback). Lots = capital/₹40k. Nifty 2 + Bank 1 regardless of lots. Crude off.',
   },
 };
 
@@ -80,7 +96,8 @@ function liveGreenTrapExtras() {
     profitLockGivebackRs: t.profitLockGivebackRs,
     slConfirmCutoffEnabled: t.slConfirmCutoffEnabled,
     slConfirmSoftRs: t.softRs,
-    trapMode: 'both',
+    minConfirmBody: t.minConfirmBody || 0,
+    trapMode: t.trapMode === 'both' ? 'both' : 'trap',
     bounceOrPierceMult: 0,
     bounceOrPierceCap: 0,
     optionStandDownRs: LIVE_GREEN_DNA.liveOps.optionStandDownRs,
@@ -108,6 +125,9 @@ function liveGreenStartConfig() {
     fillFrictionPremium: LIVE_GREEN_DNA.liveOps.fillFrictionPremium,
     crudeAfterIndexClose: true,
     bankOnlyAfterNifty: LIVE_GREEN_DNA.liveOps.bankOnlyAfterNifty,
+    bankOnlyAfterNiftyGreen: LIVE_GREEN_DNA.liveOps.bankOnlyAfterNiftyGreen,
+    deskGreenProtectRs: LIVE_GREEN_DNA.liveOps.deskGreenProtectRs,
+    capitalRs: LIVE_GREEN_DNA.defaultCapitalRs,
   };
 }
 

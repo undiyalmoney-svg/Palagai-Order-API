@@ -136,7 +136,7 @@ function statusPayload(session) {
       crudeStrategy: cfg.crudeStrategy || 'live-crude-green',
       crudeAfterIndexClose: cfg.crudeAfterIndexClose !== false,
       bankOnlyAfterNifty: cfg.bankOnlyAfterNifty !== false,
-      label: 'Nifty → Bank (after Nifty) → Crude after NSE',
+      label: '₹40k → 1 lot each · Nifty 2 + Bank 1 · floor ₹400',
     },
     risk: {
       dayProfitLockRsBase: DAY_PROFIT_LOCK_RS,
@@ -146,9 +146,9 @@ function statusPayload(session) {
       profitLockMoneyRs: profitLockMoneyRs(lots),
       strictStopMoneyRs: strictStopMoneyRs(lots),
       labels: riskStatusLabels(cfg),
-      checkboxHint: `₹${DAY_PROFIT_LOCK_RS.toLocaleString('en-IN')} × lots (1→₹3k · 3→₹9k)`,
+      checkboxHint: `₹${DAY_PROFIT_LOCK_RS.toLocaleString('en-IN')} × lots (1 lot @ ₹40k → ₹1,000)`,
       capitalHint:
-        'Capital ladder (same deskLots Nifty+Bank+Crude): <₹75k→1 · ₹75k+→2 · then ₹1L per lot (₹6L→6, cap 10). Stop→Start to apply.',
+        'Lots = capital/₹40k (same Nifty+Bank). Nifty 2 + Bank 1. Floor ₹400. Stop→Start to apply.',
     },
     version: APP_VERSION,
     appBuild: APP_BUILD,
@@ -310,7 +310,7 @@ async function start(userId, config) {
     );
   }
   session.message =
-    `All3 desk · N${session.config.enableNifty ? 1 : 0}/B${session.config.enableBank ? 1 : 0}/C${session.config.enableCrude ? 1 : 0}` +
+    `₹1k desk · N${session.config.enableNifty ? 1 : 0}/B${session.config.enableBank ? 1 : 0}/C${session.config.enableCrude ? 1 : 0}` +
     ` · Crude after NSE · Bank after Nifty` +
     (riskBits.length ? ` · ${riskBits.join(' · ')}` : '');
   pushEvent(

@@ -20,7 +20,7 @@ const {
 } = require('./strategy-core.cjs');
 const { fetchInstruments, fetchHistorical5m } = require('./kite-market');
 const { LiveBroker } = require('./live-broker');
-const { indexDayRiskOverrides, riskStatusLabels } = require('./daily-desk-defaults');
+const { indexDayRiskOverrides, riskStatusLabels, deskRiskLots, profitLockMoneyRs, greenProtectMoneyRs, strictStopMoneyRs } = require('./daily-desk-defaults');
 const {
   ingestReplayTrades,
   applyBrokerFill,
@@ -138,6 +138,7 @@ class LiveWorker {
     this.reconciled = false;
     this.tickBusy = false;
     this.lastSignals = { nifty: '', bank: '', crude: '' };
+    this.lastDeskHalt = '';
   }
 
   handleBrokerFill(fill) {
@@ -280,6 +281,11 @@ class LiveWorker {
       }
 
       const { date: today, hhmm: now } = istParts();
+      const halt = this.deskHaltReason(today);
+      if (halt && halt !== this.lastDeskHalt) {
+        this.lastDeskHalt = halt;
+        this.pushEvent('DESK_HALT', halt);
+      }
       const indexSession = now >= '09:15' && now <= '15:30';
       const crudeSession = now >= '09:00' && now <= '23:15';
       const enableKutty = !!config.enableKutty;
@@ -328,7 +334,10 @@ class LiveWorker {
       if (config.enableBank && indexSession) {
         const genie = config.bankStrategy === 'genie';
         const bankAfterNifty = config.bankOnlyAfterNifty !== false;
-        const niftyReady = !bankAfterNifty || this.niftyTakenToday(today);
+        const bankAfterGreen = config.bankOnlyAfterNiftyGreen === true;
+        const niftyReady = bankAfterGreen
+          ? this.niftyGreenToday(today)
+          : !bankAfterNifty || this.niftyTakenToday(today);
         const replay = await this.replayIndexLive({
           authorization,
           instrument: BANK_NIFTY_INSTRUMENT,
@@ -366,7 +375,11 @@ class LiveWorker {
         const bankSig =
           `Bank ${genie ? 'Genie' : 'Trap'} · ${replay.lastSignal}` +
           (bankSyncOpen ? ` · OPEN ${bankSyncOpen.direction}` : '') +
-          (bankAfterNifty && !niftyReady ? ' · wait Nifty first' : '');
+          (bankAfterGreen && !niftyReady
+            ? ' · wait Nifty green'
+            : bankAfterNifty && !niftyReady
+              ? ' · wait Nifty first'
+              : '');
         if (bankSig !== this.lastSignals.bank) {
           this.lastSignals.bank = bankSig;
           this.pushEvent('SIGNAL', bankSig);
@@ -580,6 +593,82 @@ class LiveWorker {
     });
   }
 
+  /**
+   * Closed-trade desk P&L for IST `today` (paper ledger, charges-aware).
+   */
+  deskDayStats(today) {
+    let net = 0;
+    let trades = 0;
+    for (const t of this.liveTrades || []) {
+      if (String(t.entryTime || '').slice(0, 10) !== today) continue;
+      if (t.premiumEstimated) continue;
+      const n =
+        t.netOptionPnlRs != null
+          ? Number(t.netOptionPnlRs)
+          : t.optionPnlRs != null
+            ? Number(t.optionPnlRs)
+            : null;
+      if (n == null || !Number.isFinite(n)) continue;
+      net += n;
+      trades += 1;
+    }
+    return { net, trades };
+  }
+
+  /**
+   * Stop new entries once ₹1k is banked, stop is hit, or 3 trades are done.
+   * Open legs still manage/exit via liveOpenForSync.
+   */
+  deskHaltReason(today) {
+    const config = this.getConfig() || {};
+    const lots = deskRiskLots(config);
+    const lock = config.dayProfitLock !== false ? profitLockMoneyRs(lots) : 0;
+    const protect =
+      config.deskGreenProtectRs != null
+        ? Math.max(0, Number(config.deskGreenProtectRs) || 0) * lots
+        : greenProtectMoneyRs(lots);
+    const stop = config.strictDayStop === true ? strictStopMoneyRs(lots) : 0;
+    const maxT =
+      config.deskMaxTradesDay != null
+        ? Math.max(0, Math.floor(Number(config.deskMaxTradesDay)) || 0)
+        : LIVE_GREEN_DNA.liveOps.deskMaxTradesDay || 3;
+    const { net, trades } = this.deskDayStats(today);
+    if (protect > 0 && net >= protect) {
+      return `desk protect +₹${protect.toLocaleString('en-IN')} (50% · net ₹${Math.round(net)})`;
+    }
+    if (lock > 0 && net >= lock) {
+      return `desk lock +₹${lock.toLocaleString('en-IN')} (net ₹${Math.round(net)})`;
+    }
+    if (stop > 0 && net <= -stop) {
+      return `desk stop −₹${stop.toLocaleString('en-IN')} (net ₹${Math.round(net)})`;
+    }
+    if (maxT > 0 && trades >= maxT) {
+      return `desk max ${maxT} trades (done ${trades})`;
+    }
+    return null;
+  }
+
+  niftyGreenToday(today) {
+    const niftyId = NIFTY_50_INSTRUMENT.id;
+    let net = 0;
+    let closed = false;
+    for (const t of this.liveTrades || []) {
+      if (t.instrumentId !== niftyId) continue;
+      if (String(t.entryTime || '').slice(0, 10) !== today) continue;
+      if (t.premiumEstimated) continue;
+      const n =
+        t.netOptionPnlRs != null
+          ? Number(t.netOptionPnlRs)
+          : t.optionPnlRs != null
+            ? Number(t.optionPnlRs)
+            : null;
+      if (n == null || !Number.isFinite(n)) continue;
+      net += n;
+      closed = true;
+    }
+    return closed && net > 0;
+  }
+
   /** True once Nifty has an open/exiting broker leg or a closed trade today. */
   niftyTakenToday(today) {
     const niftyId = NIFTY_50_INSTRUMENT.id;
@@ -609,6 +698,8 @@ class LiveWorker {
     if (this.broker.maxOpenLegs > 0 && this.broker.openLegCount() >= this.broker.maxOpenLegs) {
       return null;
     }
+    const { date: today } = istParts();
+    if (this.deskHaltReason(today)) return null;
     return open;
   }
 
@@ -618,6 +709,7 @@ class LiveWorker {
     this.broker.clear();
     this.liveTrades = [];
     this.lastSignals = { nifty: '', bank: '', crude: '' };
+    this.lastDeskHalt = '';
   }
 }
 
