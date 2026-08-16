@@ -97,7 +97,7 @@ function trapInitOverrides(config, instrumentId) {
       dayProfitLock: !!config.dayProfitLock,
       strictDayStop: !!config.strictDayStop,
     }) || {};
-  const extras = liveGreenTrapExtras();
+  const extras = liveGreenTrapExtras(instrumentId);
   if (config.optionStandDownRs != null) {
     extras.optionStandDownRs = Number(config.optionStandDownRs);
   }
@@ -105,10 +105,13 @@ function trapInitOverrides(config, instrumentId) {
   const maxTrades = bank
     ? LIVE_GREEN_DNA.trap.bankMaxTradesPerDay || LIVE_GREEN_DNA.trap.maxTradesPerDay
     : LIVE_GREEN_DNA.trap.maxTradesPerDay;
+  const cut = LIVE_GREEN_DNA.trap.sessionCutTime || LIVE_GREEN_DNA.trap.entryTimeEnd;
   return {
     ...risk,
     maxTradesPerDay: maxTrades,
     targetRMultiple: LIVE_GREEN_DNA.trap.targetRMultiple,
+    entryTimeStart: LIVE_GREEN_DNA.trap.entryTimeStart,
+    entryTimeEnd: bank ? cut : LIVE_GREEN_DNA.trap.entryTimeEnd,
     extras,
   };
 }
@@ -302,7 +305,7 @@ class LiveWorker {
           instrument: NIFTY_50_INSTRUMENT,
           kind: 'nifty',
           candles: this.candles.nifty,
-          lots: config.deskLots || config.niftyLots || 1,
+          lots: config.niftyLots || config.deskLots || 1,
           forceClose: now >= '15:15',
           enableKutty,
           kuttyAlone: !!config.kuttyAlone,
@@ -320,7 +323,7 @@ class LiveWorker {
           instrumentId: NIFTY_50_INSTRUMENT.id,
           instrumentName: 'Nifty Trap',
           open: this.liveOpenForSync(NIFTY_50_INSTRUMENT.id, replay.open),
-          lots: config.deskLots || config.niftyLots || 1,
+          lots: config.niftyLots || config.deskLots || 1,
         });
         const niftySig =
           `Nifty Trap · ${replay.lastSignal}` +
@@ -333,7 +336,7 @@ class LiveWorker {
 
       if (config.enableBank && indexSession) {
         const genie = config.bankStrategy === 'genie';
-        const bankAfterNifty = config.bankOnlyAfterNifty !== false;
+        const bankAfterNifty = config.bankOnlyAfterNifty === true;
         const bankAfterGreen = config.bankOnlyAfterNiftyGreen === true;
         const niftyReady = bankAfterGreen
           ? this.niftyGreenToday(today)
@@ -343,8 +346,8 @@ class LiveWorker {
           instrument: BANK_NIFTY_INSTRUMENT,
           kind: 'banknifty',
           candles: this.candles.bank,
-          lots: config.deskLots || config.bankLots || 1,
-          forceClose: now >= '15:15',
+          lots: config.bankLots || config.deskLots || 1,
+          forceClose: now >= (LIVE_GREEN_DNA.trap.sessionCutTime || '14:15'),
           enableKutty,
           kuttyAlone: !!config.kuttyAlone,
           today,
@@ -370,7 +373,7 @@ class LiveWorker {
           instrumentId: BANK_NIFTY_INSTRUMENT.id,
           instrumentName: `Bank ${genie ? 'Genie' : 'Trap'}`,
           open: bankSyncOpen,
-          lots: config.deskLots || config.bankLots || 1,
+          lots: config.bankLots || config.deskLots || 1,
         });
         const bankSig =
           `Bank ${genie ? 'Genie' : 'Trap'} · ${replay.lastSignal}` +
@@ -633,7 +636,36 @@ class LiveWorker {
         ? Math.max(0, Math.floor(Number(config.deskMaxTradesDay)) || 0)
         : LIVE_GREEN_DNA.liveOps.deskMaxTradesDay || 3;
     const { net, trades } = this.deskDayStats(today);
+    const { hhmm: now } = istParts();
+    const pe = LIVE_GREEN_DNA.trap.peSession;
+    const inPe =
+      LIVE_GREEN_DNA.liveOps.peSessionIgnoresHalt &&
+      pe &&
+      pe.enabled !== false &&
+      now >= (pe.entryTimeStart || '14:15') &&
+      now <= (pe.entryTimeEnd || '14:45');
+    if (inPe) {
+      if (this.peTakenToday(today)) return `PE session done`;
+      const peBelow = Number(LIVE_GREEN_DNA.liveOps.peSessionOnlyIfBelowRs) || 0;
+      if (peBelow > 0 && net >= peBelow) {
+        return `PE skip — morning already ₹${Math.round(net)} (≥ ₹${peBelow})`;
+      }
+      if (peBelow <= 0 && LIVE_GREEN_DNA.liveOps.peSessionOnlyIfNotGreen === true && net > 0) {
+        return `PE skip — morning already green (net ₹${Math.round(net)})`;
+      }
+      return null;
+    }
+    const haltAfterRed =
+      config.deskHaltAfterRed != null
+        ? !!config.deskHaltAfterRed
+        : LIVE_GREEN_DNA.liveOps.deskHaltAfterRed === true;
+    if (haltAfterRed && trades > 0 && net < 0) {
+      return `desk red — no repair (net ₹${Math.round(net)})`;
+    }
     if (protect > 0 && net >= protect) {
+      if (protect <= 1) {
+        return `desk green — halt new entries (net ₹${Math.round(net)})`;
+      }
       return `desk protect +₹${protect.toLocaleString('en-IN')} (50% · net ₹${Math.round(net)})`;
     }
     if (lock > 0 && net >= lock) {
@@ -698,9 +730,42 @@ class LiveWorker {
     if (this.broker.maxOpenLegs > 0 && this.broker.openLegCount() >= this.broker.maxOpenLegs) {
       return null;
     }
-    const { date: today } = istParts();
+    const { date: today, hhmm: now } = istParts();
+    const pe = LIVE_GREEN_DNA.trap.peSession;
+    const cut = LIVE_GREEN_DNA.trap.sessionCutTime || '14:15';
+    const openTm = String(open.entryTime || '').match(/T(\d{2}:\d{2})/)?.[1] || now;
+    const inPe =
+      pe &&
+      pe.enabled !== false &&
+      openTm >= (pe.entryFillStart || pe.entryTimeStart || cut) &&
+      openTm <= (pe.entryTimeEnd || '14:45');
+    if (inPe) {
+      const peDir = String(pe.allowDirection || 'SELL').toUpperCase();
+      if (peDir === 'SELL' && open.direction === 'BUY') return null;
+      if (peDir === 'BUY' && open.direction === 'SELL') return null;
+      if (this.peTakenToday(today)) return null;
+      return open;
+    }
     if (this.deskHaltReason(today)) return null;
+    if (openTm >= cut) return null;
+    const allowDir = String(LIVE_GREEN_DNA.trap.allowDirection || '').toUpperCase();
+    if (allowDir === 'SELL' && open.direction === 'BUY') return null;
+    if (allowDir === 'BUY' && open.direction === 'SELL') return null;
     return open;
+  }
+
+  peTakenToday(today) {
+    const pe = LIVE_GREEN_DNA.trap.peSession;
+    if (!pe || pe.enabled === false) return false;
+    const start = pe.entryFillStart || pe.entryTimeStart || '14:15';
+    const niftyId = NIFTY_50_INSTRUMENT.id;
+    for (const t of this.liveTrades || []) {
+      if (t.instrumentId !== niftyId) continue;
+      if (String(t.entryTime || '').slice(0, 10) !== today) continue;
+      const tm = String(t.entryTime || '').match(/T(\d{2}:\d{2})/)?.[1] || '';
+      if (tm >= start && t.direction === (pe.allowDirection || 'SELL')) return true;
+    }
+    return false;
   }
 
   resetWarm() {

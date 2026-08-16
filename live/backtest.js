@@ -116,7 +116,7 @@ function trapInitOverrides(cfg, instrumentId) {
       dayProfitLock: !!cfg.dayProfitLock,
       strictDayStop: !!cfg.strictDayStop,
     }) || {};
-  const extras = liveGreenTrapExtras();
+  const extras = liveGreenTrapExtras(instrumentId);
   if (cfg.optionStandDownRs != null) {
     extras.optionStandDownRs = Number(cfg.optionStandDownRs);
   }
@@ -124,10 +124,13 @@ function trapInitOverrides(cfg, instrumentId) {
   const maxTrades = bank
     ? LIVE_GREEN_DNA.trap.bankMaxTradesPerDay || LIVE_GREEN_DNA.trap.maxTradesPerDay
     : LIVE_GREEN_DNA.trap.maxTradesPerDay;
+  const cut = LIVE_GREEN_DNA.trap.sessionCutTime || LIVE_GREEN_DNA.trap.entryTimeEnd;
   return {
     ...risk,
     maxTradesPerDay: maxTrades,
     targetRMultiple: LIVE_GREEN_DNA.trap.targetRMultiple,
+    entryTimeStart: LIVE_GREEN_DNA.trap.entryTimeStart,
+    entryTimeEnd: bank ? cut : LIVE_GREEN_DNA.trap.entryTimeEnd,
     extras,
   };
 }
@@ -322,13 +325,16 @@ async function runBacktest({ authorization, fromDate, toDate, config }, deps = {
         ...DEFAULT_LIVE_PATH,
         maxOpenLegs: cfg.maxOpenLegs != null ? cfg.maxOpenLegs : DEFAULT_LIVE_PATH.maxOpenLegs,
         dayProfitLockRs: cfg.dayProfitLock
-          ? DAY_PROFIT_LOCK_RS * Math.max(1, cfg.deskLots || cfg.niftyLots || 1)
+          ? (cfg.dayProfitLockRs != null
+              ? Number(cfg.dayProfitLockRs)
+              : LIVE_GREEN_DNA.dayProfitLockRs || DAY_PROFIT_LOCK_RS) *
+            Math.max(1, cfg.deskLots || cfg.niftyLots || 1)
           : 0,
         dayStopRs: cfg.strictDayStop
           ? STRICT_DAY_STOP_RS * Math.max(1, cfg.deskLots || cfg.niftyLots || 1)
           : 0,
         rejectEstimatedPremium: true,
-        bankOnlyAfterNifty: cfg.bankOnlyAfterNifty !== false,
+        bankOnlyAfterNifty: cfg.bankOnlyAfterNifty === true,
         bankOnlyAfterNiftyGreen: cfg.bankOnlyAfterNiftyGreen === true,
         deskMaxTradesDay:
           cfg.deskMaxTradesDay != null
@@ -338,6 +344,18 @@ async function runBacktest({ authorization, fromDate, toDate, config }, deps = {
           cfg.deskGreenProtectRs != null
             ? cfg.deskGreenProtectRs
             : DEFAULT_LIVE_PATH.deskGreenProtectRs,
+        allowDirection: LIVE_GREEN_DNA.trap.allowDirection || DEFAULT_LIVE_PATH.allowDirection,
+        entryTimeStart: LIVE_GREEN_DNA.trap.entryTimeStart || DEFAULT_LIVE_PATH.entryTimeStart,
+        entryTimeEnd:
+          LIVE_GREEN_DNA.trap.sessionCutTime ||
+          LIVE_GREEN_DNA.trap.entryTimeEnd ||
+          DEFAULT_LIVE_PATH.entryTimeEnd,
+        sessionCutTime: LIVE_GREEN_DNA.trap.sessionCutTime || '',
+        peSession: LIVE_GREEN_DNA.trap.peSession || null,
+        deskHaltAfterRed: LIVE_GREEN_DNA.liveOps.deskHaltAfterRed === true,
+        bankOnlyAfterNiftyGreen: LIVE_GREEN_DNA.liveOps.bankOnlyAfterNiftyGreen === true,
+        peSessionOnlyIfNotGreen: LIVE_GREEN_DNA.liveOps.peSessionOnlyIfNotGreen === true,
+        peSessionOnlyIfBelowRs: Number(LIVE_GREEN_DNA.liveOps.peSessionOnlyIfBelowRs) || 0,
       })
     : rawTrades;
 

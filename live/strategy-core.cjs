@@ -1821,7 +1821,8 @@ function closePaperTrade(params) {
     }
     if (!useEstimate && optionEntryPremium != null && optionExitPremium != null) {
       const friction = livePath ? Number(livePath.fillFrictionPremium) || 0 : 0;
-      if (friction > 0) {
+      // Resting bank/stand already names the option ₹. Do not haircut it again.
+      if (friction > 0 && restingOpt == null) {
         optionEntryPremium = Math.max(0.05, Number(optionEntryPremium) + friction);
         optionExitPremium = Math.max(0.05, Number(optionExitPremium) - friction);
       }
@@ -2136,6 +2137,26 @@ function replayPaperOnIndex(params) {
     if (livePath && livePath.rejectEstimatedPremium !== false && premiumEstimated) {
       lastSignal = `Live-path skip \u2014 estimated/synthetic premium`;
       continue;
+    }
+    if (livePath && optionEntryPremium != null) {
+      const { evaluateChargeEntryGate } = require("./charge-entry-gate");
+      const { LIVE_GREEN_DNA } = require("./dna-live-green");
+      const lots = Math.max(1, Math.floor(lotsMultiplier ?? 1) || 1);
+      const qty = Math.max(1, Number(option.lotSize) || 1) * lots;
+      const gate = evaluateChargeEntryGate({
+        instrumentId,
+        entryPremium: optionEntryPremium,
+        quantity: qty,
+        indexEntry: entryPrice,
+        indexStop: entryStop,
+        indexTarget: entryTarget,
+        targetRMultiple: strategy?.getSettings?.()?.targetRMultiple,
+        ops: { ...LIVE_GREEN_DNA.liveOps, ...livePath },
+      });
+      if (gate.skip) {
+        lastSignal = gate.reason;
+        continue;
+      }
     }
     if (livePath?.deskGate && !livePath.deskGate.tryOpen()) {
       lastSignal = `Live-path skip \u2014 maxOpenLegs ${livePath.deskGate.maxOpenLegs}`;
@@ -4641,7 +4662,8 @@ function createSrTrapDayState() {
   return {
     ...createRuleDayState(),
     pending: null,
-    barSeq: 0
+    barSeq: 0,
+    peTradesToday: 0
   };
 }
 function recordSrTrapTradeClosed(state, points, dayStopPts, dayProfitLockPts = 0, money = null) {
@@ -4653,18 +4675,101 @@ function num2(v, fallback) {
 function readTrapExtras(settings) {
   const x = settings.extras ?? {};
   const mode = x["trapMode"] === "trap" ? "trap" : "both";
+  const allowRaw = String(x["allowDirection"] || x["allowedDirection"] || "").toUpperCase();
+  const allowDirection = allowRaw === "BUY" || allowRaw === "SELL" ? allowRaw : "";
+  const peAllowRaw = String(x["peAllowDirection"] || "").toUpperCase();
+  const peAllowDirection = peAllowRaw === "BUY" || peAllowRaw === "SELL" ? peAllowRaw : "";
   return {
     swingLb: Math.max(3, Math.floor(num2(x["swingLb"], 5))),
     piercePts: num2(x["piercePts"], 15),
     bankPiercePts: Math.max(0, num2(x["bankPiercePts"], 0)),
     mode,
+    allowDirection,
+    sessionCutTime: String(x["sessionCutTime"] || ""),
+    peEntryStart: String(x["peEntryStart"] || ""),
+    peEntryEnd: String(x["peEntryEnd"] || ""),
+    peAllowDirection,
+    peMaxTrades: Math.max(0, Math.floor(num2(x["peMaxTrades"], 0))),
+    peTrapMode: x["peTrapMode"] === "trap" ? "trap" : x["peTrapMode"] === "both" ? "both" : "",
     minRisk: num2(x["minRiskPts"], 4),
     maxRisk: num2(x["maxRiskPts"], 28),
     slPad: num2(x["slPadPts"], 2),
     minConfirmBody: num2(x["minConfirmBody"], 0),
     bounceOrPierceMult: Math.max(0, num2(x["bounceOrPierceMult"], 0)),
-    bounceOrPierceCap: Math.max(0, num2(x["bounceOrPierceCap"], 0))
+    bounceOrPierceCap: Math.max(0, num2(x["bounceOrPierceCap"], 0)),
+    fadeBarEntry: x["fadeBarEntry"] === true,
+    fadeBarTime: String(x["fadeBarTime"] || "09:50"),
+    fadeBarLo: num2(x["fadeBarLo"], 0.4),
+    fadeBarHi: num2(x["fadeBarHi"], 0.6),
+    fadeBarMinStopPts: num2(x["fadeBarMinStopPts"], 12),
+    fadeBarMidDir: String(x["fadeBarMidDir"] || "").toUpperCase() === "BUY"
+      ? "BUY"
+      : String(x["fadeBarMidDir"] || "").toUpperCase() === "SELL"
+        ? "SELL"
+        : "",
+    fadeConfirmNext: x["fadeConfirmNext"] === true,
+    fadeCeMaxPreNet: x["fadeCeMaxPreNet"] == null ? null : num2(x["fadeCeMaxPreNet"], 0),
+    fadePeMaxBody: x["fadePeMaxBody"] == null ? null : num2(x["fadePeMaxBody"], 0),
+    fadePeMaxLowerWick: x["fadePeMaxLowerWick"] == null ? null : num2(x["fadePeMaxLowerWick"], 0),
+    fadeSkipBreakout: x["fadeSkipBreakout"] === true,
+    fadeSkipBreakdown: x["fadeSkipBreakdown"] === true,
+    optionOnlyExit: x["optionOnlyExit"] === true
   };
+}
+
+function fadeQualityBlock(extras, fadeDir, candle, dayBars) {
+  const pre = dayBars.filter((b) => {
+    const t = extractHhMm(b.date);
+    return t >= "09:15" && t <= "09:45";
+  });
+  const fadeRng = Math.max(candle.high - candle.low, 1e-9);
+  const bodyPct = Math.abs(candle.close - candle.open) / fadeRng;
+  const dnWick = Math.min(candle.open, candle.close) - candle.low;
+  const hod = pre.length ? Math.max(...pre.map((b) => b.high)) : Number.POSITIVE_INFINITY;
+  const lod = pre.length ? Math.min(...pre.map((b) => b.low)) : Number.NEGATIVE_INFINITY;
+  const preNet = pre.length ? pre[pre.length - 1].close - pre[0].open : 0;
+  if (fadeDir === 1) {
+    if (extras.fadeCeMaxPreNet != null && preNet > extras.fadeCeMaxPreNet) {
+      return `Fade skip CE — morning already up ${preNet.toFixed(0)}`;
+    }
+    if (extras.fadeSkipBreakdown && candle.close < lod) {
+      return "Fade skip CE — opening-range breakdown";
+    }
+  }
+  if (fadeDir === -1) {
+    if (extras.fadeSkipBreakout && candle.close > hod) {
+      return "Fade skip PE — opening-range breakout";
+    }
+    if (extras.fadePeMaxBody != null && bodyPct >= extras.fadePeMaxBody) {
+      return "Fade skip PE — strong bull bar";
+    }
+    if (extras.fadePeMaxLowerWick != null && dnWick / fadeRng >= extras.fadePeMaxLowerWick) {
+      return "Fade skip PE — hammer";
+    }
+  }
+  return "";
+}
+function trapActiveSession(time, settings, extras) {
+  const peStart = extras.peEntryStart || "";
+  const peEnd = extras.peEntryEnd || "";
+  if (peStart && peEnd && time >= peStart && time <= peEnd) {
+    return {
+      id: "pe",
+      start: peStart,
+      end: peEnd,
+      allow: extras.peAllowDirection || "SELL"
+    };
+  }
+  const cut = extras.sessionCutTime || settings.entryTimeEnd;
+  if (time >= settings.entryTimeStart && (!cut || time < cut)) {
+    return {
+      id: "am",
+      start: settings.entryTimeStart,
+      end: cut || settings.entryTimeEnd,
+      allow: extras.allowDirection || ""
+    };
+  }
+  return null;
 }
 function morningOrWidth(dayBars, orEnd) {
   let hi = -Infinity;
@@ -4707,6 +4812,12 @@ function runSrTrapConfirm(ctx, state, settings) {
     state.tradesToday = 0;
     state.dayStopped = false;
     state.pending = null;
+    state.peTradesToday = 0;
+    state.fadeDone = false;
+  }
+  const sess = trapActiveSession(time, settings, extras);
+  if (state.pending && extras.sessionCutTime && time >= extras.sessionCutTime && state.pending.session !== "pe") {
+    state.pending = null;
   }
   const wait6 = (reason, analysis = {}) => ({
     action: "WAITING",
@@ -4726,7 +4837,9 @@ function runSrTrapConfirm(ctx, state, settings) {
     reason,
     analysis: { strategy: "sr-trap-confirm", ...analysis }
   });
-  if (state.dayStopped) {
+  const peMax = extras.peMaxTrades || 0;
+  const peOpen = sess && sess.id === "pe" && peMax > 0 && (state.peTradesToday || 0) < peMax;
+  if (state.dayStopped && !peOpen) {
     const rs = state.dayNetOptionRs || 0;
     const netLabel =
       settings.dayProfitLockRs > 0 || settings.dayStopRs > 0
@@ -4734,7 +4847,11 @@ function runSrTrapConfirm(ctx, state, settings) {
         : `${state.dayNetPts.toFixed(1)} pts`;
     return skip(`Day stopped (net ${netLabel})`);
   }
-  if (settings.maxTradesPerDay > 0 && state.tradesToday >= settings.maxTradesPerDay) {
+  if (peOpen) {
+    if ((state.peTradesToday || 0) >= peMax) {
+      return skip(`PE session filled (${state.peTradesToday}/${peMax})`);
+    }
+  } else if (settings.maxTradesPerDay > 0 && state.tradesToday >= settings.maxTradesPerDay) {
     return skip(
       `Max trades per day reached (${state.tradesToday}/${settings.maxTradesPerDay})`
     );
@@ -4744,11 +4861,109 @@ function runSrTrapConfirm(ctx, state, settings) {
   if (i < extras.swingLb) {
     return wait6("Warming swing lookback");
   }
+  const fadeBook = extras.fadeBarEntry && sess && sess.id !== "pe";
+  const fadeTime = extras.fadeBarTime || "09:50";
+  const fadeEnter = (fadeDir, fadePos, fill, stopFade, reason) => {
+    const riskFade = Math.max(Math.abs(fill - stopFade), 1);
+    const rrFade = settings.targetRMultiple > 0 ? settings.targetRMultiple : 3.5;
+    const targetFade = fadeDir === 1 ? fill + riskFade * rrFade : fill - riskFade * rrFade;
+    state.pending = null;
+    state.fadeDone = true;
+    return {
+      action: fadeDir === 1 ? "BUY" : "SELL",
+      entryPrice: fill,
+      stopLoss: stopFade,
+      target: targetFade,
+      riskRewardRatio: rrFade,
+      reason,
+      analysis: {
+        strategy: "sr-trap-confirm",
+        setup: "fade_bar",
+        fadePos,
+        risk: riskFade,
+        rr: rrFade
+      }
+    };
+  };
+  if (fadeBook && state.pending && state.pending.fade) {
+    if (time <= fadeTime) {
+      return wait6("Fade confirm wait");
+    }
+    const p = state.pending;
+    state.pending = null;
+    state.fadeDone = true;
+    const ok = p.dir === 1 ? candle.close > p.signalClose : candle.close < p.signalClose;
+    if (!ok) {
+      return wait6(`Fade confirm failed ${p.dir === 1 ? "CE" : "PE"}`);
+    }
+    return fadeEnter(
+      p.dir,
+      p.fadePos,
+      candle.close,
+      p.stopFade,
+      `Fade-bar ${fadeTime} ${p.dir === 1 ? "CE" : "PE"} pos${Number(p.fadePos).toFixed(2)} confirm ${time}`,
+    );
+  }
+  if (fadeBook && time === fadeTime && !state.fadeDone) {
+    const fadeRng = Math.max(candle.high - candle.low, 1e-9);
+    const fadePos = (candle.close - candle.low) / fadeRng;
+    const fadeLo = extras.fadeBarLo != null ? extras.fadeBarLo : 0.4;
+    const fadeHi = extras.fadeBarHi != null ? extras.fadeBarHi : 0.6;
+    let fadeDir = 0;
+    if (fadePos <= fadeLo) fadeDir = 1;
+    else if (fadePos >= fadeHi) fadeDir = -1;
+    else if (extras.fadeBarMidDir === "BUY") fadeDir = 1;
+    else if (extras.fadeBarMidDir === "SELL") fadeDir = -1;
+    if (fadeDir && !(sess.allow === "SELL" && fadeDir === 1) && !(sess.allow === "BUY" && fadeDir === -1)) {
+      const blocked = fadeQualityBlock(extras, fadeDir, candle, dayBars);
+      if (blocked) {
+        state.fadeDone = true;
+        state.pending = null;
+        return wait6(blocked);
+      }
+      const fill = candle.close;
+      const minStop = extras.fadeBarMinStopPts > 0 ? extras.fadeBarMinStopPts : 12;
+      const rawStop = fadeDir === 1 ? candle.low - extras.slPad : candle.high + extras.slPad;
+      const stopFade = fadeDir === 1
+        ? Math.min(rawStop, fill - minStop)
+        : Math.max(rawStop, fill + minStop);
+      if (extras.fadeConfirmNext) {
+        state.pending = {
+          fade: true,
+          dir: fadeDir,
+          fadePos,
+          signalClose: fill,
+          stopFade,
+        };
+        return wait6(`Fade ${fadeDir === 1 ? "CE" : "PE"} pos${fadePos.toFixed(2)} — wait confirm`);
+      }
+      return fadeEnter(
+        fadeDir,
+        fadePos,
+        fill,
+        stopFade,
+        `Fade-bar ${time} ${fadeDir === 1 ? "CE" : "PE"} pos${fadePos.toFixed(2)}`,
+      );
+    }
+    state.fadeDone = true;
+    state.pending = null;
+    return wait6(`Fade mid-skip pos${fadePos.toFixed(2)}`);
+  }
+  if (fadeBook) {
+    return wait6(state.fadeDone ? "Fade-only desk" : "Waiting fade bar");
+  }
   if (state.pending) {
     const p = state.pending;
     state.pending = null;
-    if (time < settings.entryTimeStart || time > settings.entryTimeEnd) {
+    const confirmSess = sess || trapActiveSession(time, settings, extras);
+    if (!confirmSess || time < confirmSess.start || time > confirmSess.end) {
       return wait6("Confirm outside entry window");
+    }
+    if (confirmSess.allow === "SELL" && p.dir === 1) {
+      return wait6("CE blocked — PE-only desk");
+    }
+    if (confirmSess.allow === "BUY" && p.dir === -1) {
+      return wait6("PE blocked — CE-only desk");
     }
     const body = Math.abs(candle.close - candle.open);
     const bullOk = p.dir === 1 && candle.close > candle.open && candle.close > p.signalClose;
@@ -4770,6 +4985,9 @@ function runSrTrapConfirm(ctx, state, settings) {
     }
     const rr = settings.targetRMultiple > 0 ? settings.targetRMultiple : 3.5;
     const target = p.dir === 1 ? fill + risk2 * rr : fill - risk2 * rr;
+    if (confirmSess.id === "pe") {
+      state.peTradesToday = (state.peTradesToday || 0) + 1;
+    }
     return {
       action: p.dir === 1 ? "BUY" : "SELL",
       entryPrice: fill,
@@ -4785,11 +5003,17 @@ function runSrTrapConfirm(ctx, state, settings) {
       }
     };
   }
-  if (time < settings.entryTimeStart) {
-    return wait6(`Before entry window ${settings.entryTimeStart}`);
-  }
-  if (time > settings.entryTimeEnd) {
-    return skip(`After entry window ${settings.entryTimeEnd}`);
+  if (!sess) {
+    if (extras.peEntryEnd && time > extras.peEntryEnd) {
+      return skip(`After entry window ${extras.peEntryEnd}`);
+    }
+    if (time < settings.entryTimeStart) {
+      return wait6(`Before entry window ${settings.entryTimeStart}`);
+    }
+    if (extras.sessionCutTime && time >= extras.sessionCutTime && !extras.peEntryStart) {
+      return skip(`After session cut ${extras.sessionCutTime}`);
+    }
+    return wait6("Outside entry window");
   }
   const closes = series.map((c) => c.close);
   const ema = emaLast2(closes, settings.emaLength);
@@ -4820,12 +5044,13 @@ function runSrTrapConfirm(ctx, state, settings) {
   const bounceSell = hh >= sh - bouncePierce && hh <= sh + bouncePierce * 2 && cc < oo && cc <= sh && (cc - ll) / rng < 0.35;
   let dir = 0;
   let stop = 0;
-  if (trapBuy || extras.mode === "both" && bounceBuy) {
+  const sessionMode = sess.id === "pe" && extras.peTrapMode ? extras.peTrapMode : extras.mode;
+  if (trapBuy || sessionMode === "both" && bounceBuy) {
     if (cc > ema) {
       dir = 1;
       stop = ll - extras.slPad;
     }
-  } else if (trapSell || extras.mode === "both" && bounceSell) {
+  } else if (trapSell || sessionMode === "both" && bounceSell) {
     if (cc < ema) {
       dir = -1;
       stop = hh + extras.slPad;
@@ -4833,6 +5058,12 @@ function runSrTrapConfirm(ctx, state, settings) {
   }
   if (!dir) {
     return wait6("No S/R trap / bounce", { sh, sl, ema });
+  }
+  if (sess.allow === "SELL" && dir === 1) {
+    return wait6("CE blocked — PE-only desk", { sh, sl, ema });
+  }
+  if (sess.allow === "BUY" && dir === -1) {
+    return wait6("PE blocked — CE-only desk", { sh, sl, ema });
   }
   const risk = Math.abs(cc - stop);
   const bank = /bank/i.test(ctx.instrumentId ?? "");
@@ -4845,7 +5076,8 @@ function runSrTrapConfirm(ctx, state, settings) {
     dir,
     stop,
     signalClose: cc,
-    barSeq: state.barSeq
+    barSeq: state.barSeq,
+    session: sess.id
   };
   return wait6(dir === 1 ? "Trap BUY armed \u2014 wait confirm" : "Trap SELL armed \u2014 wait confirm", {
     sh,
@@ -4855,6 +5087,15 @@ function runSrTrapConfirm(ctx, state, settings) {
   });
 }
 function srTrapExitLogic(candle, open, closes, settings, ctx) {
+  const extras = readTrapExtras(settings);
+  const time = extractHhMm(candle.date);
+  const entryTm = extractHhMm(open.entryTime || "");
+  if (extras.sessionCutTime && entryTm && entryTm < extras.sessionCutTime && time >= extras.sessionCutTime) {
+    return {
+      exitPrice: candle.close,
+      reason: `Session cut ${extras.sessionCutTime}`
+    };
+  }
   const { armRs, lockRs, givebackRs } = optionPeakTrailSettingsFromExtras(
     settings.extras,
     open.lotsMultiplier
@@ -4873,6 +5114,24 @@ function srTrapExitLogic(candle, open, closes, settings, ctx) {
         optionExitPremium: open.optionBarLow
       };
     }
+  }
+  const bankRs =
+    num2(settings.extras?.optionBankRs, 0) * clampTrailLots(open.lotsMultiplier);
+  if (bankRs > 0 && optionMarksKnown && open.optionPeakMfeRs >= bankRs) {
+    const takePrem = roundOptionPremiumTick(
+      open.optionEntryPremium + bankRs / open.optionLotUnits
+    );
+    return {
+      exitPrice: candle.close,
+      reason: `Option bank \u20B9${Math.round(bankRs)}`,
+      optionExitPremium: takePrem
+    };
+  }
+  if (extras.optionOnlyExit && optionMarksKnown) {
+    if (time >= (settings.exitTime || "15:15")) {
+      return { exitPrice: candle.close, reason: "EOD / session exit" };
+    }
+    return null;
   }
   const armedIndex = armPeakTrailFloor(candle, open, settings, ctx.instrumentId ?? "");
   const cutoff = applySlConfirmCutoff(candle, open, settings, ctx.instrumentId ?? "");

@@ -9,10 +9,12 @@ Runs on the Order-API droplet. **Does not change** `/api/kite/*` handlers.
 3. **Crude LIVE_CRUDE_GREEN** — after NSE close (16:00–21:00, gate 15:30)
 
 ### Capital from UI
-- Send `capital` / `capitalRs` on Start → server maps to `niftyLots` / `bankLots` / `crudeLots`
-- One-leg desk: same capital rotates across books (only one open at a time)
-- Explicit lot fields still override when provided
-- ₹12k+ → 1/1/1 · ₹75k+ → 2/2/2
+- Send `capital` / `capitalRs` on Start → server maps to `niftyLots` / `bankLots`
+- ₹40k → Nifty 1×2 trades · Bank 2×1 trade
+- ₹80k → Nifty 2×2 · Bank 2×1
+- ₹1.2L → Nifty 3×2 · Bank 3×1
+- ₹2L → Nifty 5×2 · Bank 5×1
+- Then `floor(capital / ₹40k)` both books (cap 10). Stop→Start to apply.
 
 ### Paper ≡ Live
 - Reject estimated/synthetic premiums  

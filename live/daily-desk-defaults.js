@@ -1,19 +1,18 @@
 /**
  * Daily desk DNA — Autobot multi-strategy Paper≡Live.
  *
- * 1) Nifty Trap (primary)
- * 2) Bank Trap — only AFTER Nifty day net is green
- * 3) Crude OFF (45d net red)
+ * 1) 09:50 Nifty fade-bar + Bank own trap (Bank not parked after Nifty)
+ * 2) Flatten at 14:15 — no afternoon PE
+ * 3) Crude OFF
  *
- * ₹40k → 1 lot Nifty + 1 lot Bank. ₹80k → 2+2. ₹1.2L → 3+3.
- * Trade count stays Nifty 2 / Bank 1. Lock +₹1,000. Protect +₹500. Floor ₹400.
+ * ₹40k → Nifty 1 lot (2 trades) · Bank 2 lots (1 trade).
  *
- * Capital: UI `capitalRs` / `capital` → floor(capital / ₹40k), same lots both books.
+ * Capital: UI `capitalRs` / `capital` on Start. Server does not fetch Kite cash.
  * Stop→Start required to apply a new capital.
  */
 
-const APP_VERSION = '1.3.126';
-const APP_BUILD = '2026.08.15-lot40k-floor400';
+const APP_VERSION = '1.3.136';
+const APP_BUILD = '2026.08.16-lot-ladder';
 const { LIVE_GREEN_DNA } = require('./dna-live-green');
 const { LIVE_CRUDE_GREEN_DNA } = require('./dna-live-crude-green');
 
@@ -38,7 +37,10 @@ function normalizeCrudeStrategy(raw) {
 
 /** Research desk lock band (option ₹). */
 const DAY_PROFIT_LOCK_RS = LIVE_GREEN_DNA.dayProfitLockRs || 1000;
-const DESK_GREEN_PROTECT_RS = LIVE_GREEN_DNA.liveOps.deskGreenProtectRs || 500;
+const DESK_GREEN_PROTECT_RS =
+  LIVE_GREEN_DNA.liveOps.deskGreenProtectRs != null
+    ? Number(LIVE_GREEN_DNA.liveOps.deskGreenProtectRs) || 0
+    : 0;
 const STRICT_DAY_STOP_RS =
   LIVE_GREEN_DNA.strictDayStopRs != null ? Number(LIVE_GREEN_DNA.strictDayStopRs) : 0;
 
@@ -48,35 +50,47 @@ const CRUDE_RS_PER_POINT = 10;
 
 /** Hard cap — one-leg desk; raise only with intentional risk review. */
 const MAX_DESK_LOTS = 10;
-/** UI capital per shared desk lot (Nifty lots = Bank lots). */
+/** UI capital per Nifty lot. Bank is 2 lots on the ₹40k band, then matches Nifty. */
 const CAPITAL_RS_PER_LOT = 40000;
+const BANK_BASE_LOTS = 2;
+const BANK_MATCH_NIFTY_FROM_RS = 80000;
 
 /**
- * Map UI capital → one shared desk lot size (Nifty = Bank).
- *   ₹40k  → 1 lot each · Nifty 2 trades · Bank 1 trade
- *   ₹80k  → 2 lots each · same 2 + 1
- *   ₹1.2L → 3 lots each · same 2 + 1
- * Below ₹40k still 1 lot. Cap 10 lots (₹4L).
+ * Map UI capital → per-book lots. 1 Nifty lot per ₹40k.
+ *   ₹40k  → Nifty 1 / 2 trades · Bank 2 / 1 trade
+ *   ₹80k  → Nifty 2 / 2 trades · Bank 2 / 1 trade
+ *   ₹1.2L → Nifty 3 / 2 trades · Bank 3 / 1 trade
+ *   ₹1.6L → Nifty 4 / 2 trades · Bank 4 / 1 trade
+ *   ₹2L   → Nifty 5 / 2 trades · Bank 5 / 1 trade
+ * Below ₹40k still the ₹40k band. Cap 10 lots.
  */
-function deskLotsFromCapitalRs(capitalRs) {
+function bookLotsFromCapitalRs(capitalRs) {
   const c = Math.max(0, Number(capitalRs) || 0);
   if (!(c > 0)) return null;
-  return Math.min(MAX_DESK_LOTS, Math.max(1, Math.floor(c / CAPITAL_RS_PER_LOT)));
+  const niftyLots = Math.min(MAX_DESK_LOTS, Math.max(1, Math.floor(c / CAPITAL_RS_PER_LOT)));
+  const bankLots = Math.min(
+    MAX_DESK_LOTS,
+    c < BANK_MATCH_NIFTY_FROM_RS ? BANK_BASE_LOTS : niftyLots,
+  );
+  return { niftyLots, bankLots, crudeLots: niftyLots };
 }
 
-/** @deprecated use deskLotsFromCapitalRs — kept for callers expecting {nifty,bank,crude} */
+/** Nifty lot count only — Bank can differ at ₹40k. */
+function deskLotsFromCapitalRs(capitalRs) {
+  const books = bookLotsFromCapitalRs(capitalRs);
+  return books ? books.niftyLots : null;
+}
+
 function lotsFromCapitalRs(capitalRs) {
-  const n = deskLotsFromCapitalRs(capitalRs);
-  if (n == null) return null;
-  return { niftyLots: n, bankLots: n, crudeLots: n };
+  return bookLotsFromCapitalRs(capitalRs);
 }
 
 const DAILY_3K_PRESET = {
   id: 'daily-1k-40k',
-  label: '₹1k @ ₹40k · Nifty→Bank · protect ₹500',
+  label: '₹1k @ ₹40k · 09:50 fade-bar · bank ₹500',
   capitalRs: LIVE_GREEN_DNA.defaultCapitalRs || 40000,
   niftyLots: 1,
-  bankLots: 1,
+  bankLots: 2,
   crudeLots: 1,
   enableNifty: true,
   enableBank: true,
@@ -91,9 +105,9 @@ const DAILY_3K_PRESET = {
   strictDayStop: false,
   crudeAfterIndexClose: true,
   paperLivePath: true,
-  bankOnlyAfterNifty: true,
+  bankOnlyAfterNifty: false,
   researchNote:
-    '₹40k→1 lot both books · ₹80k→2 · ₹1.2L→3 · Nifty 2 + Bank 1 · floor ₹400 · Crude off',
+    '09:50 Nifty fade · Bank trap prem ≤ ₹400 · no afternoon PE',
   dnaId: LIVE_GREEN_DNA.id,
 };
 
@@ -107,10 +121,11 @@ function rsPerPointForInstrument(instrumentId) {
 
 function deskRiskLots(config) {
   if (!config) return 1;
-  if (config.enableBank && !config.enableNifty) {
-    return Math.max(1, Math.floor(Number(config.bankLots)) || 1);
-  }
-  return Math.max(1, Math.floor(Number(config.niftyLots)) || 1);
+  const nifty = Math.max(1, Math.floor(Number(config.niftyLots)) || 1);
+  const bank = Math.max(1, Math.floor(Number(config.bankLots)) || 1);
+  if (config.enableBank && !config.enableNifty) return bank;
+  if (config.enableNifty && !config.enableBank) return nifty;
+  return Math.max(nifty, bank);
 }
 
 function profitLockMoneyRs(lots) {
@@ -175,13 +190,19 @@ function riskStatusLabels(config) {
     config?.deskGreenProtectRs != null
       ? Number(config.deskGreenProtectRs)
       : DESK_GREEN_PROTECT_RS;
-  if (protect > 0) {
+  if (LIVE_GREEN_DNA.liveOps.deskHaltAfterRed) {
+    parts.push('halt after first (win or lose)');
+  } else if (protect > 0 && protect <= 1) {
+    parts.push('halt after first green');
+  } else if (protect > 0) {
     parts.push(`protect +₹${(protect * lots).toLocaleString('en-IN')} (50%)`);
   }
   if (config?.bankOnlyAfterNiftyGreen) {
     parts.push('Bank after Nifty green');
-  } else if (config?.bankOnlyAfterNifty !== false) {
-    parts.push('Bank after Nifty');
+  } else if (config?.bankOnlyAfterNifty === true) {
+    parts.push('Bank after Nifty (repair only)');
+  } else {
+    parts.push('Nifty+Bank same bar');
   }
   if (config?.paperLivePath !== false) {
     parts.push('Paper≡Live');
@@ -191,6 +212,13 @@ function riskStatusLabels(config) {
       ? Math.max(0, Math.floor(Number(config.deskMaxTradesDay)) || 0)
       : LIVE_GREEN_DNA.liveOps.deskMaxTradesDay || 0;
   if (maxT > 0) parts.push(`max ${maxT} trades`);
+  const cut = LIVE_GREEN_DNA.trap.sessionCutTime;
+  const pe = LIVE_GREEN_DNA.trap.peSession;
+  if (cut && pe && pe.enabled === true) {
+    parts.push(`Friday till ${cut} then PE ${pe.entryTimeStart}–${pe.entryTimeEnd}`);
+  } else if (cut) {
+    parts.push(`flatten ${cut} · no afternoon PE`);
+  }
   return parts;
 }
 
@@ -201,34 +229,46 @@ function parseLotCount(raw) {
 }
 
 /**
- * One desk lot for Nifty + Bank + Crude.
- * 1) capitalRs/capital wins (UI capital change must resize ALL books)
- * 2) else shared deskLots/lots/niftyLots/bankLots (first present)
- * 3) else preset
- * Crude never keeps a private crudeLots that differs from the desk.
+ * Per-book lots.
+ * 1) capitalRs/capital wins (UI capital change resizes Nifty and Bank)
+ * 2) else explicit niftyLots / bankLots / deskLots
+ * 3) else preset (₹40k → Nifty 1 · Bank 2)
  */
-function resolveDeskLots(config = {}, preset = DAILY_3K_PRESET) {
+function resolveBookLots(config = {}, preset = DAILY_3K_PRESET) {
   const capitalRaw = config.capitalRs != null ? config.capitalRs : config.capital;
-  const fromCap = deskLotsFromCapitalRs(capitalRaw);
-  if (fromCap != null) return fromCap;
-  return (
+  const fromCap = bookLotsFromCapitalRs(capitalRaw);
+  if (fromCap) return fromCap;
+  const niftyLots =
+    parseLotCount(config.niftyLots) ||
     parseLotCount(config.deskLots) ||
     parseLotCount(config.lots) ||
-    parseLotCount(config.niftyLots) ||
-    parseLotCount(config.bankLots) ||
-    parseLotCount(config.crudeLots) ||
     preset.niftyLots ||
-    1
-  );
+    1;
+  const bankLots =
+    parseLotCount(config.bankLots) ||
+    parseLotCount(config.deskLots) ||
+    parseLotCount(config.lots) ||
+    preset.bankLots ||
+    BANK_BASE_LOTS;
+  const crudeLots =
+    parseLotCount(config.crudeLots) ||
+    parseLotCount(config.deskLots) ||
+    niftyLots;
+  return { niftyLots, bankLots, crudeLots };
+}
+
+function resolveDeskLots(config = {}, preset = DAILY_3K_PRESET) {
+  return resolveBookLots(config, preset).niftyLots;
 }
 
 function normalizeStartConfig(config = {}) {
   const preset = DAILY_3K_PRESET;
   const capitalRaw = config.capitalRs != null ? config.capitalRs : config.capital;
-  const deskLots = resolveDeskLots(config, preset);
-  const niftyLots = deskLots;
-  const bankLots = deskLots;
-  const crudeLots = deskLots;
+  const books = resolveBookLots(config, preset);
+  const niftyLots = books.niftyLots;
+  const bankLots = books.bankLots;
+  const crudeLots = books.crudeLots;
+  const deskLots = niftyLots;
 
   return {
     enableNifty: true,
@@ -274,7 +314,7 @@ function normalizeStartConfig(config = {}) {
     bankOnlyAfterNifty:
       config.bankOnlyAfterNifty != null
         ? !!config.bankOnlyAfterNifty
-        : LIVE_GREEN_DNA.liveOps.bankOnlyAfterNifty !== false,
+        : LIVE_GREEN_DNA.liveOps.bankOnlyAfterNifty === true,
     bankOnlyAfterNiftyGreen:
       config.bankOnlyAfterNiftyGreen != null
         ? !!config.bankOnlyAfterNiftyGreen
@@ -286,14 +326,22 @@ function normalizeStartConfig(config = {}) {
     deskGreenProtectRs:
       config.deskGreenProtectRs != null
         ? Math.max(0, Number(config.deskGreenProtectRs) || 0)
-        : LIVE_GREEN_DNA.liveOps.deskGreenProtectRs || 500,
+        : LIVE_GREEN_DNA.liveOps.deskGreenProtectRs != null
+          ? Number(LIVE_GREEN_DNA.liveOps.deskGreenProtectRs) || 0
+          : 0,
+    deskHaltAfterRed:
+      config.deskHaltAfterRed != null
+        ? !!config.deskHaltAfterRed
+        : LIVE_GREEN_DNA.liveOps.deskHaltAfterRed === true,
   };
 }
 
 module.exports = {
   APP_VERSION,
   APP_BUILD,
+  bookLotsFromCapitalRs,
   deskLotsFromCapitalRs,
+  resolveBookLots,
   resolveDeskLots,
   MAX_DESK_LOTS,
   CAPITAL_RS_PER_LOT,

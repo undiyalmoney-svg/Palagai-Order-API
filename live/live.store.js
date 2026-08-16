@@ -135,8 +135,9 @@ function statusPayload(session) {
       crudeLots: cfg.crudeLots || 1,
       crudeStrategy: cfg.crudeStrategy || 'live-crude-green',
       crudeAfterIndexClose: cfg.crudeAfterIndexClose !== false,
-      bankOnlyAfterNifty: cfg.bankOnlyAfterNifty !== false,
-      label: '₹40k → 1 lot each · Nifty 2 + Bank 1 · floor ₹400',
+      bankOnlyAfterNifty: cfg.bankOnlyAfterNifty === true,
+      label: '₹40k → Nifty 1×2 · Bank 2×1 · send capitalRs',
+      capitalRs: cfg.capitalRs || null,
     },
     risk: {
       dayProfitLockRsBase: DAY_PROFIT_LOCK_RS,
@@ -148,7 +149,7 @@ function statusPayload(session) {
       labels: riskStatusLabels(cfg),
       checkboxHint: `₹${DAY_PROFIT_LOCK_RS.toLocaleString('en-IN')} × lots (1 lot @ ₹40k → ₹1,000)`,
       capitalHint:
-        'Lots = capital/₹40k (same Nifty+Bank). Nifty 2 + Bank 1. Floor ₹400. Stop→Start to apply.',
+        'Send capitalRs on Start. ₹40k N1/B2 · ₹80k N2/B2 · ₹1.2L N3/B3. Nifty 2 trades, Bank 1. Stop→Start.',
     },
     version: APP_VERSION,
     appBuild: APP_BUILD,
@@ -310,13 +311,12 @@ async function start(userId, config) {
     );
   }
   session.message =
-    `₹1k desk · N${session.config.enableNifty ? 1 : 0}/B${session.config.enableBank ? 1 : 0}/C${session.config.enableCrude ? 1 : 0}` +
-    ` · Crude after NSE · Bank after Nifty` +
+    `₹1k desk · 09:50 fade · no PE · N${session.config.enableNifty ? 1 : 0}/B${session.config.enableBank ? 1 : 0}/C${session.config.enableCrude ? 1 : 0}` +
     (riskBits.length ? ` · ${riskBits.join(' · ')}` : '');
   pushEvent(
     session,
     'START',
-    `Daily desk · books N${session.config.enableNifty ? 1 : 0}/B${session.config.enableBank ? 1 : 0}/C${session.config.enableCrude ? 1 : 0} · deskLots=${session.config.deskLots || session.config.niftyLots || 1} · bank=${session.config.bankStrategy} · crude=${session.config.crudeStrategy} · real=${session.config.realOrders}` +
+    `Daily desk · books N${session.config.enableNifty ? 1 : 0}/B${session.config.enableBank ? 1 : 0}/C${session.config.enableCrude ? 1 : 0} · N${session.config.niftyLots || 1}lot×2 / B${session.config.bankLots || 1}lot×1 · bank=${session.config.bankStrategy} · crude=${session.config.crudeStrategy} · real=${session.config.realOrders}` +
       (session.config.capitalRs ? ` · capital₹${session.config.capitalRs}` : '') +
       (riskBits.length ? ` · ${riskBits.join(' · ')}` : ''),
   );
