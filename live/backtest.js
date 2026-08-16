@@ -124,13 +124,12 @@ function trapInitOverrides(cfg, instrumentId) {
   const maxTrades = bank
     ? LIVE_GREEN_DNA.trap.bankMaxTradesPerDay || LIVE_GREEN_DNA.trap.maxTradesPerDay
     : LIVE_GREEN_DNA.trap.maxTradesPerDay;
-  const cut = LIVE_GREEN_DNA.trap.sessionCutTime || LIVE_GREEN_DNA.trap.entryTimeEnd;
   return {
     ...risk,
     maxTradesPerDay: maxTrades,
     targetRMultiple: LIVE_GREEN_DNA.trap.targetRMultiple,
     entryTimeStart: LIVE_GREEN_DNA.trap.entryTimeStart,
-    entryTimeEnd: bank ? cut : LIVE_GREEN_DNA.trap.entryTimeEnd,
+    entryTimeEnd: LIVE_GREEN_DNA.trap.entryTimeEnd,
     extras,
   };
 }

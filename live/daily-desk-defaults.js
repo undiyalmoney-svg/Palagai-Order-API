@@ -1,18 +1,12 @@
 /**
- * Daily desk DNA — Autobot multi-strategy Paper≡Live.
+ * Daily desk — Friday pivot S/R (v8) + UI capital lots.
+ * Fade-bar OFF. Crude OFF unless toggled.
  *
- * 1) 09:50 Nifty fade-bar + Bank own trap (Bank not parked after Nifty)
- * 2) Flatten at 14:15 — no afternoon PE
- * 3) Crude OFF
- *
- * ₹40k → Nifty 1 lot (2 trades) · Bank 2 lots (1 trade).
- *
- * Capital: UI `capitalRs` / `capital` on Start. Server does not fetch Kite cash.
- * Stop→Start required to apply a new capital.
+ * Capital: UI `capitalRs` / `capital` on Start. Stop→Start to apply.
  */
 
-const APP_VERSION = '1.3.136';
-const APP_BUILD = '2026.08.16-lot-ladder';
+const APP_VERSION = '1.3.137';
+const APP_BUILD = '2026.08.16-pivot-sr-lots';
 const { LIVE_GREEN_DNA } = require('./dna-live-green');
 const { LIVE_CRUDE_GREEN_DNA } = require('./dna-live-crude-green');
 
@@ -86,8 +80,8 @@ function lotsFromCapitalRs(capitalRs) {
 }
 
 const DAILY_3K_PRESET = {
-  id: 'daily-1k-40k',
-  label: '₹1k @ ₹40k · 09:50 fade-bar · bank ₹500',
+  id: 'daily-index-core',
+  label: 'Pivot S/R · lots from UI capital',
   capitalRs: LIVE_GREEN_DNA.defaultCapitalRs || 40000,
   niftyLots: 1,
   bankLots: 2,
@@ -101,13 +95,13 @@ const DAILY_3K_PRESET = {
   niftyStrategy: 'trap',
   bankStrategy: 'trap',
   crudeStrategy: 'live-crude-green',
-  dayProfitLock: true,
-  strictDayStop: false,
+  dayProfitLock: LIVE_GREEN_DNA.dayProfitLock !== false,
+  strictDayStop: LIVE_GREEN_DNA.strictDayStop === true,
   crudeAfterIndexClose: true,
   paperLivePath: true,
   bankOnlyAfterNifty: false,
   researchNote:
-    '09:50 Nifty fade · Bank trap prem ≤ ₹400 · no afternoon PE',
+    'Pivot S/R · Nifty 2 / Bank 1 · lots from capitalRs',
   dnaId: LIVE_GREEN_DNA.id,
 };
 

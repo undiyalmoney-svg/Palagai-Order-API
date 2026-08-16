@@ -1,6 +1,6 @@
 {
   "name": "palagai-order-api",
-  "version": "1.3.136",
+  "version": "1.3.137",
   "description": "Fixed-IP Kite order proxy for Palagai (DigitalOcean Droplet) + additive Server Live control",
   "main": "server.js",
   "scripts": {

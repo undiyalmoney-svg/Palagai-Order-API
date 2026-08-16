@@ -105,13 +105,12 @@ function trapInitOverrides(config, instrumentId) {
   const maxTrades = bank
     ? LIVE_GREEN_DNA.trap.bankMaxTradesPerDay || LIVE_GREEN_DNA.trap.maxTradesPerDay
     : LIVE_GREEN_DNA.trap.maxTradesPerDay;
-  const cut = LIVE_GREEN_DNA.trap.sessionCutTime || LIVE_GREEN_DNA.trap.entryTimeEnd;
   return {
     ...risk,
     maxTradesPerDay: maxTrades,
     targetRMultiple: LIVE_GREEN_DNA.trap.targetRMultiple,
     entryTimeStart: LIVE_GREEN_DNA.trap.entryTimeStart,
-    entryTimeEnd: bank ? cut : LIVE_GREEN_DNA.trap.entryTimeEnd,
+    entryTimeEnd: LIVE_GREEN_DNA.trap.entryTimeEnd,
     extras,
   };
 }
@@ -347,7 +346,7 @@ class LiveWorker {
           kind: 'banknifty',
           candles: this.candles.bank,
           lots: config.bankLots || config.deskLots || 1,
-          forceClose: now >= (LIVE_GREEN_DNA.trap.sessionCutTime || '14:15'),
+          forceClose: now >= (LIVE_GREEN_DNA.trap.exitTime || '15:15'),
           enableKutty,
           kuttyAlone: !!config.kuttyAlone,
           today,
@@ -732,12 +731,12 @@ class LiveWorker {
     }
     const { date: today, hhmm: now } = istParts();
     const pe = LIVE_GREEN_DNA.trap.peSession;
-    const cut = LIVE_GREEN_DNA.trap.sessionCutTime || '14:15';
+    const cut = LIVE_GREEN_DNA.trap.sessionCutTime || '';
     const openTm = String(open.entryTime || '').match(/T(\d{2}:\d{2})/)?.[1] || now;
     const inPe =
       pe &&
-      pe.enabled !== false &&
-      openTm >= (pe.entryFillStart || pe.entryTimeStart || cut) &&
+      pe.enabled === true &&
+      openTm >= (pe.entryFillStart || pe.entryTimeStart || '') &&
       openTm <= (pe.entryTimeEnd || '14:45');
     if (inPe) {
       const peDir = String(pe.allowDirection || 'SELL').toUpperCase();
@@ -747,7 +746,7 @@ class LiveWorker {
       return open;
     }
     if (this.deskHaltReason(today)) return null;
-    if (openTm >= cut) return null;
+    if (cut && openTm >= cut) return null;
     const allowDir = String(LIVE_GREEN_DNA.trap.allowDirection || '').toUpperCase();
     if (allowDir === 'SELL' && open.direction === 'BUY') return null;
     if (allowDir === 'BUY' && open.direction === 'SELL') return null;

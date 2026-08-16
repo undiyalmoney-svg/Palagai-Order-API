@@ -35,7 +35,7 @@ const DEFAULT_LIVE_PATH = {
   /** BUY = CE, SELL = PE. Empty = both (morning). */
   allowDirection: LIVE_GREEN_DNA.trap.allowDirection || '',
   entryTimeStart: LIVE_GREEN_DNA.trap.entryTimeStart || '',
-  entryTimeEnd: LIVE_GREEN_DNA.trap.sessionCutTime || LIVE_GREEN_DNA.trap.entryTimeEnd || '',
+  entryTimeEnd: LIVE_GREEN_DNA.trap.entryTimeEnd || '',
   sessionCutTime: LIVE_GREEN_DNA.trap.sessionCutTime || '',
   peSession: LIVE_GREEN_DNA.trap.peSession || null,
 };

@@ -19,7 +19,7 @@ async function health(_req, res) {
   res.json({
     status: 'ok',
     service: 'palagai-live-control',
-    note: 'Server Live — ₹1k @ ₹40k · 09:50 fade-bar · bank ₹500',
+    note: 'Server Live — Pivot S/R · lots from UI capital',
     version: APP_VERSION,
     appBuild: APP_BUILD,
     dnaId: LIVE_GREEN_DNA.id,
@@ -32,7 +32,7 @@ async function health(_req, res) {
     crudeDna: AUTOBOT_ALLOW_CRUDE
       ? `after NSE · OR${c.minOrWidth}–${c.maxOrWidth} · ${c.entryStart}–${c.entryEnd} · SL${c.stopPts}/TP${c.targetPts} · trail ₹${c.profitLockArmRs}→₹${c.profitLockLockRs} · max${c.maxTradesDay} · first-win · no index-session overlap`
       : 'OFF — Autobot will not trade Crude',
-    trapDna: `Quality fade ${t.fadeBarTime || '09:50'} · skip continuation · N₹${t.optionBankRs} B₹${t.bankOptionBankRs} · 2 legs`,
+    trapDna: `Pivot S/R · ${t.entryTimeStart}–${t.entryTimeEnd} · max N${t.maxTradesPerDay}/B${t.bankMaxTradesPerDay} · trail ₹${t.profitLockArmRs}/₹${t.profitLockLockRs}`,
     dayProfitLockRsBase: DAY_PROFIT_LOCK_RS,
     strictDayStopRsBase: STRICT_DAY_STOP_RS,
     liveOps: { ...ops, ...LIVE_CRUDE_GREEN_DNA.liveOps },
@@ -40,7 +40,7 @@ async function health(_req, res) {
       index: LIVE_GREEN_DNA.research,
       crude: LIVE_CRUDE_GREEN_DNA.research,
       greenPath:
-        'Nifty fades the 09:50 bar (low close → CE, high close → PE), banks ₹540 / stand ₹350. Bank still own trap, prem ≤ ₹400. No afternoon PE.',
+        'Friday pivot S/R (v8). Fade-bar off. Lots from capitalRs. Crude off.',
     },
     defaults: DAILY_3K_PRESET,
   });
@@ -66,7 +66,7 @@ async function defaults(_req, res) {
     preset: DAILY_3K_PRESET,
     dayProfitLockRsBase: DAY_PROFIT_LOCK_RS,
     strictDayStopRsBase: STRICT_DAY_STOP_RS,
-    checkboxHint: `₹${DAY_PROFIT_LOCK_RS.toLocaleString('en-IN')} × lots (1 lot @ ₹40k → ₹1,000)`,
+    checkboxHint: `₹${DAY_PROFIT_LOCK_RS.toLocaleString('en-IN')} desk lock · lots from capitalRs`,
     /** Autobot UI should render these books (Crude is server-forced ON). */
     books: {
       nifty: true,
@@ -80,7 +80,7 @@ async function defaults(_req, res) {
       crudeStrategy: 'live-crude-green',
       crudeWindow: '16:00–21:00 IST (hard gate 15:15)',
       bankOnlyAfterNifty: LIVE_GREEN_DNA.liveOps.bankOnlyAfterNifty === true,
-      label: '₹40k → Nifty 1×2 · Bank 2×1 · send capitalRs on Start',
+      label: 'Pivot S/R · ₹40k → Nifty 1×2 · Bank 2×1 · send capitalRs',
       capitalLots: {
         per40k: 1,
         at40k: { niftyLots: 1, bankLots: 2, niftyTrades: 2, bankTrades: 1 },
