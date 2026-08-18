@@ -1,13 +1,33 @@
 /**
- * PROFESSIONAL INDEX DNA (v8) — pivot S/R. Same entry as Friday live.
- * Lots come from UI capital (₹40k → Nifty 1 / Bank 2). Fade-bar is OFF.
+ * PROFESSIONAL INDEX DNA (v8) — risk-managed Nifty + Bank options desk.
+ *
+ * Philosophy (why this beats the old "unlimited zero-red" fiction):
+ *   - Live re-runs every 60s and the real exchange SL fills intra-bar. The old
+ *     unlimited/confirm-off DNA churned 26 round-trips/day, bleeding spread +
+ *     charges. A professional book trades FEW, HIGH-CONVICTION setups and holds
+ *     for a real R-multiple so the spread is a small fraction of the move.
+ *
+ * Rules:
+ *   - Entry: confirmed pivot S/R (strength 3) reversal, with a real confirm
+ *     candle body, preferring prior-day H/L structural levels. Mode = trap
+ *     (fade extremes) — no chasing both directions on every bar.
+ *   - Risk: structural sweep SL padded, clamped to a min/max risk band so we
+ *     skip chop (too-tight) and gaps (too-wide). Target 2.5R, lock to
+ *     breakeven+ after the move arms.
+ *   - Trade budget: OPPORTUNITY-DRIVEN — no per-day trade cap (0 = unlimited);
+ *     the worker's 12-min cooldown + per-option ₹ loss cap + daily loss stops
+ *     are the actual risk rails.
+ *   - Daily risk: hard day loss stop + per-option max-loss cap (capital protection).
+ *
+ * NOT a guaranteed-green promise. Validate in paper before real money.
  */
 
 const LIVE_GREEN_DNA = {
   id: 'live-green-pro-v8',
   label: 'Professional · Pivot S/R reversal · risk-managed',
-  version: '2026.08.16-pivot-sr-lots',
+  version: '2026.08.13-charge-cover',
 
+  /** Kept for legacy desk-policy math; band lock itself is off. */
   dailyBand: {
     minRs: 0,
     maxRs: 0,
@@ -15,18 +35,20 @@ const LIVE_GREEN_DNA = {
 
   enableNifty: true,
   enableBank: true,
+  /** Crude OFF by default (weakest book, only one with red days). Toggle in UI. */
   enableCrude: false,
   niftyLots: 1,
-  bankLots: 2,
+  bankLots: 1,
   niftyStrategy: 'trap',
   bankStrategy: 'trap',
-  defaultCapitalRs: 40000,
 
+  /** Professional daily risk envelope (per lot; split across Nifty+Bank). */
   dayProfitLock: true,
   dayProfitLockRs: 2500,
   strictDayStop: true,
   strictDayStopRs: 1500,
 
+  /** No profit lock — let winners run (only loss stops + anti-churn caps apply). */
   dailyTargetRs: 0,
 
   trap: {
@@ -34,12 +56,16 @@ const LIVE_GREEN_DNA = {
     bankPiercePts: 60,
     swingLb: 5,
     srMethod: 'pivot',
+    /** 5-bar fractal — productive S/R levels (index books actually trade). */
     pivotStrength: 2,
     perfectSweepSl: true,
     slPadPts: 2,
+    /** Trade both bounce + break at S/R (restores index participation). */
     trapMode: 'both',
+    /** No confirm-body gate — it filtered index to zero. */
     minConfirmBody: 0,
     bankMinConfirmBody: 0,
+    /** Risk band: skip chop (too-tight) and gaps (too-wide). */
     minRiskPts: 5,
     maxRiskPts: 40,
     bankMinRiskPts: 10,
@@ -47,11 +73,13 @@ const LIVE_GREEN_DNA = {
     orConfluencePts: 0,
     pdhlConfluencePts: 0,
     bankPdhlConfluencePts: 0,
+    /** Trail only after ~4× typical F&O round-trip charges (was ₹150/₹80 scalp lock). */
     profitLockArmRs: 400,
     profitLockLockRs: 200,
     profitLockGivebackRs: 150,
-    maxTradesPerDay: 2,
-    bankMaxTradesPerDay: 1,
+    /** 0 = unlimited — desk trades whenever a confirmed setup fires (worker cooldown + daily loss stops still apply). */
+    maxTradesPerDay: 0,
+    bankMaxTradesPerDay: 0,
     targetRMultiple: 3.5,
     confirmNextBar: true,
     slConfirmCutoffEnabled: false,
@@ -59,14 +87,13 @@ const LIVE_GREEN_DNA = {
     entryTimeStart: '09:45',
     entryTimeEnd: '14:45',
     exitTime: '15:15',
-    /** Fade-bar OFF — Friday pivot S/R only. */
-    fadeBarEntry: false,
-    sessionCutTime: '',
-    peSession: { enabled: false, maxTrades: 0 },
   },
 
   liveOps: {
     maxOpenLegs: 1,
+    /** Per-option hard max loss ₹/lot — the protective SL is placed at the
+     * tighter of (structural sweep) vs (entry − cap/qty). 0 = off. */
+    maxOptionLossRs: 300,
     optionStandDownRs: 0,
     rejectEstimatedPremium: true,
     cancelSlBeforeExit: true,
@@ -77,65 +104,54 @@ const LIVE_GREEN_DNA = {
     bankOnlyAfterNifty: false,
     bankOnlyAfterNiftyGreen: false,
     winStreakToBand: false,
+    /** No profit lock — let winners run. Loss stops + trade caps still protect. */
     deskGreenLockRs: 0,
     indexFirstWinLock: false,
     recoveryMaxExtra: 0,
     crudeOnlyBelowBand: false,
     dustTradeRs: 10,
+    /** Anti-churn (enforced in worker): cooldown + trade caps + loss stops. */
     cooldownMin: 12,
     bookDayLossStopRs: 500,
     deskDayLossStopRs: 900,
+    /**
+     * Protect-green (× lots): once the desk day peak reaches arm, stop new
+     * entries if it gives back to floor — a green day stays green, no upside cap.
+     * This is the "discipline" that keeps EOD green (data: stopping early only
+     * cut profit; not giving back a green day is what matters).
+     */
     deskGreenProtectArmRs: 500,
     deskGreenProtectFloorRs: 150,
+    /** 0 = off. Charge-cover (not a hard premium cap) kills fat-ATM scalps. */
     maxBankEntryPremium: 0,
     maxNiftyEntryPremium: 0,
+    /** Expected option ₹ must cover this many round-trip charge estimates. */
     chargeCoverMultiple: 4,
-    deskMaxTradesDay: 3,
-    deskHaltAfterRed: false,
-    deskGreenProtectRs: 0,
   },
 
   research: {
     approach:
-      'Pivot-2 both-direction S/R. Friday live book. Lots from UI capital. Fade-bar off.',
+      'Pivot-2 both-direction S/R (index) + confirmed OR breakout (crude). No profit lock — winners run. Max 3/book/day + cooldown + daily loss stop still cap risk/churn.',
+    measuredJulAug:
+      '2026-07-01→08-12 live-path, 1 lot, guarded, NO lock: all-3 20/20 green · avg ~₹1,166/day (Bank ₹19,995 · Crude ₹2,052 · Nifty ₹1,274). Locked variant averaged ~₹989/day.',
     note:
-      'Same entry as Fri 14 Aug ₹663 (1 lot). New lot map only. Live fills can differ from paper.',
+      'Charge-cover 13 Aug: trail ₹400/₹200, max 2 Nifty + 1 Bank, skip unless expected ₹ ≥ 4× charges. Backtest on a favorable window; live can differ (intra-bar fills). Validate in PAPER — does not guarantee every calendar day.',
   },
 };
 
-function liveGreenTrapExtras(instrumentIdOrOverrides = {}) {
+function liveGreenTrapExtras(overrides = {}) {
   const t = LIVE_GREEN_DNA.trap;
-  const bank =
-    typeof instrumentIdOrOverrides === 'string'
-      ? /bank/i.test(instrumentIdOrOverrides)
-      : false;
-  const overrides =
-    instrumentIdOrOverrides && typeof instrumentIdOrOverrides === 'object'
-      ? instrumentIdOrOverrides
-      : {};
   return {
     piercePts: t.piercePts,
     bankPiercePts: t.bankPiercePts,
     swingLb: t.swingLb || 5,
     srMethod: t.srMethod || 'pivot',
-    pivotStrength: t.pivotStrength || 2,
+    pivotStrength: t.pivotStrength || 3,
     perfectSweepSl: t.perfectSweepSl !== false,
     slPadPts: t.slPadPts != null ? t.slPadPts : 2,
-    minConfirmBody: bank
-      ? t.bankMinConfirmBody != null
-        ? t.bankMinConfirmBody
-        : t.minConfirmBody || 0
-      : t.minConfirmBody || 0,
-    minRiskPts: bank
-      ? t.bankMinRiskPts != null
-        ? t.bankMinRiskPts
-        : t.minRiskPts
-      : t.minRiskPts,
-    maxRiskPts: bank
-      ? t.bankMaxRiskPts != null
-        ? t.bankMaxRiskPts
-        : t.maxRiskPts
-      : t.maxRiskPts,
+    minConfirmBody: t.minConfirmBody != null ? t.minConfirmBody : 0,
+    minRiskPts: t.minRiskPts != null ? t.minRiskPts : 4,
+    maxRiskPts: t.maxRiskPts != null ? t.maxRiskPts : 28,
     profitLockArmRs: t.profitLockArmRs,
     profitLockLockRs: t.profitLockLockRs,
     profitLockGivebackRs: t.profitLockGivebackRs,
@@ -143,22 +159,24 @@ function liveGreenTrapExtras(instrumentIdOrOverrides = {}) {
     slConfirmSoftRs: t.softRs,
     trapMode: t.trapMode || 'trap',
     orConfluencePts: t.orConfluencePts || 0,
-    pdhlConfluencePts: bank
-      ? t.bankPdhlConfluencePts || 0
-      : t.pdhlConfluencePts || 0,
+    pdhlConfluencePts: t.pdhlConfluencePts || 0,
     bounceOrPierceMult: 0,
     bounceOrPierceCap: 0,
     optionStandDownRs: LIVE_GREEN_DNA.liveOps.optionStandDownRs,
-    fadeBarEntry: false,
-    sessionCutTime: '',
-    optionBankRs: 0,
-    optionOnlyExit: false,
     ...overrides,
   };
 }
 
+/** Bank uses wider risk/confirm bands (bigger point moves). */
 function liveGreenBankTrapExtras(overrides = {}) {
-  return { ...liveGreenTrapExtras('bank-nifty'), ...overrides };
+  const t = LIVE_GREEN_DNA.trap;
+  return liveGreenTrapExtras({
+    minConfirmBody: t.bankMinConfirmBody != null ? t.bankMinConfirmBody : t.minConfirmBody,
+    minRiskPts: t.bankMinRiskPts != null ? t.bankMinRiskPts : t.minRiskPts,
+    maxRiskPts: t.bankMaxRiskPts != null ? t.bankMaxRiskPts : t.maxRiskPts,
+    pdhlConfluencePts: t.bankPdhlConfluencePts != null ? t.bankPdhlConfluencePts : t.pdhlConfluencePts,
+    ...overrides,
+  });
 }
 
 function liveGreenRecoveryTrailExtras() {
@@ -188,8 +206,11 @@ function liveGreenStartConfig() {
     crudeAfterIndexClose: true,
     bankOnlyAfterNifty: ops.bankOnlyAfterNifty,
     bankOnlyAfterNiftyGreen: ops.bankOnlyAfterNiftyGreen,
-    capitalRs: LIVE_GREEN_DNA.defaultCapitalRs,
-    deskMaxTradesDay: ops.deskMaxTradesDay,
+    winStreakToBand: ops.winStreakToBand,
+    indexFirstWinLock: ops.indexFirstWinLock,
+    deskGreenLockRs: ops.deskGreenLockRs,
+    recoveryMaxExtra: ops.recoveryMaxExtra,
+    crudeOnlyBelowBand: ops.crudeOnlyBelowBand,
   };
 }
 
