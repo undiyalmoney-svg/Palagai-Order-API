@@ -8,10 +8,9 @@ const {
   evaluateOptionPeakTrail,
   optionPeakTrailSettingsFromExtras,
   NIFTY_50_INSTRUMENT,
-  BANK_NIFTY_INSTRUMENT,
-  CRUDE_OIL_MINI_INSTRUMENT,
 } = require('./strategy-core.cjs');
 const { LIVE_GREEN_DNA, liveGreenTrapExtras } = require('./dna-live-green');
+const { evaluateChargeEntryGate } = require('./charge-entry-gate');
 const { fetchQuotes } = require('./kite-market');
 
 const TICK = 0.05;
@@ -45,11 +44,9 @@ function slOrderFields({ exchange, tradingsymbol, quantity, product, trigger }) 
   };
 }
 
-/** Map a broker option symbol back to the desk instrument id. */
+/** Map a broker option symbol back to the desk instrument id (Nifty 50 only). */
 function instrumentIdForSymbol(sym) {
   const s = String(sym || '').toUpperCase();
-  if (s.startsWith('BANKNIFTY')) return BANK_NIFTY_INSTRUMENT.id;
-  if (s.startsWith('CRUDEOIL')) return CRUDE_OIL_MINI_INSTRUMENT.id;
   if (s.startsWith('NIFTY')) return NIFTY_50_INSTRUMENT.id;
   return null;
 }
@@ -401,7 +398,6 @@ class LiveBroker {
     const lotsMult = this.lotsFor(instrumentId);
     const quantity = lotSize * lotsMult;
     const product = 'MIS';
-    const { evaluateChargeEntryGate } = require('./charge-entry-gate');
     const chargeGate = evaluateChargeEntryGate({
       instrumentId,
       entryPremium: open.optionEntryPremium,

@@ -7,7 +7,7 @@
  *   13/14 green (92.9%) · net ≈ ₹2.6k · 0 entries before 15:30
  *
  * Method: session-OR · OR width 40–60 · 16:00–21:00 · SL30/TP80
- *   trail ₹350→₹180 · max 1/day · first-win · confirm ON
+ *   trail ₹350→₹180 · max 4/day · confirm ON
  */
 
 const LIVE_CRUDE_GREEN_DNA = {
@@ -37,8 +37,8 @@ const LIVE_CRUDE_GREEN_DNA = {
     stopPts: 30,
     targetPts: 80,
     requireConfirm: true,
-    firstWinLock: true,
-    maxTradesDay: 1,
+    firstWinLock: false,
+    maxTradesDay: 4,
     minOrWidth: 40,
     maxOrWidth: 60,
     breakBufferPts: 0,
@@ -52,6 +52,8 @@ const LIVE_CRUDE_GREEN_DNA = {
     /** Hard gate — no Crude entries before this IST time (always). */
     crudeAfterIndexClose: true,
     crudeAfterIndexCloseTime: '15:15',
+    /** Crude is its own evening book — do not sit out on Nifty/Bank P&L. */
+    crudeSkipIfIndexGreen: false,
     rejectEstimatedPremium: true,
     cancelSlBeforeExit: true,
     fillLedger: true,
@@ -95,7 +97,7 @@ function liveCrudeGreenProfileOverrides() {
     defaultEnableMorning: false,
     defaultEnableEvening: true,
     dailyBandLabel:
-      'After NSE · OR40–60 · 16:00–21:00 · SL30/TP80 · trail ₹350→₹180 · max1 · first-win',
+      'After NSE · OR40–60 · 16:00–21:00 · SL30/TP80 · trail ₹350→₹180 · max4',
     profitLockArmRs: s.profitLockArmRs,
     profitLockLockRs: s.profitLockLockRs,
     profitLockGivebackRs: s.profitLockGivebackRs,

@@ -19,7 +19,7 @@ async function health(_req, res) {
   res.json({
     status: 'ok',
     service: 'palagai-live-control',
-    note: 'Server Live — Pivot S/R · lots from UI capital',
+    note: 'Server Live — Nifty 50 only · Pivot S/R trap · lots from UI · Paper≡Live',
     version: APP_VERSION,
     appBuild: APP_BUILD,
     dnaId: LIVE_GREEN_DNA.id,
@@ -28,19 +28,29 @@ async function health(_req, res) {
     bankAllowed: AUTOBOT_ALLOW_BANK,
     crudeAllowed: AUTOBOT_ALLOW_CRUDE,
     paperLivePath: true,
-    bankOnlyAfterNifty: LIVE_GREEN_DNA.liveOps.bankOnlyAfterNifty === true,
+    bankOnlyAfterNifty: !!ops.bankOnlyAfterNifty,
     crudeDna: AUTOBOT_ALLOW_CRUDE
-      ? `after NSE · OR${c.minOrWidth}–${c.maxOrWidth} · ${c.entryStart}–${c.entryEnd} · SL${c.stopPts}/TP${c.targetPts} · trail ₹${c.profitLockArmRs}→₹${c.profitLockLockRs} · max${c.maxTradesDay} · first-win · no index-session overlap`
+      ? `Professional · after NSE · OR${c.minOrWidth}–${c.maxOrWidth} · ${c.entryStart}–${c.entryEnd} · SL${c.stopPts}/TP${c.targetPts} · confirm ${c.requireConfirm ? 'ON' : 'OFF'} · trail ₹${c.profitLockArmRs}→₹${c.profitLockLockRs} · max${c.maxTradesDay || '∞'}`
       : 'OFF — Autobot will not trade Crude',
-    trapDna: `Pivot S/R · ${t.entryTimeStart}–${t.entryTimeEnd} · max N${t.maxTradesPerDay}/B${t.bankMaxTradesPerDay} · trail ₹${t.profitLockArmRs}/₹${t.profitLockLockRs}`,
+    trapDna: `Professional · Nifty 50 · Pivot${t.pivotStrength || 3} · perfectSL · ${t.trapMode || 'trap'} · pierce ${t.piercePts} · confirm≥${t.minConfirmBody || 0}pt · risk ${t.minRiskPts || 0}-${t.maxRiskPts || 0}pt · ${t.targetRMultiple || 0}R · max${t.maxTradesPerDay || '∞'} · peak ₹${t.profitLockArmRs}/${t.profitLockLockRs} · ${ops.chargeCoverMultiple || 0}× charges`,
     dayProfitLockRsBase: DAY_PROFIT_LOCK_RS,
     strictDayStopRsBase: STRICT_DAY_STOP_RS,
     liveOps: { ...ops, ...LIVE_CRUDE_GREEN_DNA.liveOps },
+    antiChurn: {
+      crudeCooldownMin: 20,
+      indexCooldownMin: 12,
+            crudeMaxTradesDay: 0,
+      indexMaxTradesDay: 0,
+      bookDayLossStopRs: '500 × lots',
+      deskDayLossStopRs: '900 × lots',
+      note: 'Loss stops scale with lots → worst-case daily loss is bounded & predictable when you expand. Guards also block 60s re-entry churn.',
+    },
     research: {
       index: LIVE_GREEN_DNA.research,
       crude: LIVE_CRUDE_GREEN_DNA.research,
       greenPath:
-        'Friday pivot S/R (v8). Fade-bar off. Lots from capitalRs. Crude off.',
+        'Professional DNA: confirmed pivot S/R reversal (index) + confirmed OR breakout (crude), 2–2.5R targets, breakeven trail, max 2–3 trades/book/day, cooldown, per-book & desk daily loss stops + day profit lock. Validate in paper.',
+      dailyBand: LIVE_GREEN_DNA.dailyBand,
     },
     defaults: DAILY_3K_PRESET,
   });
@@ -66,8 +76,11 @@ async function defaults(_req, res) {
     preset: DAILY_3K_PRESET,
     dayProfitLockRsBase: DAY_PROFIT_LOCK_RS,
     strictDayStopRsBase: STRICT_DAY_STOP_RS,
-    checkboxHint: `₹${DAY_PROFIT_LOCK_RS.toLocaleString('en-IN')} desk lock · lots from capitalRs`,
-    /** Autobot UI should render these books (Crude is server-forced ON). */
+    checkboxHint:
+      DAY_PROFIT_LOCK_RS > 0
+        ? `₹${DAY_PROFIT_LOCK_RS.toLocaleString('en-IN')} × lots (1→₹3k · 3→₹9k)`
+        : 'Treasure DNA — no day profit lock / stop (S/R + perfect SL)',
+    /** Autobot UI should render Nifty only (Bank/Crude are hard-off). */
     books: {
       nifty: true,
       bank: AUTOBOT_ALLOW_BANK,
@@ -77,23 +90,29 @@ async function defaults(_req, res) {
       deskLots: DAILY_3K_PRESET.niftyLots,
       niftyLots: DAILY_3K_PRESET.niftyLots,
       bankLots: DAILY_3K_PRESET.bankLots,
+      crudeLots: DAILY_3K_PRESET.crudeLots,
       crudeStrategy: 'live-crude-green',
       crudeWindow: '16:00–21:00 IST (hard gate 15:15)',
-      bankOnlyAfterNifty: LIVE_GREEN_DNA.liveOps.bankOnlyAfterNifty === true,
-      label: 'Pivot S/R · ₹40k → Nifty 1×2 · Bank 2×1 · send capitalRs',
+      bankOnlyAfterNifty: !!LIVE_GREEN_DNA.liveOps.bankOnlyAfterNifty,
+      niftyMaxTradesDay: DAILY_3K_PRESET.niftyMaxTradesDay,
+      bankMaxTradesDay: DAILY_3K_PRESET.bankMaxTradesDay,
+      crudeMaxTradesDay: DAILY_3K_PRESET.crudeMaxTradesDay,
+      deskMaxTradesDay: DAILY_3K_PRESET.deskMaxTradesDay,
+      label: 'Nifty 50 · lots from UI',
       capitalLots: {
-        per40k: 1,
-        at40k: { niftyLots: 1, bankLots: 2, niftyTrades: 2, bankTrades: 1 },
-        at80k: { niftyLots: 2, bankLots: 2, niftyTrades: 2, bankTrades: 1 },
-        at120k: { niftyLots: 3, bankLots: 3, niftyTrades: 2, bankTrades: 1 },
-        at160k: { niftyLots: 4, bankLots: 4, niftyTrades: 2, bankTrades: 1 },
-        at200k: { niftyLots: 5, bankLots: 5, niftyTrades: 2, bankTrades: 1 },
+        perRs: 40000,
+        at40k: 1,
+        at80k: 2,
+        at1_2L: 3,
+        at2L: 5,
         cap: 10,
-        note: 'Send capitalRs on Start. 1 Nifty lot per ₹40k. ₹40k Bank is 2 lots; from ₹80k Bank matches Nifty. Trades stay Nifty 2 / Bank 1.',
+        note: 'Send lots / niftyLots on Start (integer ≥ 1, cap 10). If omitted, capitalRs maps ~1 lot per ₹40k. Stop→Start.',
+        tradeCounts:
+          'Send niftyMaxTradesDay on Start (0 = unlimited). Stop→Start to apply.',
       },
     },
     uiHint:
-      'Send capitalRs on Start. ₹40k → N1/B2 · ₹80k → N2/B2 · ₹1.2L → N3/B3. Nifty 2 trades, Bank 1. Stop→Start.',
+      'Lots: lots / niftyLots (integer ≥ 1, cap 10; capitalRs is fallback). Trade counts: niftyMaxTradesDay (0 = unlimited). Stop→Start.',
   });
 }
 

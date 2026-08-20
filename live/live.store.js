@@ -135,9 +135,12 @@ function statusPayload(session) {
       crudeLots: cfg.crudeLots || 1,
       crudeStrategy: cfg.crudeStrategy || 'live-crude-green',
       crudeAfterIndexClose: cfg.crudeAfterIndexClose !== false,
-      bankOnlyAfterNifty: cfg.bankOnlyAfterNifty === true,
-      label: 'Pivot S/R · ₹40k → Nifty 1×2 · Bank 2×1',
-      capitalRs: cfg.capitalRs || null,
+      bankOnlyAfterNifty: !!cfg.bankOnlyAfterNifty,
+      niftyMaxTradesDay: cfg.niftyMaxTradesDay,
+      bankMaxTradesDay: cfg.bankMaxTradesDay,
+      crudeMaxTradesDay: cfg.crudeMaxTradesDay,
+      deskMaxTradesDay: cfg.deskMaxTradesDay,
+      label: 'Nifty 50 only · lots from UI',
     },
     risk: {
       dayProfitLockRsBase: DAY_PROFIT_LOCK_RS,
@@ -147,9 +150,9 @@ function statusPayload(session) {
       profitLockMoneyRs: profitLockMoneyRs(lots),
       strictStopMoneyRs: strictStopMoneyRs(lots),
       labels: riskStatusLabels(cfg),
-      checkboxHint: `₹${DAY_PROFIT_LOCK_RS.toLocaleString('en-IN')} × lots (1 lot @ ₹40k → ₹1,000)`,
+      checkboxHint: `₹${DAY_PROFIT_LOCK_RS.toLocaleString('en-IN')} × lots (1→₹3k · 3→₹9k)`,
       capitalHint:
-        'Pivot S/R. Send capitalRs on Start. ₹40k N1/B2 · ₹80k N2/B2 · ₹1.2L N3/B3. Stop→Start.',
+        'Nifty-only: UI lots (lots / niftyLots) used as-is, cap 10. If omitted, capital maps ~1 lot per ₹40k. Stop→Start to apply.',
     },
     version: APP_VERSION,
     appBuild: APP_BUILD,
@@ -158,6 +161,8 @@ function statusPayload(session) {
     /** Money ledger: paper marks overwritten by broker fills when realOrders. */
     trades: money.trades,
     totals: money.totals,
+    /** Closed round-trips today — one trade = placed + closed. */
+    tradeCounts: money.tradeCounts || { nifty: 0, bank: 0, crude: 0, other: 0, total: 0 },
     mongo: !!mongoDb,
     userId: session.userId,
   };
@@ -311,12 +316,13 @@ async function start(userId, config) {
     );
   }
   session.message =
-    `Pivot S/R · N${session.config.enableNifty ? 1 : 0}/B${session.config.enableBank ? 1 : 0}/C${session.config.enableCrude ? 1 : 0}` +
+    `Nifty desk · lots=${session.config.deskLots || session.config.niftyLots || 1}` +
+    (session.config.capitalRs ? ` · capital₹${session.config.capitalRs}` : '') +
     (riskBits.length ? ` · ${riskBits.join(' · ')}` : '');
   pushEvent(
     session,
     'START',
-    `Daily desk · books N${session.config.enableNifty ? 1 : 0}/B${session.config.enableBank ? 1 : 0}/C${session.config.enableCrude ? 1 : 0} · N${session.config.niftyLots || 1}lot×2 / B${session.config.bankLots || 1}lot×1 · bank=${session.config.bankStrategy} · crude=${session.config.crudeStrategy} · real=${session.config.realOrders}` +
+    `Nifty 50 daily desk · lots=${session.config.deskLots || session.config.niftyLots || 1} · strategy=${session.config.niftyStrategy} · real=${session.config.realOrders}` +
       (session.config.capitalRs ? ` · capital₹${session.config.capitalRs}` : '') +
       (riskBits.length ? ` · ${riskBits.join(' · ')}` : ''),
   );

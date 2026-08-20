@@ -65,6 +65,12 @@ function round0(n) {
 function summarize(trades) {
   let optionNetRs = 0;
   let optionNetAfterChargesRs = 0;
+  let underlyingPoints = 0;
+  const pointsByInstrument = {};
+  let underlyingPointWins = 0;
+  let underlyingPointLosses = 0;
+  let optionMarkedTrades = 0;
+  let underlyingFallbackTrades = 0;
   let wins = 0;
   let losses = 0;
   for (const t of trades) {
@@ -72,6 +78,14 @@ function summarize(trades) {
     const net = tradeNetRs(t);
     optionNetRs += gross;
     optionNetAfterChargesRs += net;
+    const points = Number(t.indexPoints) || 0;
+    underlyingPoints += points;
+    if (points > 0) underlyingPointWins += 1;
+    else if (points < 0) underlyingPointLosses += 1;
+    const instrumentId = String(t.instrumentId || 'other');
+    pointsByInstrument[instrumentId] = (pointsByInstrument[instrumentId] || 0) + points;
+    if (t.optionPnlRs != null) optionMarkedTrades += 1;
+    else underlyingFallbackTrades += 1;
     if (net > 0) wins += 1;
     else if (net < 0) losses += 1;
   }
@@ -81,6 +95,16 @@ function summarize(trades) {
     losses,
     optionNetRs: round0(optionNetRs),
     optionNetAfterChargesRs: round0(optionNetAfterChargesRs),
+    // Underlying proxy is intentionally separate from option net P&L.
+    // It is useful for strategy research when option history is unavailable.
+    underlyingPoints: round0(underlyingPoints * 100) / 100,
+    underlyingPointsByInstrument: Object.fromEntries(
+      Object.entries(pointsByInstrument).map(([id, points]) => [id, round0(points * 100) / 100]),
+    ),
+    underlyingPointWins,
+    underlyingPointLosses,
+    optionMarkedTrades,
+    underlyingFallbackTrades,
   };
 }
 
@@ -88,13 +112,27 @@ function dayBreakdown(trades) {
   const byDate = new Map();
   for (const t of trades) {
     const date = tradeDateOf(t.entryTime);
-    const row = byDate.get(date) || { date, trades: 0, optionNetRs: 0 };
+    const row = byDate.get(date) || {
+      date,
+      trades: 0,
+      optionNetRs: 0,
+      underlyingPoints: 0,
+      optionMarkedTrades: 0,
+      underlyingFallbackTrades: 0,
+    };
     row.trades += 1;
     row.optionNetRs += tradeNetRs(t);
+    row.underlyingPoints += Number(t.indexPoints) || 0;
+    if (t.optionPnlRs != null) row.optionMarkedTrades += 1;
+    else row.underlyingFallbackTrades += 1;
     byDate.set(date, row);
   }
   return [...byDate.values()]
-    .map((r) => ({ ...r, optionNetRs: round0(r.optionNetRs) }))
+    .map((r) => ({
+      ...r,
+      optionNetRs: round0(r.optionNetRs),
+      underlyingPoints: round0(r.underlyingPoints * 100) / 100,
+    }))
     .sort((a, b) => b.date.localeCompare(a.date));
 }
 
@@ -116,20 +154,22 @@ function trapInitOverrides(cfg, instrumentId) {
       dayProfitLock: !!cfg.dayProfitLock,
       strictDayStop: !!cfg.strictDayStop,
     }) || {};
-  const extras = liveGreenTrapExtras(instrumentId);
+  const extras = liveGreenTrapExtras();
   if (cfg.optionStandDownRs != null) {
     extras.optionStandDownRs = Number(cfg.optionStandDownRs);
   }
   const bank = /bank/i.test(String(instrumentId || ''));
-  const maxTrades = bank
-    ? LIVE_GREEN_DNA.trap.bankMaxTradesPerDay || LIVE_GREEN_DNA.trap.maxTradesPerDay
-    : LIVE_GREEN_DNA.trap.maxTradesPerDay;
+  const fromUi = bank ? cfg.bankMaxTradesDay : cfg.niftyMaxTradesDay;
+  const maxTrades =
+    fromUi != null
+      ? Math.max(0, Math.floor(Number(fromUi)) || 0)
+      : bank
+        ? LIVE_GREEN_DNA.trap.bankMaxTradesPerDay || LIVE_GREEN_DNA.trap.maxTradesPerDay
+        : LIVE_GREEN_DNA.trap.maxTradesPerDay;
   return {
     ...risk,
     maxTradesPerDay: maxTrades,
     targetRMultiple: LIVE_GREEN_DNA.trap.targetRMultiple,
-    entryTimeStart: LIVE_GREEN_DNA.trap.entryTimeStart,
-    entryTimeEnd: LIVE_GREEN_DNA.trap.entryTimeEnd,
     extras,
   };
 }
@@ -213,12 +253,16 @@ async function runBacktest({ authorization, fromDate, toDate, config }, deps = {
   }
   const market = deps.market || defaultMarket;
   const cfg = normalizeStartConfig(config);
+  // Keep signals visible when historical option candles are absent.  They are
+  // returned separately as underlying-proxy trades and never contribute to
+  // option net P&L or the executable/live-path totals.
+  const useUnderlyingFallback = config?.underlyingFallback !== false;
   const warmFrom = addDaysIso(fromDate, -LOOKBACK_DAYS);
   const instruments = deps.instruments || (await market.fetchInstruments(authorization));
   const useLivePath = cfg.paperLivePath !== false;
   const livePath = useLivePath
     ? livePathReplayOpts({
-        rejectEstimatedPremium: true,
+        rejectEstimatedPremium: !useUnderlyingFallback,
         fillFrictionPremium: cfg.fillFrictionPremium,
       })
     : null;
@@ -282,7 +326,17 @@ async function runBacktest({ authorization, fromDate, toDate, config }, deps = {
         toDate,
       );
       const profile = cfg.crudeStrategy || 'live-crude-green';
-      const tradeParams = resolveCrudeStrategyProfile(profile);
+      let tradeParams = resolveCrudeStrategyProfile(profile);
+      if (profile === 'live-crude-green') {
+        const { liveCrudeGreenProfileOverrides } = require('./dna-live-crude-green');
+        tradeParams = { ...tradeParams, ...liveCrudeGreenProfileOverrides() };
+      }
+      if (cfg.crudeMaxTradesDay != null) {
+        tradeParams.maxEveningTradesDay = Math.max(
+          0,
+          Math.floor(Number(cfg.crudeMaxTradesDay)) || 0,
+        );
+      }
       const dayLossStopPts = resolveCrudeProfileDayLossPts(tradeParams, !!cfg.strictDayStop);
       const crudeBase = {
         instrumentId: CRUDE_OIL_MINI_INSTRUMENT.id,
@@ -318,49 +372,55 @@ async function runBacktest({ authorization, fromDate, toDate, config }, deps = {
 
   rawTrades.sort((a, b) => String(a.entryTime).localeCompare(String(b.entryTime)));
 
-  // Desk-level Paper≡Live: one-leg across books + option-₹ day lock/stop.
-  const allTrades = useLivePath
+  // Executable Paper≡Live totals: reject missing/synthetic option marks.
+  const executableTrades = useLivePath
     ? filterTradesLivePath(rawTrades, {
         ...DEFAULT_LIVE_PATH,
         maxOpenLegs: cfg.maxOpenLegs != null ? cfg.maxOpenLegs : DEFAULT_LIVE_PATH.maxOpenLegs,
-        dayProfitLockRs: cfg.dayProfitLock
-          ? (cfg.dayProfitLockRs != null
-              ? Number(cfg.dayProfitLockRs)
-              : LIVE_GREEN_DNA.dayProfitLockRs || DAY_PROFIT_LOCK_RS) *
-            Math.max(1, cfg.deskLots || cfg.niftyLots || 1)
-          : 0,
-        dayStopRs: cfg.strictDayStop
-          ? STRICT_DAY_STOP_RS * Math.max(1, cfg.deskLots || cfg.niftyLots || 1)
-          : 0,
+        dayProfitLockRs: cfg.dayProfitLock ? DAY_PROFIT_LOCK_RS : 0,
+        dayStopRs: cfg.strictDayStop ? STRICT_DAY_STOP_RS : 0,
         rejectEstimatedPremium: true,
-        bankOnlyAfterNifty: cfg.bankOnlyAfterNifty === true,
-        bankOnlyAfterNiftyGreen: cfg.bankOnlyAfterNiftyGreen === true,
-        deskMaxTradesDay:
-          cfg.deskMaxTradesDay != null
-            ? cfg.deskMaxTradesDay
-            : DEFAULT_LIVE_PATH.deskMaxTradesDay,
-        deskGreenProtectRs:
-          cfg.deskGreenProtectRs != null
-            ? cfg.deskGreenProtectRs
-            : DEFAULT_LIVE_PATH.deskGreenProtectRs,
-        allowDirection: LIVE_GREEN_DNA.trap.allowDirection || DEFAULT_LIVE_PATH.allowDirection,
-        entryTimeStart: LIVE_GREEN_DNA.trap.entryTimeStart || DEFAULT_LIVE_PATH.entryTimeStart,
-        entryTimeEnd:
-          LIVE_GREEN_DNA.trap.sessionCutTime ||
-          LIVE_GREEN_DNA.trap.entryTimeEnd ||
-          DEFAULT_LIVE_PATH.entryTimeEnd,
-        sessionCutTime: LIVE_GREEN_DNA.trap.sessionCutTime || '',
-        peSession: LIVE_GREEN_DNA.trap.peSession || null,
-        deskHaltAfterRed: LIVE_GREEN_DNA.liveOps.deskHaltAfterRed === true,
-        bankOnlyAfterNiftyGreen: LIVE_GREEN_DNA.liveOps.bankOnlyAfterNiftyGreen === true,
-        peSessionOnlyIfNotGreen: LIVE_GREEN_DNA.liveOps.peSessionOnlyIfNotGreen === true,
-        peSessionOnlyIfBelowRs: Number(LIVE_GREEN_DNA.liveOps.peSessionOnlyIfBelowRs) || 0,
+        bankOnlyAfterNifty:
+          cfg.bankOnlyAfterNifty != null
+            ? !!cfg.bankOnlyAfterNifty
+            : LIVE_GREEN_DNA.liveOps.bankOnlyAfterNifty === true,
+        bankOnlyAfterNiftyGreen:
+          cfg.bankOnlyAfterNiftyGreen != null
+            ? !!cfg.bankOnlyAfterNiftyGreen
+            : LIVE_GREEN_DNA.liveOps.bankOnlyAfterNiftyGreen === true,
+        winStreakToBand:
+          cfg.winStreakToBand != null
+            ? !!cfg.winStreakToBand
+            : LIVE_GREEN_DNA.liveOps.winStreakToBand === true,
+        indexFirstWinLock:
+          cfg.indexFirstWinLock != null
+            ? !!cfg.indexFirstWinLock
+            : LIVE_GREEN_DNA.liveOps.indexFirstWinLock === true,
+        deskGreenLockRs:
+          cfg.deskGreenLockRs != null
+            ? Number(cfg.deskGreenLockRs)
+            : Number(LIVE_GREEN_DNA.liveOps.deskGreenLockRs) || 0,
+        recoveryMaxExtra:
+          cfg.recoveryMaxExtra != null
+            ? Number(cfg.recoveryMaxExtra)
+            : LIVE_GREEN_DNA.liveOps.recoveryMaxExtra ?? 0,
+        dustTradeRs:
+          cfg.dustTradeRs != null
+            ? Number(cfg.dustTradeRs)
+            : LIVE_GREEN_DNA.liveOps.dustTradeRs ?? 0,
       })
     : rawTrades;
 
+  // The same strategy replay can retain missing-option trades as an
+  // underlying-candle research record. Do not mix these proxy values with
+  // actual option P&L, charges, or broker-comparable totals.
+  const underlyingFallbackTrades = useUnderlyingFallback
+    ? rawTrades.filter((t) => t.pnlSource === 'underlying_proxy')
+    : [];
+
   // Book rows from filtered desk trades (not raw overlapping fiction).
   const booksLive = books.map((b) => {
-    const subset = allTrades.filter((t) => t.instrumentId === b.instrumentId);
+    const subset = executableTrades.filter((t) => t.instrumentId === b.instrumentId);
     return {
       label: b.label,
       instrumentId: b.instrumentId,
@@ -376,10 +436,18 @@ async function runBacktest({ authorization, fromDate, toDate, config }, deps = {
     riskLabels: riskStatusLabels(cfg),
     paperLivePath: useLivePath,
     books: booksLive,
-    totals: summarize(allTrades),
+    totals: summarize(executableTrades),
     rawTotals: useLivePath ? summarize(rawTrades) : undefined,
-    dayStats: dayBreakdown(allTrades),
-    trades: allTrades,
+    dayStats: dayBreakdown(executableTrades),
+    trades: executableTrades,
+    underlyingFallback: {
+      enabled: useUnderlyingFallback,
+      note:
+        'Underlying-candle points only; it is not option P&L, net P&L, rupees, or a live-executable result.',
+      totals: summarize(underlyingFallbackTrades),
+      dayStats: dayBreakdown(underlyingFallbackTrades),
+      trades: underlyingFallbackTrades,
+    },
   };
 }
 

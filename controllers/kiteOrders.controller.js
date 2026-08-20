@@ -103,8 +103,8 @@ function health(_req, res) {
     service: 'palagai-order-api',
     version: '1.3.0',
     appBuild: '2026.08.04-autobot-daily-3k',
-    crudeDefault: 'selective',
-    deskPreset: 'daily-3k',
+    crudeDefault: 'off',
+    deskPreset: 'nifty-50-only',
   });
 }
 

@@ -1,21 +1,13 @@
 /**
- * Server Live strategy worker — multi-strategy Paper≡Live desk:
- * 1) Nifty Trap + Bank Trap (one-leg, option-₹ day lock)
- * 2) Crude LIVE_CRUDE_GREEN after NSE close (second session)
+ * Server Live strategy worker — Nifty 50 Paper≡Live desk:
+ * 1) Nifty Trap (one-leg, option-₹ day lock). Bank Nifty & Crude are hard-off.
  * Paper path rejects estimated premiums + fill friction (same as broker skips).
  * Places orders via live-broker → kite.service (does NOT touch kiteOrders.controller).
  */
 const {
   NIFTY_50_INSTRUMENT,
-  BANK_NIFTY_INSTRUMENT,
-  CRUDE_OIL_MINI_INSTRUMENT,
   createTrapStrategy,
-  createGenieStrategy,
   replayPaperOnIndex,
-  replayPaperOnCrude,
-  resolveCrudeStrategyProfile,
-  resolveCrudeProfileDayLossPts,
-  resolveCrudeOilMiniFuturesToken,
   effectiveProtectiveStop,
 } = require('./strategy-core.cjs');
 const { fetchInstruments, fetchHistorical5m } = require('./kite-market');
@@ -28,10 +20,8 @@ const {
   publicTrades,
 } = require('./live-trades');
 const { LIVE_GREEN_DNA, liveGreenTrapExtras } = require('./dna-live-green');
-const { LIVE_CRUDE_GREEN_DNA } = require('./dna-live-crude-green');
 const { livePathReplayOpts, isEstimatedOrSynthetic } = require('./live-path');
 
-const CRUDE_EXIT_BY = '23:10';
 const LOOKBACK_DAYS = 12;
 
 function istParts(d = new Date()) {
@@ -102,9 +92,13 @@ function trapInitOverrides(config, instrumentId) {
     extras.optionStandDownRs = Number(config.optionStandDownRs);
   }
   const bank = /bank/i.test(String(instrumentId || ''));
-  const maxTrades = bank
-    ? LIVE_GREEN_DNA.trap.bankMaxTradesPerDay || LIVE_GREEN_DNA.trap.maxTradesPerDay
-    : LIVE_GREEN_DNA.trap.maxTradesPerDay;
+  const fromUi = bank ? config.bankMaxTradesDay : config.niftyMaxTradesDay;
+  const maxTrades =
+    fromUi != null
+      ? Math.max(0, Math.floor(Number(fromUi)) || 0)
+      : bank
+        ? LIVE_GREEN_DNA.trap.bankMaxTradesPerDay || LIVE_GREEN_DNA.trap.maxTradesPerDay
+        : LIVE_GREEN_DNA.trap.maxTradesPerDay;
   return {
     ...risk,
     maxTradesPerDay: maxTrades,
@@ -132,14 +126,11 @@ class LiveWorker {
     this.instrumentsAt = 0;
     this.candles = {
       nifty: [],
-      bank: [],
-      crude: [],
     };
-    this.crudeFuture = null;
     this.warmed = false;
     this.reconciled = false;
     this.tickBusy = false;
-    this.lastSignals = { nifty: '', bank: '', crude: '' };
+    this.lastSignals = { nifty: '' };
     this.lastDeskHalt = '';
   }
 
@@ -181,13 +172,9 @@ class LiveWorker {
     }
     this.instruments = await fetchInstruments(authorization);
     this.instrumentsAt = Date.now();
-    this.crudeFuture = resolveCrudeOilMiniFuturesToken(this.instruments);
     this.pushEvent(
       'DATA',
-      `Instruments loaded · ${this.instruments.length} rows` +
-        (this.crudeFuture
-          ? ` · crude fut ${this.crudeFuture.tradingSymbol}`
-          : ' · crude fut missing'),
+      `Instruments loaded · ${this.instruments.length} rows (Nifty 50 only)`,
     );
     return this.instruments;
   }
@@ -203,46 +190,19 @@ class LiveWorker {
       from,
       today,
     );
-    this.candles.bank = await fetchHistorical5m(
-      authorization,
-      BANK_NIFTY_INSTRUMENT.instrumentToken,
-      from,
-      today,
-    );
-    if (this.crudeFuture?.instrumentToken) {
-      this.candles.crude = await fetchHistorical5m(
-        authorization,
-        this.crudeFuture.instrumentToken,
-        from,
-        today,
-      );
-    } else {
-      this.candles.crude = [];
-    }
     this.warmed = true;
-    this.pushEvent(
-      'DATA',
-      `Warm OK · Nifty ${this.candles.nifty.length} · Bank ${this.candles.bank.length} · Crude ${this.candles.crude.length} bars`,
-    );
+    this.pushEvent('DATA', `Warm OK · Nifty ${this.candles.nifty.length} bars`);
   }
 
   async refreshToday(authorization) {
     const { date: today } = istParts();
-    const [n, b] = await Promise.all([
-      fetchHistorical5m(authorization, NIFTY_50_INSTRUMENT.instrumentToken, today, today),
-      fetchHistorical5m(authorization, BANK_NIFTY_INSTRUMENT.instrumentToken, today, today),
-    ]);
+    const n = await fetchHistorical5m(
+      authorization,
+      NIFTY_50_INSTRUMENT.instrumentToken,
+      today,
+      today,
+    );
     this.candles.nifty = mergeCandles(this.candles.nifty, n);
-    this.candles.bank = mergeCandles(this.candles.bank, b);
-    if (this.crudeFuture?.instrumentToken) {
-      const c = await fetchHistorical5m(
-        authorization,
-        this.crudeFuture.instrumentToken,
-        today,
-        today,
-      );
-      this.candles.crude = mergeCandles(this.candles.crude, c);
-    }
   }
 
   async onTick() {
@@ -289,7 +249,6 @@ class LiveWorker {
         this.pushEvent('DESK_HALT', halt);
       }
       const indexSession = now >= '09:15' && now <= '15:30';
-      const crudeSession = now >= '09:00' && now <= '23:15';
       const enableKutty = !!config.enableKutty;
 
       const livePath = livePathReplayOpts({
@@ -304,7 +263,7 @@ class LiveWorker {
           instrument: NIFTY_50_INSTRUMENT,
           kind: 'nifty',
           candles: this.candles.nifty,
-          lots: config.niftyLots || config.deskLots || 1,
+          lots: config.niftyLots || config.deskLots || config.lots || 1,
           forceClose: now >= '15:15',
           enableKutty,
           kuttyAlone: !!config.kuttyAlone,
@@ -322,7 +281,7 @@ class LiveWorker {
           instrumentId: NIFTY_50_INSTRUMENT.id,
           instrumentName: 'Nifty Trap',
           open: this.liveOpenForSync(NIFTY_50_INSTRUMENT.id, replay.open),
-          lots: config.niftyLots || config.deskLots || 1,
+          lots: config.niftyLots || config.deskLots || config.lots || 1,
         });
         const niftySig =
           `Nifty Trap · ${replay.lastSignal}` +
@@ -333,139 +292,10 @@ class LiveWorker {
         }
       }
 
-      if (config.enableBank && indexSession) {
-        const genie = config.bankStrategy === 'genie';
-        const bankAfterNifty = config.bankOnlyAfterNifty === true;
-        const bankAfterGreen = config.bankOnlyAfterNiftyGreen === true;
-        const niftyReady = bankAfterGreen
-          ? this.niftyGreenToday(today)
-          : !bankAfterNifty || this.niftyTakenToday(today);
-        const replay = await this.replayIndexLive({
-          authorization,
-          instrument: BANK_NIFTY_INSTRUMENT,
-          kind: 'banknifty',
-          candles: this.candles.bank,
-          lots: config.bankLots || config.deskLots || 1,
-          forceClose: now >= (LIVE_GREEN_DNA.trap.exitTime || '15:15'),
-          enableKutty,
-          kuttyAlone: !!config.kuttyAlone,
-          today,
-          livePath,
-          makeStrategy: () => {
-            const s = genie ? createGenieStrategy() : createTrapStrategy();
-            if (genie) s.initialize();
-            else s.initialize(trapInitOverrides(config, BANK_NIFTY_INSTRUMENT.id));
-            return s;
-          },
-        });
-        ingestReplayTrades(this.liveTrades, replay.trades, { rejectEstimated: true });
-        // Zero-red rule: new Bank entries only after Nifty has traded today.
-        // Still manage/exit an already-open Bank leg.
-        const bankOpen = this.liveOpenForSync(BANK_NIFTY_INSTRUMENT.id, replay.open);
-        const bankPos = this.broker.positions?.get(BANK_NIFTY_INSTRUMENT.id);
-        const bankAlreadyLive =
-          bankPos && (bankPos.status === 'open' || bankPos.status === 'exiting');
-        const bankSyncOpen =
-          bankAlreadyLive || niftyReady ? bankOpen : null;
-        await this.broker.syncInstrument({
-          authorization,
-          instrumentId: BANK_NIFTY_INSTRUMENT.id,
-          instrumentName: `Bank ${genie ? 'Genie' : 'Trap'}`,
-          open: bankSyncOpen,
-          lots: config.bankLots || config.deskLots || 1,
-        });
-        const bankSig =
-          `Bank ${genie ? 'Genie' : 'Trap'} · ${replay.lastSignal}` +
-          (bankSyncOpen ? ` · OPEN ${bankSyncOpen.direction}` : '') +
-          (bankAfterGreen && !niftyReady
-            ? ' · wait Nifty green'
-            : bankAfterNifty && !niftyReady
-              ? ' · wait Nifty first'
-              : '');
-        if (bankSig !== this.lastSignals.bank) {
-          this.lastSignals.bank = bankSig;
-          this.pushEvent('SIGNAL', bankSig);
-        }
-      }
-
-      if (config.enableCrude && crudeSession && this.candles.crude.length) {
-        // Hard floor: never open new Crude before 15:15 IST (user: 3:15pm).
-        const CRUDE_NOT_BEFORE = '15:15';
-        const dnaGate =
-          LIVE_CRUDE_GREEN_DNA.liveOps.crudeAfterIndexCloseTime || CRUDE_NOT_BEFORE;
-        const gateTime = dnaGate > CRUDE_NOT_BEFORE ? dnaGate : CRUDE_NOT_BEFORE;
-        const crudeEntryOk = now >= gateTime;
-        const crudeOpen = this.broker?.positions?.get(CRUDE_OIL_MINI_INSTRUMENT.id);
-        const crudeOpenLive = crudeOpen?.status === 'open';
-
-        if (crudeEntryOk || crudeOpenLive) {
-          const crudeProfile = config.crudeStrategy || 'live-crude-green';
-          const tradeParams = resolveCrudeStrategyProfile(crudeProfile);
-          const dayLossStopPts = resolveCrudeProfileDayLossPts(
-            tradeParams,
-            !!config.strictDayStop,
-          );
-          const futSym = this.crudeFuture?.tradingSymbol || 'CRUDEOILM';
-          const crudeLabel =
-            tradeParams.profileId === 'selective'
-              ? 'Crude Selective'
-              : `Crude ${tradeParams.label}`;
-          // Two-pass like index: fetch real option 5m marks so live entry is
-          // not stuck on premiumEstimated (broker SKIP / liveOpenForSync null).
-          const crudeLots = config.deskLots || config.crudeLots || 1;
-          const replay = await this.replayCrudeLive({
-            candles: this.candles.crude,
-            lots: crudeLots,
-            forceClose: now >= CRUDE_EXIT_BY,
-            today,
-            authorization,
-            futSym,
-            dayLossStopPts,
-            // New entries only after gate; still manage exits if already live.
-            enableMorning: crudeEntryOk && tradeParams.defaultEnableMorning,
-            enableEvening: crudeEntryOk && tradeParams.defaultEnableEvening,
-            tradeParams,
-          });
-          ingestReplayTrades(this.liveTrades, replay.trades, { rejectEstimated: true });
-          const crudeSyncOpen = this.liveOpenForSync(
-            CRUDE_OIL_MINI_INSTRUMENT.id,
-            replay.open,
-          );
-          if (replay.open && !crudeSyncOpen) {
-            const why = isEstimatedOrSynthetic({
-              option: replay.open.option,
-              premiumEstimated: replay.open.premiumEstimated,
-            })
-              ? 'estimated/missing option premium'
-              : 'maxOpenLegs / not tradeable';
-            this.pushEvent(
-              'SKIP',
-              `${crudeLabel}: signal open but no live entry — ${why}`,
-            );
-          }
-          await this.broker.syncInstrument({
-            authorization,
-            instrumentId: CRUDE_OIL_MINI_INSTRUMENT.id,
-            instrumentName: crudeLabel,
-            open: crudeSyncOpen,
-            lots: crudeLots,
-          });
-          const crudeSig =
-            `${crudeLabel} · ${replay.lastSignal}` +
-            (crudeSyncOpen ? ` · OPEN ${crudeSyncOpen.direction}` : '') +
-            (replay.open && !crudeSyncOpen ? ' · paper-only (no live entry)' : '') +
-            (!crudeEntryOk ? ` · gated until ${gateTime}` : '');
-          if (crudeSig !== this.lastSignals.crude) {
-            this.lastSignals.crude = crudeSig;
-            this.pushEvent('SIGNAL', crudeSig);
-          }
-        }
-      }
-
       const riskBits = riskStatusLabels(config);
       const riskTxt = riskBits.length ? ` · ${riskBits.join(' · ')}` : '';
       this.heartbeat(
-        `Live tick · ${now} IST · real=${!!config.realOrders} · N${config.enableNifty ? 1 : 0}/B${config.enableBank ? 1 : 0}/C${config.enableCrude ? 1 : 0}${riskTxt}`,
+        `Live tick · ${now} IST · real=${!!config.realOrders} · N${config.enableNifty ? 1 : 0}${riskTxt}`,
       );
     } catch (err) {
       const msg = err?.message || String(err);
@@ -489,56 +319,6 @@ class LiveWorker {
       }
     }
     return map;
-  }
-
-  /**
-   * Two-pass Crude replay — same as index: discover ATM option token, fetch
-   * 5m option candles, replay with marks so premiumEstimated is false when
-   * history exists (required for live broker entry).
-   */
-  async replayCrudeLive({
-    candles,
-    lots,
-    forceClose,
-    today,
-    authorization,
-    futSym,
-    dayLossStopPts,
-    enableMorning,
-    enableEvening,
-    tradeParams,
-  }) {
-    const base = {
-      instrumentId: CRUDE_OIL_MINI_INSTRUMENT.id,
-      instrumentName: `Crude Mini (${futSym || 'CRUDEOILM'})`,
-      candles,
-      fromDate: today,
-      toDate: today,
-      instruments: this.instruments,
-      forceCloseOpen: forceClose,
-      lotsMultiplier: lots,
-      dayLossStopPts,
-      enableMorning,
-      enableEvening,
-      tradeParams,
-    };
-    const needed = new Set();
-    replayPaperOnCrude({
-      ...base,
-      optionCandlesByToken: new Map(),
-      neededOptionTokens: needed,
-    });
-    let optionCandles = new Map();
-    try {
-      optionCandles = await this.fetchOptionCandles(authorization, needed, today, today);
-    } catch (err) {
-      optionCandles = new Map();
-    }
-    return replayPaperOnCrude({
-      ...base,
-      optionCandlesByToken: optionCandles,
-      neededOptionTokens: new Set(),
-    });
   }
 
   /**
@@ -633,7 +413,9 @@ class LiveWorker {
     const maxT =
       config.deskMaxTradesDay != null
         ? Math.max(0, Math.floor(Number(config.deskMaxTradesDay)) || 0)
-        : LIVE_GREEN_DNA.liveOps.deskMaxTradesDay || 3;
+        : LIVE_GREEN_DNA.liveOps.deskMaxTradesDay != null
+          ? Math.max(0, Math.floor(Number(LIVE_GREEN_DNA.liveOps.deskMaxTradesDay)) || 0)
+          : 0;
     const { net, trades } = this.deskDayStats(today);
     const { hhmm: now } = istParts();
     const pe = LIVE_GREEN_DNA.trap.peSession;
@@ -673,10 +455,30 @@ class LiveWorker {
     if (stop > 0 && net <= -stop) {
       return `desk stop −₹${stop.toLocaleString('en-IN')} (net ₹${Math.round(net)})`;
     }
-    if (maxT > 0 && trades >= maxT) {
+    if (maxT > 0 && trades >= maxT && now < '15:15') {
       return `desk max ${maxT} trades (done ${trades})`;
     }
     return null;
+  }
+
+  /** Closed Nifty 50 option ₹ today. */
+  indexDayNet(today) {
+    const ids = new Set([NIFTY_50_INSTRUMENT.id]);
+    let net = 0;
+    for (const t of this.liveTrades || []) {
+      if (!ids.has(t.instrumentId)) continue;
+      if (String(t.entryTime || '').slice(0, 10) !== today) continue;
+      if (t.premiumEstimated) continue;
+      const n =
+        t.netOptionPnlRs != null
+          ? Number(t.netOptionPnlRs)
+          : t.optionPnlRs != null
+            ? Number(t.optionPnlRs)
+            : null;
+      if (n == null || !Number.isFinite(n)) continue;
+      net += n;
+    }
+    return net;
   }
 
   niftyGreenToday(today) {
@@ -772,7 +574,7 @@ class LiveWorker {
     this.reconciled = false;
     this.broker.clear();
     this.liveTrades = [];
-    this.lastSignals = { nifty: '', bank: '', crude: '' };
+    this.lastSignals = { nifty: '' };
     this.lastDeskHalt = '';
   }
 }

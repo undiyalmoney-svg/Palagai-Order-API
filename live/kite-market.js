@@ -99,16 +99,14 @@ function parseInstrumentsCsv(csv) {
     const itype = (cols[9] || '').trim().toUpperCase();
     const sym = (cols[2] || '').trim().toUpperCase();
     const name = (cols[3] || '').trim().toUpperCase();
-    // Keep desk-relevant rows only (memory on 512MB droplet).
+    // Keep desk rows only (memory on 512MB droplet) — Nifty 50 only (no Bank/Crude).
     let keep = false;
     if (exchange === 'NFO' && (itype === 'CE' || itype === 'PE' || itype === 'FUT')) {
-      if (sym.startsWith('BANKNIFTY') || name === 'BANKNIFTY' || sym.startsWith('NIFTY') || name === 'NIFTY') {
+      if (sym.startsWith('NIFTY') || name === 'NIFTY' || name === 'NIFTY 50') {
         keep = true;
       }
-    } else if (exchange === 'MCX') {
-      if (sym.startsWith('CRUDEOIL') || name.includes('CRUDE')) keep = true;
     } else if (exchange === 'NSE' && (itype === 'EQ' || itype === 'INDEX')) {
-      if (sym === 'NIFTY 50' || sym === 'NIFTY BANK' || name === 'NIFTY 50' || name === 'NIFTY BANK') {
+      if (sym === 'NIFTY 50' || name === 'NIFTY 50') {
         keep = true;
       }
     }

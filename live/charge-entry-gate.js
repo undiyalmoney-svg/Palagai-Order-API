@@ -1,7 +1,11 @@
 /**
- * Same entry bar for Nifty and Bank: skip tickets that cannot pay charges
- * or whose premium is too fat to arm the ₹400 trail (never-armed SL).
+ * Charge-cover entry gate — skip tickets that cannot pay round-trip costs.
+ *
+ * Rule: expected option ₹ must be ≥ chargeCoverMultiple × estimated
+ * round-trip charges. Fat Bank ATM premium can also be capped.
+ * Crude is not gated here (separate DNA).
  */
+
 const ATM_OPTION_DELTA = {
   nifty: 0.41,
   bank: 0.3,
@@ -30,6 +34,7 @@ function estimateRoundTripCharges({ entryPrice, exitPrice, quantity }) {
   }
   const buyTurnover = entry * qty;
   const sellTurnover = exit * qty;
+  // Zerodha F&O options: ₹20 per executed order (not 0.03% like futures).
   const brokerageRs = roundPaise(20 + 20);
   const exchangeRs = roundPaise((buyTurnover + sellTurnover) * 35e-5);
   const sttRs = roundPaise(sellTurnover * 1e-3);
@@ -58,6 +63,9 @@ function expectedOptionRs({ instrumentId, indexEntry, indexStop, indexTarget, qu
   return targetPts * delta * qty;
 }
 
+/**
+ * @returns {{ skip: boolean, reason?: string, expectedRs?: number, chargesRs?: number, needRs?: number }}
+ */
 function evaluateChargeEntryGate(input = {}) {
   const book = bookForInstrumentId(input.instrumentId);
   if (book === 'crude' || book === 'natgas') return { skip: false };
@@ -71,7 +79,7 @@ function evaluateChargeEntryGate(input = {}) {
   if (maxPrem > 0 && prem > maxPrem) {
     return {
       skip: true,
-      reason: `Skip ${book} — premium ₹${prem.toFixed(2)} > cap ₹${maxPrem} (cannot arm trail)`,
+      reason: `Charge-path skip — ${book} premium ₹${prem.toFixed(2)} > cap ₹${maxPrem}`,
     };
   }
 
@@ -93,13 +101,10 @@ function evaluateChargeEntryGate(input = {}) {
     quantity: qty,
   }).totalRs;
   const needRs = multiple * chargesRs;
-  if (!(expectedRs > 0)) {
-    return { skip: false, expectedRs, chargesRs, needRs };
-  }
   if (expectedRs + 1e-9 < needRs) {
     return {
       skip: true,
-      reason: `Skip ${book} — expected ₹${Math.round(expectedRs)} < ${multiple}× charges ₹${Math.round(chargesRs)}`,
+      reason: `Charge-path skip — expected ₹${Math.round(expectedRs)} < ${multiple}× charges ₹${Math.round(chargesRs)}`,
       expectedRs,
       chargesRs,
       needRs,

@@ -1,5 +1,5 @@
 /**
- * PROFESSIONAL INDEX DNA (v8) — risk-managed Nifty + Bank options desk.
+ * PROFESSIONAL INDEX DNA (v8) — risk-managed Nifty 50 options desk (Bank/Crude off).
  *
  * Philosophy (why this beats the old "unlimited zero-red" fiction):
  *   - Live re-runs every 60s and the real exchange SL fills intra-bar. The old
@@ -34,8 +34,8 @@ const LIVE_GREEN_DNA = {
   },
 
   enableNifty: true,
-  enableBank: true,
-  /** Crude OFF by default (weakest book, only one with red days). Toggle in UI. */
+  enableBank: false,
+  /** Crude OFF — Nifty 50 only desk. */
   enableCrude: false,
   niftyLots: 1,
   bankLots: 1,
@@ -110,7 +110,9 @@ const LIVE_GREEN_DNA = {
     recoveryMaxExtra: 0,
     crudeOnlyBelowBand: false,
     dustTradeRs: 10,
-    /** Anti-churn (enforced in worker): cooldown + trade caps + loss stops. */
+    /** 0 = unlimited Nifty+Bank tickets. Crude keeps its own max 4. */
+    deskMaxTradesDay: 0,
+    /** Anti-churn (enforced in worker): cooldown + loss stops. */
     cooldownMin: 12,
     bookDayLossStopRs: 500,
     deskDayLossStopRs: 900,

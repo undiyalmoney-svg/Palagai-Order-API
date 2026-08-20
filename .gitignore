@@ -6,3 +6,9 @@ logs/
 npm-debug.log*
 .idea/
 .vscode/
+
+# local scratch / research flow (not part of the server)
+.tmp-friday-1m.js
+.tmp-friday-code/
+.cursor/
+*.tmp

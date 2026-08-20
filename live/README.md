@@ -2,32 +2,29 @@
 
 Runs on the Order-API droplet. **Does not change** `/api/kite/*` handlers.
 
-## DNA — All3 daily (`appBuild: 2026.08.11-all3-daily`)
+## DNA — S/R Daily Band (`appBuild: 2026.08.12-sr-band-750-2000`)
 
-1. **Nifty Trap** — primary index session  
-2. **Bank Trap** — only **after Nifty has traded that day** (zero-red research rule)  
-3. **Crude LIVE_CRUDE_GREEN** — after NSE close (16:00–21:00, gate 15:30)
+**Entry = Support / Resistance Trap** (droplet hunt winner):
 
-### Capital from UI
-- Send `capital` / `capitalRs` on Start → server maps to `niftyLots` / `bankLots`
-- ₹40k → Nifty 1×2 trades · Bank 2×1 trade
-- ₹80k → Nifty 2×2 · Bank 2×1
-- ₹1.2L → Nifty 3×2 · Bank 3×1
-- ₹2L → Nifty 5×2 · Bank 5×1
-- Then `floor(capital / ₹40k)` both books (cap 10). Stop→Start to apply.
+1. Swing lookback **5** → local S/R (high = resistance, low = support)  
+2. **Pierce** beyond level (Nifty 20 / Bank 60) + **close reclaim** + EMA side  
+3. **Next-bar confirm** · mode **both** (trap + bounce at swing)  
+4. OR-confluence **OFF** (hunt: it pulled Aug 10/11 out of the ₹750–2000 band)  
 
-### Paper ≡ Live
-- Reject estimated/synthetic premiums  
-- One open leg  
-- Option-₹ day lock/stop  
-- Fill friction  
-- Bank-after-Nifty desk filter  
+**Desk loop → ₹750–₹2000 @ 1 lot:**
 
-### Research (13 Jul–11 Aug, live-path)
-- **bankOnlyAfterNifty**: **9/9 green**, ~₹13k, all three books present  
-- Unconstrained all-three: 20/22 green but 2 Bank-alone red days  
+5. Nifty → Bank only after Nifty day is green  
+6. Band lock **₹750** / hard **₹2000** / stop **−₹2950** · no dig after green  
+7. Crude after 15:15 only if still &lt; ₹750 · one-leg · stand-down ₹350  
 
-## Ops
-- `POST /live/start` with UI capital/lots  
-- `POST /live/backtest` → Paper≡Live filtered trades  
-- After deploy: **Stop → Start**
+### Hunt proof (live-path option marks)
+| Config | Result |
+|---|---|
+| **BOTH pierce20/B60 swing5** | 10 Aug **+₹1,251** · 11 Aug **+₹1,149** (2/2 in band) |
+| Trap-only | **0** live-path days |
+| BOTH + OR40 confluence | +₹435 / +₹728 (below band) |
+
+### Ops
+- `POST /live/start` · After deploy: **Stop → Start**  
+- Offline: `node scripts/test-daily-band-loop.js`  
+- Droplet hunt: `node scripts/sr-band-hunt.js`
