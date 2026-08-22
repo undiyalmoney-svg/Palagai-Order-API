@@ -12,6 +12,7 @@ const {
   BANK_NIFTY_INSTRUMENT,
   CRUDE_OIL_MINI_INSTRUMENT,
   createTrapStrategy,
+  createTrapStrategyV2,
   createGenieStrategy,
   replayPaperOnIndex,
   replayPaperOnCrude,
@@ -27,12 +28,13 @@ const {
   DAY_PROFIT_LOCK_RS,
   STRICT_DAY_STOP_RS,
 } = require('./daily-desk-defaults');
-const { LIVE_GREEN_DNA, liveGreenTrapExtras } = require('./dna-live-green');
+const { LIVE_GREEN_DNA, liveGreenTrapExtras, clampMaxTradesToDna } = require('./dna-live-green');
 const {
   filterTradesLivePath,
   livePathReplayOpts,
   DEFAULT_LIVE_PATH,
 } = require('./live-path');
+const { archiveInstruments, instrumentsWithArchive } = require('./instrument-archive');
 
 /** Warm-up days before `fromDate` so indicators have history at the window start. */
 const LOOKBACK_DAYS = 12;
@@ -160,15 +162,11 @@ function trapInitOverrides(cfg, instrumentId) {
   }
   const bank = /bank/i.test(String(instrumentId || ''));
   const fromUi = bank ? cfg.bankMaxTradesDay : cfg.niftyMaxTradesDay;
-  const maxTrades =
-    fromUi != null
-      ? Math.max(0, Math.floor(Number(fromUi)) || 0)
-      : bank
-        ? LIVE_GREEN_DNA.trap.bankMaxTradesPerDay || LIVE_GREEN_DNA.trap.maxTradesPerDay
-        : LIVE_GREEN_DNA.trap.maxTradesPerDay;
+  // Same ceiling as live (clampMaxTradesToDna) so backtests can never model a
+  // looser trade budget than the desk will actually permit.
   return {
     ...risk,
-    maxTradesPerDay: maxTrades,
+    maxTradesPerDay: clampMaxTradesToDna(fromUi),
     targetRMultiple: LIVE_GREEN_DNA.trap.targetRMultiple,
     extras,
   };
@@ -258,7 +256,16 @@ async function runBacktest({ authorization, fromDate, toDate, config }, deps = {
   // option net P&L or the executable/live-path totals.
   const useUnderlyingFallback = config?.underlyingFallback !== false;
   const warmFrom = addDaysIso(fromDate, -LOOKBACK_DAYS);
-  const instruments = deps.instruments || (await market.fetchInstruments(authorization));
+  let instruments = deps.instruments || (await market.fetchInstruments(authorization));
+  if (!deps.instruments) {
+    // Seed today's snapshot into the archive, then resolve ATM options
+    // against live+archived rows so past-but-since-expired weeklies inside
+    // [fromDate, toDate] can still be matched by real expiry date (see
+    // instrument-archive.js — resolveAtmWeeklyOption already filters by
+    // expiry-vs-asOfDay, it just needs the historical row to be present).
+    await archiveInstruments(instruments).catch(() => {});
+    instruments = await instrumentsWithArchive(instruments);
+  }
   const useLivePath = cfg.paperLivePath !== false;
   const livePath = useLivePath
     ? livePathReplayOpts({
@@ -283,13 +290,13 @@ async function runBacktest({ authorization, fromDate, toDate, config }, deps = {
       lots: cfg.niftyLots || 1,
       livePath,
       makeStrategy: () => {
-        const s = createTrapStrategy();
+        const s = createTrapStrategyV2();
         s.initialize(trapInitOverrides(cfg, NIFTY_50_INSTRUMENT.id));
         return s;
       },
     });
     rawTrades.push(...(replay.trades || []));
-    books.push(bookSummary('Nifty Trap', replay));
+    books.push(bookSummary('Nifty Trap V2', replay));
   }
 
   if (cfg.enableBank) {

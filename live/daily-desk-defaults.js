@@ -87,19 +87,27 @@ const DAILY_3K_PRESET = {
   enableNatGas: false,
   enableKutty: false,
   kuttyAlone: false,
-  niftyStrategy: 'trap',
-  bankStrategy: 'trap',
+  niftyStrategy: LIVE_GREEN_DNA.niftyStrategy,
+  bankStrategy: LIVE_GREEN_DNA.bankStrategy,
   crudeStrategy: 'live-crude-green',
   dayProfitLock: LIVE_GREEN_DNA.dayProfitLock !== false,
   strictDayStop: LIVE_GREEN_DNA.strictDayStop === true,
   crudeAfterIndexClose: true,
   paperLivePath: true,
   bankOnlyAfterNifty: false,
-  niftyMaxTradesDay: 0,
-  bankMaxTradesDay: 0,
+  /**
+   * MUST mirror the DNA, never hardcode 0. These are served by /live/defaults
+   * and the UI sends them straight back on Start, where parseTradeCount treats
+   * an explicit 0 as "unlimited" and overrides the strategy's own cap. Hardcoding
+   * 0 here silently re-created exactly the unlimited-trades churn the Aug-10 RCA
+   * (docs/owner-private/51) blamed for an all-red day.
+   */
+  niftyMaxTradesDay: Math.max(0, Number(LIVE_GREEN_DNA.trap.maxTradesPerDay) || 0),
+  bankMaxTradesDay: Math.max(0, Number(LIVE_GREEN_DNA.trap.bankMaxTradesPerDay) || 0),
   crudeMaxTradesDay: 0,
-  deskMaxTradesDay: 0,
-  tradeCountsNote: 'Send niftyMaxTradesDay on Start. 0 = unlimited. Stop→Start to apply.',
+  deskMaxTradesDay: Math.max(0, Number(LIVE_GREEN_DNA.liveOps.deskMaxTradesDay) || 0),
+  tradeCountsNote:
+    'Send niftyMaxTradesDay on Start. 0 = unlimited (DNA default is 3). Stop→Start to apply.',
   researchNote:
     'Pivot S/R · Nifty 50 only · lots from UI (lots / niftyLots)',
   dnaId: LIVE_GREEN_DNA.id,

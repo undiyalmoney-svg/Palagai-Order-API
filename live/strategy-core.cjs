@@ -31,14 +31,14 @@ __export(bundle_entry_exports, {
   BANK_NIFTY_INSTRUMENT: () => BANK_NIFTY_INSTRUMENT,
   CRUDE_OIL_MINI_INSTRUMENT: () => CRUDE_OIL_MINI_INSTRUMENT,
   NIFTY_50_INSTRUMENT: () => NIFTY_50_INSTRUMENT,
+  STRATEGY_BUNDLE_VERSION: () => STRATEGY_BUNDLE_VERSION,
   applySlConfirmCutoff: () => applySlConfirmCutoff,
   armPeakTrailFloor: () => armPeakTrailFloor,
   computeProtectiveSlTrigger: () => computeProtectiveSlTrigger,
   createGenieStrategy: () => createGenieStrategy,
   createTrapStrategy: () => createTrapStrategy,
+  createTrapStrategyV2: () => createTrapStrategyV2,
   effectiveProtectiveStop: () => effectiveProtectiveStop,
-  evaluateOptionPeakTrail: () => evaluateOptionPeakTrail,
-  optionPeakTrailSettingsFromExtras: () => optionPeakTrailSettingsFromExtras,
   replayPaperOnCrude: () => replayPaperOnCrude,
   replayPaperOnIndex: () => replayPaperOnIndex,
   resolveAtmCrudeMiniOption: () => resolveAtmCrudeMiniOption,
@@ -812,8 +812,8 @@ function estimateRoundTripCharges(input) {
   }
   const buyTurnover = entry * qty;
   const sellTurnover = exit * qty;
-  const brokerageBuy = input.segment === "nse_equity" ? Math.min(20, buyTurnover * 3e-4) : 20;
-  const brokerageSell = input.segment === "nse_equity" ? Math.min(20, sellTurnover * 3e-4) : 20;
+  const brokerageBuy = Math.min(20, buyTurnover * 3e-4);
+  const brokerageSell = Math.min(20, sellTurnover * 3e-4);
   const brokerageRs = roundPaise(brokerageBuy + brokerageSell);
   let exchangeRs = 0;
   let sttRs = 0;
@@ -923,21 +923,31 @@ var MANAGED_STRATEGY_IDS = {
   ALIGN_COMBO_GENIE: "align-combo-genie",
   /**
    * S/R Trap + Confirm — liquidity sweep at swing S/R + next-bar confirm · 3.5R.
-   * **Default Nifty/Bank** Paper+Live (doc 33 RCA).
+   * Superseded by SR_TRAP_CONFIRM_V2 as the Nifty/Bank default — kept
+   * registered (not deleted) for comparison against the loss history it was
+   * live for.
    */
   SR_TRAP_CONFIRM: "sr-trap-confirm",
+  /**
+   * S/R Trap + Confirm v2 — same sweep+confirm mechanics as SR_TRAP_CONFIRM,
+   * but with a single-source DNA (TRAP_V2_ENTRY_DNA_EXTRAS in
+   * strategy-dna-caps.ts, shared by this UI module and the Order-API live
+   * bundle) and an enforced hard ₹/lot option loss cap. **Default Nifty/Bank**
+   * Paper+Live.
+   */
+  SR_TRAP_CONFIRM_V2: "sr-trap-confirm-v2",
   /** Stocks Desk champion — gap-up fade ₹500 book. */
   GAP_FADE_500: "gap-fade-500"
 };
 var DEFAULT_CHANNEL_ASSIGNMENTS = {
   nifty: {
-    paper: MANAGED_STRATEGY_IDS.SR_TRAP_CONFIRM,
-    live: MANAGED_STRATEGY_IDS.SR_TRAP_CONFIRM,
+    paper: MANAGED_STRATEGY_IDS.SR_TRAP_CONFIRM_V2,
+    live: MANAGED_STRATEGY_IDS.SR_TRAP_CONFIRM_V2,
     shadow: null
   },
   bank: {
-    paper: MANAGED_STRATEGY_IDS.SR_TRAP_CONFIRM,
-    live: MANAGED_STRATEGY_IDS.SR_TRAP_CONFIRM,
+    paper: MANAGED_STRATEGY_IDS.SR_TRAP_CONFIRM_V2,
+    live: MANAGED_STRATEGY_IDS.SR_TRAP_CONFIRM_V2,
     shadow: null
   },
   stocks: {
@@ -967,9 +977,6 @@ function defaultStrategySettings(partial) {
     instrumentType: "index",
     dayStopPts: 60,
     dayProfitLockPts: 0,
-    /** Option-₹ day risk (preferred for live/paper parity; 0 = use index pts). */
-    dayStopRs: 0,
-    dayProfitLockRs: 0,
     targetRMultiple: 0,
     profitProtectEnabled: false,
     profitProtectArmR: 1,
@@ -1141,7 +1148,6 @@ function createRuleDayState() {
   return {
     tradingDate: null,
     dayNetPts: 0,
-    dayNetOptionRs: 0,
     tradesToday: 0,
     dayStopped: false,
     insideHigh: null,
@@ -1337,22 +1343,9 @@ function mergeSettings(base, partial) {
   }
   return defaultStrategySettings({ ...base, ...partial, extras: { ...base.extras, ...partial.extras } });
 }
-function recordRuleTradeClosed(state, points, dayStopPts, dayProfitLockPts = 0, money = null) {
+function recordRuleTradeClosed(state, points, dayStopPts, dayProfitLockPts = 0) {
   state.dayNetPts += points;
   state.tradesToday += 1;
-  // Live/paper parity: lock/stop on option ₹ when configured (avoids Bank
-  // "day lock" on index points while option money is still red).
-  if (money && (money.dayStopRs > 0 || money.dayProfitLockRs > 0)) {
-    const netRs = Number(money.netRs);
-    state.dayNetOptionRs = (state.dayNetOptionRs || 0) + (Number.isFinite(netRs) ? netRs : 0);
-    if (money.dayStopRs > 0 && state.dayNetOptionRs <= -money.dayStopRs) {
-      state.dayStopped = true;
-    }
-    if (money.dayProfitLockRs > 0 && state.dayNetOptionRs >= money.dayProfitLockRs) {
-      state.dayStopped = true;
-    }
-    return;
-  }
   if (dayStopPts > 0 && state.dayNetPts <= -dayStopPts) {
     state.dayStopped = true;
   }
@@ -1797,21 +1790,15 @@ function computeOptionPnl(params) {
 var tradeSeq = 0;
 function closePaperTrade(params) {
   const { open } = params;
-  const livePath = params.livePath || null;
   const lots = Math.max(1, Math.floor(params.lotsMultiplier ?? 1) || 1);
   const indexPoints = open.direction === "BUY" ? params.exitPrice - open.entry : open.entry - params.exitPrice;
-  // Retain the underlying result when Kite has no historical candle for the
-  // selected CE/PE (common for old/illiquid options). This is points only;
-  // it is not option P&L, rupees, charges, or a broker-comparable result.
   let optionExitPremium = null;
   let optionPnlRs = null;
   let premiumEstimated = open.premiumEstimated;
   let optionEntryPremium = open.optionEntryPremium;
   if (open.option) {
     const restingOpt = params.optionExitPremium != null && params.optionExitPremium > 0 ? params.optionExitPremium : null;
-    // Live path: never invent delta PnL on level exits — only real option marks.
-    const allowEstimate = !(livePath && livePath.noEstimatedExitPnl);
-    const useEstimate = allowEstimate && restingOpt == null && (open.option.source === "synthetic" || open.option.instrumentToken <= 0 || open.premiumEstimated || isLevelExitReason(params.exitReason));
+    const useEstimate = restingOpt == null && (open.option.source === "synthetic" || open.option.instrumentToken <= 0 || open.premiumEstimated || isLevelExitReason(params.exitReason));
     if (restingOpt != null) {
       optionExitPremium = restingOpt;
       premiumEstimated = false;
@@ -1823,11 +1810,6 @@ function closePaperTrade(params) {
       );
     }
     if (!useEstimate && optionEntryPremium != null && optionExitPremium != null) {
-      const friction = livePath ? Number(livePath.fillFrictionPremium) || 0 : 0;
-      if (friction > 0) {
-        optionEntryPremium = Math.max(0.05, Number(optionEntryPremium) + friction);
-        optionExitPremium = Math.max(0.05, Number(optionExitPremium) - friction);
-      }
       optionPnlRs = computeOptionPnl({
         entryPremium: optionEntryPremium,
         exitPremium: optionExitPremium,
@@ -1835,7 +1817,7 @@ function closePaperTrade(params) {
         lots
       });
       premiumEstimated = false;
-    } else if (allowEstimate) {
+    } else {
       const est = applyEstimatedOptionPnl({
         indexPoints,
         entryPremium: optionEntryPremium,
@@ -1847,10 +1829,6 @@ function closePaperTrade(params) {
       optionExitPremium = est.exit;
       optionPnlRs = est.pnl;
       premiumEstimated = true;
-    } else {
-      // Live path: missing exit mark → no fictional ₹ (trade marked estimated, PnL null).
-      premiumEstimated = true;
-      optionPnlRs = null;
     }
   }
   tradeSeq += 1;
@@ -1895,7 +1873,6 @@ function closePaperTrade(params) {
     optionExitPremium,
     optionPnlRs,
     premiumEstimated,
-    pnlSource: optionPnlRs != null ? "option_mark" : "underlying_proxy",
     optionEntryEdge: open.optionEntryEdge,
     outcome: indexPoints > 0 ? "WIN" : indexPoints < 0 ? "LOSS" : "FLAT",
     strategyId: params.strategyId,
@@ -1928,7 +1905,6 @@ function replayPaperOnIndex(params) {
   const kuttyMargin = params.kuttyMargin ?? { usedRs: 0, trapOpenLegs: 0 };
   const kuttyState = createKuttyDayState();
   const liveHook = params.liveHook;
-  const livePath = params.livePath || null;
   const afterBar = liveHook?.afterBarTime ?? null;
   const hookActive = (barTime) => !!liveHook && (!afterBar || barTime > afterBar);
   const strategy = params.strategy ?? (() => {
@@ -2036,8 +2012,7 @@ function replayPaperOnIndex(params) {
           lotsMultiplier,
           strategyId: isKutty ? KUTTY_ID : strategy.id,
           strategyName: isKutty ? KUTTY_NAME : strategy.name,
-          optionExitPremium: exit.optionExitPremium ?? null,
-          livePath
+          optionExitPremium: exit.optionExitPremium ?? null
         });
         trades.push(closed);
         if (hookActive(candle.date)) {
@@ -2047,11 +2022,9 @@ function replayPaperOnIndex(params) {
           recordKuttyClosed(kuttyState);
           kuttyMargin.usedRs = Math.max(0, kuttyMargin.usedRs - KUTTY_MARGIN_PER_TRADE_RS);
         } else {
-          const moneyRs = closed.netOptionPnlRs ?? closed.optionPnlRs;
-          strategy.onTradeClosed?.(closed.indexPoints, day, moneyRs);
+          strategy.onTradeClosed?.(closed.indexPoints, day);
           kuttyMargin.trapOpenLegs = Math.max(0, kuttyMargin.trapOpenLegs - 1);
         }
-        if (livePath?.deskGate) livePath.deskGate.release();
         dayNetByDate[day] = (dayNetByDate[day] ?? 0) + closed.indexPoints;
         open = null;
         lastSignal = `Closed: ${exit.reason}`;
@@ -2136,34 +2109,6 @@ function replayPaperOnIndex(params) {
         premiumEstimated = true;
       }
     }
-    // Paper ≡ Live: skip entries the broker would never take.
-    if (livePath && livePath.rejectEstimatedPremium !== false && premiumEstimated) {
-      lastSignal = `Live-path skip \u2014 estimated/synthetic premium`;
-      continue;
-    }
-    if (livePath && optionEntryPremium != null) {
-      const { evaluateChargeEntryGate } = require("./charge-entry-gate");
-      const lots = Math.max(1, Math.floor(lotsMultiplier ?? 1) || 1);
-      const qty = Math.max(1, Number(option.lotSize) || 1) * lots;
-      const gate = evaluateChargeEntryGate({
-        instrumentId,
-        entryPremium: optionEntryPremium,
-        quantity: qty,
-        indexEntry: entryPrice,
-        indexStop: entryStop,
-        indexTarget: entryTarget,
-        targetRMultiple: strategy?.getSettings?.()?.targetRMultiple,
-        ops: livePath
-      });
-      if (gate.skip) {
-        lastSignal = gate.reason;
-        continue;
-      }
-    }
-    if (livePath?.deskGate && !livePath.deskGate.tryOpen()) {
-      lastSignal = `Live-path skip \u2014 maxOpenLegs ${livePath.deskGate.maxOpenLegs}`;
-      continue;
-    }
     open = {
       direction: entryAction,
       entry: entryPrice,
@@ -2232,8 +2177,7 @@ function replayPaperOnIndex(params) {
         optionCandlesByToken,
         lotsMultiplier,
         strategyId: isKutty ? KUTTY_ID : strategy.id,
-        strategyName: isKutty ? KUTTY_NAME : strategy.name,
-        livePath
+        strategyName: isKutty ? KUTTY_NAME : strategy.name
       });
       trades.push(closed);
       if (hookActive(candle.date)) {
@@ -2243,11 +2187,9 @@ function replayPaperOnIndex(params) {
         recordKuttyClosed(kuttyState);
         kuttyMargin.usedRs = Math.max(0, kuttyMargin.usedRs - KUTTY_MARGIN_PER_TRADE_RS);
       } else {
-        const moneyRs = closed.netOptionPnlRs ?? closed.optionPnlRs;
-        strategy.onTradeClosed?.(closed.indexPoints, day, moneyRs);
+        strategy.onTradeClosed?.(closed.indexPoints, day);
         kuttyMargin.trapOpenLegs = Math.max(0, kuttyMargin.trapOpenLegs - 1);
       }
-      if (livePath?.deskGate) livePath.deskGate.release();
       dayNetByDate[day] = (dayNetByDate[day] ?? 0) + closed.indexPoints;
       if (closed.option) {
         chosenOption = closed.option;
@@ -2922,8 +2864,6 @@ function runCrudeSessionOr(params) {
   const orStart = params.orStart ?? CRUDE_SOR_OR_START;
   const orEnd = params.orEnd ?? CRUDE_SOR_OR_END;
   const maxOrWidth = params.maxOrWidth ?? CRUDE_SOR_MAX_OR_WIDTH;
-  const minOrWidth = params.minOrWidth ?? 0;
-  const breakBufferPts = params.breakBufferPts ?? 0;
   const maxTradesDay = params.maxTradesDay ?? CRUDE_SOR_MAX_TRADES_DAY;
   const tradingDate = extractTradeDate(candle.date);
   const month = tradingDate.slice(0, 7);
@@ -3009,15 +2949,10 @@ function runCrudeSessionOr(params) {
   if (maxOrWidth > 0 && width > maxOrWidth) {
     return wait5(candle, `OR too wide (${width.toFixed(1)}>${maxOrWidth})`);
   }
-  if (minOrWidth > 0 && width < minOrWidth) {
-    return wait5(candle, `OR too narrow (${width.toFixed(1)}<${minOrWidth})`);
-  }
   let action = null;
-  const upLevel = orb.high + breakBufferPts;
-  const dnLevel = orb.low - breakBufferPts;
-  if (candle.close > upLevel && candle.close > candle.open) {
+  if (candle.close > orb.high && candle.close > candle.open) {
     action = "BUY";
-  } else if (candle.close < dnLevel && candle.close < candle.open) {
+  } else if (candle.close < orb.low && candle.close < candle.open) {
     action = "SELL";
   }
   if (!action) {
@@ -3086,39 +3021,6 @@ var CRUDE_ALL_GREEN_PARAMS = {
   defaultEnableEvening: true,
   dailyBandLabel: "OR 09:00\u201309:30 \xB7 SL\u20B9150 \xB7 trail \u20B9500\u2192\u20B9240 \xB7 no OR skip",
   ...PROTECT_TRADE_CUTOFF
-};
-/** Crude Treasure — after NSE · zero-red live-path (hunt 2026-08-12). */
-var CRUDE_LIVE_GREEN_PARAMS = {
-  profileId: "live-crude-green",
-  label: "Crude Treasure (after NSE)",
-  stopPts: 20,
-  morningTargetPts: 60,
-  eveningTargetPts: 60,
-  targetRMultiple: 0,
-  dayLossStopPts: 0,
-  strictDayLossPts: 0,
-  dayProfitLockPts: 0,
-  entryMode: "session-or",
-  requireConfirm: false,
-  firstWinLock: false,
-  eveningEntryStart: "16:00",
-  eveningEntryEnd: "21:00",
-  sessionOrStart: CRUDE_SOR_OR_START,
-  sessionOrEnd: CRUDE_SOR_OR_END,
-  minOrWidth: 35,
-  maxOrWidth: 65,
-  breakBufferPts: 0,
-  maxEveningTradesDay: 0,
-  defaultEnableMorning: false,
-  defaultEnableEvening: true,
-  dailyBandLabel: "Treasure \xB7 after NSE \xB7 OR35\u201365 \xB7 16:00\u201321:00 \xB7 SL20/TP60 \xB7 no confirm \xB7 trail \u20B9350\u2192\u20B9180 \xB7 unlimited",
-  profitLockArmRs: 350,
-  profitLockLockRs: 180,
-  profitLockGivebackRs: 170,
-  slConfirmCutoffEnabled: false,
-  slConfirmCutoffFracR: 0.55,
-  slConfirmCutoffMaxMfeR: 0.75,
-  slConfirmSoftRs: 700
 };
 var CRUDE_SELECTIVE_PARAMS = {
   profileId: "selective",
@@ -3270,7 +3172,6 @@ var NATGAS_DAILY_PROFIT_PARAMS = {
 };
 var CRUDE_STRATEGY_PROFILES = {
   "all-green": CRUDE_ALL_GREEN_PARAMS,
-  "live-crude-green": CRUDE_LIVE_GREEN_PARAMS,
   selective: CRUDE_SELECTIVE_PARAMS,
   "daily-profit": CRUDE_DAILY_PROFIT_PARAMS,
   "daily-profit-ng": NATGAS_DAILY_PROFIT_PARAMS,
@@ -3428,18 +3329,9 @@ function resolveAtmCrudeMiniOption(params) {
     source: "synthetic"
   };
 }
-/**
- * Kite/MCX trading lot_size is 1 (1 order qty = 1 lot). Do NOT inflate to 10 —
- * that placed 10 lots when Autobot asked for 1 (see kite.trade/forum/14531).
- */
 function crudeMiniLotSize(lotSize) {
   const n = Math.floor(Number(lotSize) || 0);
-  return n > 0 ? n : 1;
-}
-/** Premium is ₹/barrel; 1 Kite qty = 10 bbl mini. Skip if lotSize already 10. */
-function crudeMiniPremiumPnlMult(lotSize) {
-  const n = Math.floor(Number(lotSize) || 0);
-  return n >= 10 ? 1 : 10;
+  return Math.max(10, n > 0 ? n : 10);
 }
 function toCrudePaperOption(instrument, source) {
   return {
@@ -3477,7 +3369,7 @@ function buildSyntheticCrudeOption(direction, spot, asOfDay, frontExpiry, opts) 
     expiry,
     strike,
     tickSize: 0.05,
-    lotSize: 1,
+    lotSize: 10,
     lastPrice: 0
   };
 }
@@ -3614,20 +3506,19 @@ function closePaperTrade2(params) {
       params.exitTime,
       "exit"
     );
-    const pnlMult = crudeMiniPremiumPnlMult(open.option.lotSize);
     if (open.optionEntryPremium != null && optionExitPremium != null && !premiumEstimated) {
-      optionPnlRs = (optionExitPremium - open.optionEntryPremium) * open.option.lotSize * lots * pnlMult;
+      optionPnlRs = (optionExitPremium - open.optionEntryPremium) * open.option.lotSize * lots;
       premiumEstimated = false;
     } else {
       const estMove = estimatePremiumMove(indexPoints);
       const entryPx = open.optionEntryPremium ?? Math.max(10, Math.abs(estMove) + 20);
       optionExitPremium = entryPx + estMove;
-      optionPnlRs = estMove * open.option.lotSize * lots * pnlMult;
+      optionPnlRs = estMove * open.option.lotSize * lots;
       premiumEstimated = true;
     }
   }
   tradeSeq2 += 1;
-  const closed = {
+  return {
     id: `crude-${tradeSeq2}-${params.exitTime}`,
     instrumentId: params.instrumentId,
     instrumentName: params.instrumentName,
@@ -3647,22 +3538,6 @@ function closePaperTrade2(params) {
     premiumEstimated,
     outcome: optionPnlRs != null ? optionPnlRs > 0 ? "WIN" : optionPnlRs < 0 ? "LOSS" : "FLAT" : indexPoints > 0 ? "WIN" : indexPoints < 0 ? "LOSS" : "FLAT"
   };
-  // Charge-adjust when both premiums are known (live fee parity with index books).
-  if (optionPnlRs != null && open.optionEntryPremium != null && optionExitPremium != null && open.option) {
-    const qty = Math.max(0, Math.floor(open.option.lotSize || 0) * lots);
-    if (qty > 0) {
-      const charged = applyChargesToOptionTrade({
-        segment: "mcx_option",
-        entryPremium: open.optionEntryPremium,
-        exitPremium: optionExitPremium,
-        quantity: qty,
-        grossPnlRs: optionPnlRs
-      });
-      closed.chargesRs = charged.chargesRs;
-      closed.netOptionPnlRs = charged.netPnlRs;
-    }
-  }
-  return closed;
 }
 function replayPaperOnCrude(params) {
   const {
@@ -3784,8 +3659,6 @@ function replayPaperOnCrude(params) {
           orStart: tradeParams.sessionOrStart,
           orEnd: tradeParams.sessionOrEnd,
           maxOrWidth: tradeParams.maxOrWidth,
-          minOrWidth: tradeParams.minOrWidth,
-          breakBufferPts: tradeParams.breakBufferPts,
           maxTradesDay: tradeParams.maxEveningTradesDay
         });
         if (afternoon.action === "BUY" || afternoon.action === "SELL") {
@@ -3980,11 +3853,11 @@ function replayPaperOnCrude(params) {
 // src/app/core/strategy-manager/config/strategy-dna-caps.ts
 var TRAP_1LOT_DAILY_DNA_EXTRAS = {
   piercePts: 20,
-  bankPiercePts: 60,
-  /** 1-lot bands — Paper/Live multiply by lotsMultiplier. Research trail. */
-  profitLockArmRs: 400,
-  profitLockLockRs: 200,
-  profitLockGivebackRs: 150,
+  bankPiercePts: 40,
+  /** 1-lot bands — Paper/Live multiply by lotsMultiplier. */
+  profitLockArmRs: 100,
+  profitLockLockRs: 50,
+  profitLockGivebackRs: 50,
   slConfirmCutoffEnabled: false,
   slConfirmCutoffFracR: 0,
   slConfirmCutoffMaxMfeR: 0,
@@ -3992,14 +3865,35 @@ var TRAP_1LOT_DAILY_DNA_EXTRAS = {
   trapMode: "both",
   /** Must stay 0 — bounce-OR widen drifts DNA and hurts option money. */
   bounceOrPierceMult: 0,
-  bounceOrPierceCap: 0,
-  /** Live Green: cut when option ₹ adverse ≥ this (0 = off for pure paper DNA). */
-  optionStandDownRs: 350
+  bounceOrPierceCap: 0
+};
+var TRAP_V2_ENTRY_DNA_EXTRAS = {
+  ...TRAP_1LOT_DAILY_DNA_EXTRAS,
+  /** Hard ₹/lot loss cap — read by computeProtectiveSlTrigger's maxLossRs param. */
+  maxOptionLossRs: 300,
+  /**
+   * Active intraday entry windows (IST), [start, end).
+   *
+   * Research: 5yr Black-Scholes backtest over REAL Nifty 5-min index candles
+   * (scripts/bs-backtest.js). Buckets selected on TRAIN 2021-24 only, then
+   * confirmed on untouched HOLDOUT 2025-26:
+   *   per-trade ₹183 → ₹275, profit factor 1.76 → 2.20, max DD −10.6k → −6.3k.
+   * The train lift (+₹66/trade) and holdout lift (+₹92/trade) are the same
+   * order of magnitude — the signature of a real effect rather than a fit.
+   *
+   * Cut windows are 10:30-11:00 and the 12:00-13:30 lunch lull, where the
+   * edge was flat-to-negative (13:00 bucket: positive in only 3 of 6 years).
+   * At ₹80/round-trip every removed marginal trade is a guaranteed saving,
+   * which is most of why this helps.
+   */
+  entryWindows: "09:45-10:30,11:00-12:00,13:30-14:45"
 };
 function dnaCapsForStrategy(strategyId, channel) {
   switch (strategyId) {
     case MANAGED_STRATEGY_IDS.SR_TRAP_CONFIRM:
-      return { maxTradesPerDay: 2, targetRMultiple: 3.5 };
+      return { maxTradesPerDay: 3, targetRMultiple: 3.5 };
+    case MANAGED_STRATEGY_IDS.SR_TRAP_CONFIRM_V2:
+      return { maxTradesPerDay: 3, targetRMultiple: 3.5, maxOptionLossRs: 300 };
     case MANAGED_STRATEGY_IDS.ALIGN_COMBO_GENIE:
       return channel === "bank" ? { maxTradesPerDay: 0, targetRMultiple: 1.5 } : { maxTradesPerDay: 0, targetRMultiple: 3 };
     case MANAGED_STRATEGY_IDS.SMART_PULLBACK_PRO:
@@ -4608,6 +4502,12 @@ function computeProtectiveSlTrigger(params) {
     );
     trigger = roundOptionPremiumTick(Math.max(0.05, ltp - cushion));
   }
+  const maxLossRs = Math.max(0, Number(params.maxLossRs) || 0);
+  const lotUnits = Math.max(0, Number(params.lotUnits) || 0);
+  if (maxLossRs > 0 && lotUnits > 0) {
+    const fromCap = fill - maxLossRs / lotUnits;
+    trigger = roundOptionPremiumTick(Math.max(trigger, fromCap));
+  }
   return trigger;
 }
 
@@ -4667,11 +4567,30 @@ function createSrTrapDayState() {
     barSeq: 0
   };
 }
-function recordSrTrapTradeClosed(state, points, dayStopPts, dayProfitLockPts = 0, money = null) {
-  recordRuleTradeClosed(state, points, dayStopPts, dayProfitLockPts, money);
+function recordSrTrapTradeClosed(state, points, dayStopPts, dayProfitLockPts = 0) {
+  recordRuleTradeClosed(state, points, dayStopPts, dayProfitLockPts);
 }
 function num2(v, fallback) {
   return typeof v === "number" && Number.isFinite(v) ? v : fallback;
+}
+function parseEntryWindows(raw) {
+  if (typeof raw !== "string" || !raw.trim()) {
+    return [];
+  }
+  const out = [];
+  for (const part of raw.split(",")) {
+    const [a, b] = part.trim().split("-");
+    if (/^\d{2}:\d{2}$/.test(a ?? "") && /^\d{2}:\d{2}$/.test(b ?? "")) {
+      out.push([a, b]);
+    }
+  }
+  return out;
+}
+function inEntryWindows(time, windows) {
+  if (!windows.length) {
+    return true;
+  }
+  return windows.some(([a, b]) => time >= a && time < b);
 }
 function readTrapExtras(settings) {
   const x = settings.extras ?? {};
@@ -4687,19 +4606,10 @@ function readTrapExtras(settings) {
     minConfirmBody: num2(x["minConfirmBody"], 0),
     bounceOrPierceMult: Math.max(0, num2(x["bounceOrPierceMult"], 0)),
     bounceOrPierceCap: Math.max(0, num2(x["bounceOrPierceCap"], 0)),
-    /** 0 = off. If >0, swing S/R must sit within N pts of morning OR hi/lo. */
-    orConfluencePts: Math.max(0, num2(x["orConfluencePts"], 0)),
-    /** Prefer prior-day high/low as structural S/R when within this many pts (0=off). */
-    pdhlConfluencePts: Math.max(0, num2(x["pdhlConfluencePts"], 0)),
-    /** window = rolling max/min · pivot = confirmed fractal S/R (cleaner levels). */
-    srMethod: x["srMethod"] === "pivot" ? "pivot" : "window",
-    /** Bars each side for pivot confirmation (2 → 5-bar fractal). */
-    pivotStrength: Math.max(1, Math.floor(num2(x["pivotStrength"], 2))),
-    /** true → SL exactly at liquidity-sweep extreme (perfect S/R stop). */
-    perfectSweepSl: x["perfectSweepSl"] !== false
+    entryWindows: parseEntryWindows(x["entryWindows"])
   };
 }
-function morningOrLevels(dayBars, orEnd) {
+function morningOrWidth(dayBars, orEnd) {
   let hi = -Infinity;
   let lo = Infinity;
   for (const b of dayBars) {
@@ -4711,87 +4621,20 @@ function morningOrLevels(dayBars, orEnd) {
     lo = Math.min(lo, b.low);
   }
   if (!Number.isFinite(hi) || !Number.isFinite(lo) || hi < lo) {
-    return null;
+    return 0;
   }
-  return { hi, lo, width: hi - lo };
-}
-function morningOrWidth(dayBars, orEnd) {
-  const or = morningOrLevels(dayBars, orEnd);
-  return or ? or.width : 0;
-}
-function priorDayHl(series, day) {
-  let last = null;
-  let hi = -Infinity;
-  let lo = Infinity;
-  for (const b of series) {
-    const d = extractTradeDate(b.date);
-    if (d >= day) break;
-    if (d !== last) {
-      last = d;
-      hi = -Infinity;
-      lo = Infinity;
-    }
-    hi = Math.max(hi, b.high);
-    lo = Math.min(lo, b.low);
-  }
-  if (last == null || !Number.isFinite(hi) || !Number.isFinite(lo) || hi < lo) return null;
-  return { hi, lo };
-}
-function levelNear(level, anchors, pts) {
-  if (!(pts > 0) || !anchors?.length || !(level > 0)) return false;
-  return anchors.some((a) => a > 0 && Math.abs(level - a) <= pts);
+  return hi - lo;
 }
 function swingHL3(dayBars, i, lb) {
   const start = Math.max(0, i - lb);
   const window = dayBars.slice(start, i);
   if (!window.length) {
-    return { sh: dayBars[i].high, sl: dayBars[i].low, source: "window" };
+    return { sh: dayBars[i].high, sl: dayBars[i].low };
   }
   return {
     sh: Math.max(...window.map((b) => b.high)),
-    sl: Math.min(...window.map((b) => b.low)),
-    source: "window"
+    sl: Math.min(...window.map((b) => b.low))
   };
-}
-/**
- * Confirmed pivot S/R — a bar is resistance/support only after `strength`
- * bars on each side have failed to break it. Falls back to window swing.
- */
-function pivotHL(dayBars, i, strength) {
-  const s = Math.max(1, Math.floor(strength) || 2);
-  let sh = null;
-  let sl = null;
-  // Need j+s < i so the pivot is confirmed before the signal bar.
-  for (let j = i - s - 1; j >= s; j--) {
-    const h = dayBars[j].high;
-    const l = dayBars[j].low;
-    let isPH = true;
-    let isPL = true;
-    for (let k = j - s; k <= j + s; k++) {
-      if (k === j) continue;
-      if (dayBars[k].high > h) isPH = false;
-      if (dayBars[k].low < l) isPL = false;
-      if (!isPH && !isPL) break;
-    }
-    if (isPH && sh == null) sh = h;
-    if (isPL && sl == null) sl = l;
-    if (sh != null && sl != null) break;
-  }
-  if (sh == null || sl == null) {
-    const w = swingHL3(dayBars, i, s * 2 + 1);
-    return {
-      sh: sh != null ? sh : w.sh,
-      sl: sl != null ? sl : w.sl,
-      source: "pivot-fallback"
-    };
-  }
-  return { sh, sl, source: "pivot" };
-}
-function resolveSrLevels(dayBars, i, extras) {
-  if (extras.srMethod === "pivot") {
-    return pivotHL(dayBars, i, extras.pivotStrength);
-  }
-  return swingHL3(dayBars, i, extras.swingLb);
 }
 function runSrTrapConfirm(ctx, state, settings) {
   const candle = ctx.candle5m;
@@ -4803,7 +4646,6 @@ function runSrTrapConfirm(ctx, state, settings) {
   if (state.tradingDate !== day) {
     state.tradingDate = day;
     state.dayNetPts = 0;
-    state.dayNetOptionRs = 0;
     state.tradesToday = 0;
     state.dayStopped = false;
     state.pending = null;
@@ -4827,12 +4669,7 @@ function runSrTrapConfirm(ctx, state, settings) {
     analysis: { strategy: "sr-trap-confirm", ...analysis }
   });
   if (state.dayStopped) {
-    const rs = state.dayNetOptionRs || 0;
-    const netLabel =
-      settings.dayProfitLockRs > 0 || settings.dayStopRs > 0
-        ? `\u20B9${Math.round(rs)}`
-        : `${state.dayNetPts.toFixed(1)} pts`;
-    return skip(`Day stopped (net ${netLabel})`);
+    return skip(`Day stopped (net ${state.dayNetPts.toFixed(1)})`);
   }
   if (settings.maxTradesPerDay > 0 && state.tradesToday >= settings.maxTradesPerDay) {
     return skip(
@@ -4841,16 +4678,17 @@ function runSrTrapConfirm(ctx, state, settings) {
   }
   const dayBars = barsOnDay(series, day);
   const i = dayBars.findIndex((b) => b.date === candle.date);
-  const warmBars =
-    extras.srMethod === "pivot" ? extras.pivotStrength * 2 + 2 : extras.swingLb;
-  if (i < warmBars) {
-    return wait6("Warming S/R lookback");
+  if (i < extras.swingLb) {
+    return wait6("Warming swing lookback");
   }
   if (state.pending) {
     const p = state.pending;
     state.pending = null;
     if (time < settings.entryTimeStart || time > settings.entryTimeEnd) {
       return wait6("Confirm outside entry window");
+    }
+    if (!inEntryWindows(time, extras.entryWindows)) {
+      return wait6("Confirm outside active time window");
     }
     const body = Math.abs(candle.close - candle.open);
     const bullOk = p.dir === 1 && candle.close > candle.open && candle.close > p.signalClose;
@@ -4862,10 +4700,7 @@ function runSrTrapConfirm(ctx, state, settings) {
       return wait6("Confirm body too small");
     }
     const fill = candle.open;
-    // Perfect SL: keep the sweep-extreme stop from the signal bar (do not widen).
-    let stop2 = p.stop;
-    if (p.dir === 1) stop2 = Math.min(stop2, fill - 1);
-    else stop2 = Math.max(stop2, fill + 1);
+    const stop2 = p.dir === 1 ? Math.min(p.stop, fill - 1) : Math.max(p.stop, fill + 1);
     const risk2 = Math.abs(fill - stop2);
     const bank2 = /bank/i.test(ctx.instrumentId ?? "");
     const maxRisk2 = bank2 ? Math.max(extras.maxRisk, 50) : extras.maxRisk;
@@ -4881,13 +4716,10 @@ function runSrTrapConfirm(ctx, state, settings) {
       stopLoss: stop2,
       target,
       riskRewardRatio: rr,
-      reason: `S/R ${p.setup || "trap"} confirm ${p.dir === 1 ? "BUY" : "SELL"} \xB7 SL@sweep \xB7 ${rr}R`,
+      reason: `S/R trap confirm ${p.dir === 1 ? "BUY" : "SELL"} \xB7 ${rr}R`,
       analysis: {
         strategy: "sr-trap-confirm",
-        setup: p.setup || "trap_next_confirm",
-        srLevel: p.srLevel,
-        srSource: p.srSource,
-        sweepExtreme: p.sweepExtreme,
+        setup: "trap_next_confirm",
         risk: risk2,
         rr
       }
@@ -4899,19 +4731,20 @@ function runSrTrapConfirm(ctx, state, settings) {
   if (time > settings.entryTimeEnd) {
     return skip(`After entry window ${settings.entryTimeEnd}`);
   }
+  if (!inEntryWindows(time, extras.entryWindows)) {
+    return wait6("Outside active time window");
+  }
   const closes = series.map((c) => c.close);
   const ema = emaLast2(closes, settings.emaLength);
   if (ema == null) {
     return wait6(`EMA-${settings.emaLength} warming up`);
   }
-  const { sh, sl, source: srSource } = resolveSrLevels(dayBars, i, extras);
+  const { sh, sl } = swingHL3(dayBars, i, extras.swingLb);
   const isBank = /bank/i.test(ctx.instrumentId ?? "");
   const trapPierce = isBank && extras.bankPiercePts > 0 ? extras.bankPiercePts : extras.piercePts;
   let bouncePierce = trapPierce;
-  const orEnd = settings.orEnd || "09:45";
-  const orLevels = morningOrLevels(dayBars, orEnd);
   if (extras.bounceOrPierceMult > 0) {
-    const orW = orLevels ? orLevels.width : 0;
+    const orW = morningOrWidth(dayBars, settings.orEnd || "09:45");
     if (orW > 0) {
       bouncePierce = Math.max(trapPierce, orW * extras.bounceOrPierceMult);
       if (extras.bounceOrPierceCap > 0) {
@@ -4923,7 +4756,6 @@ function runSrTrapConfirm(ctx, state, settings) {
   const oo = candle.open;
   const hh = candle.high;
   const ll = candle.low;
-  // Classic S/R trap: liquidity sweep beyond swing support/resistance + reclaim.
   const trapBuy = ll < sl - trapPierce && cc > sl && cc > oo;
   const trapSell = hh > sh + trapPierce && cc < sh && cc < oo;
   const rng = Math.max(hh - ll, 1e-9);
@@ -4931,63 +4763,19 @@ function runSrTrapConfirm(ctx, state, settings) {
   const bounceSell = hh >= sh - bouncePierce && hh <= sh + bouncePierce * 2 && cc < oo && cc <= sh && (cc - ll) / rng < 0.35;
   let dir = 0;
   let stop = 0;
-  let setup = "";
-  let sweepExtreme = 0;
-  const pad = extras.perfectSweepSl ? Math.min(extras.slPad, 1) : extras.slPad;
-  if (trapBuy) {
+  if (trapBuy || extras.mode === "both" && bounceBuy) {
     if (cc > ema) {
       dir = 1;
-      sweepExtreme = ll;
-      // Perfect SL = beyond the swept liquidity extreme under support.
-      stop = extras.perfectSweepSl ? ll - pad : ll - extras.slPad;
-      setup = "sr_trap";
+      stop = ll - extras.slPad;
     }
-  } else if (trapSell) {
+  } else if (trapSell || extras.mode === "both" && bounceSell) {
     if (cc < ema) {
       dir = -1;
-      sweepExtreme = hh;
-      stop = extras.perfectSweepSl ? hh + pad : hh + extras.slPad;
-      setup = "sr_trap";
-    }
-  } else if (extras.mode === "both" && bounceBuy) {
-    if (cc > ema) {
-      dir = 1;
-      sweepExtreme = ll;
-      stop = extras.perfectSweepSl ? ll - pad : ll - extras.slPad;
-      setup = "sr_bounce";
-    }
-  } else if (extras.mode === "both" && bounceSell) {
-    if (cc < ema) {
-      dir = -1;
-      sweepExtreme = hh;
-      stop = extras.perfectSweepSl ? hh + pad : hh + extras.slPad;
-      setup = "sr_bounce";
+      stop = hh + extras.slPad;
     }
   }
   if (!dir) {
-    return wait6("No S/R trap / bounce", { sh, sl, ema, or: orLevels, srSource });
-  }
-  // Structural S/R filter: swing level must align with morning OR and/or PDH/PDL.
-  const anchors = [];
-  if (orLevels) anchors.push(orLevels.hi, orLevels.lo);
-  if (extras.pdhlConfluencePts > 0) {
-    const pd = priorDayHl(series, day);
-    if (pd) anchors.push(pd.hi, pd.lo);
-  }
-  const level = dir === 1 ? sl : sh;
-  if (extras.orConfluencePts > 0) {
-    const orAnchors = orLevels ? [orLevels.hi, orLevels.lo] : [];
-    if (!levelNear(level, orAnchors, extras.orConfluencePts)) {
-      return wait6("S/R not at opening-range level", { sh, sl, ema, or: orLevels, setup });
-    }
-  }
-  if (extras.pdhlConfluencePts > 0) {
-    const pd = priorDayHl(series, day);
-    const pdAnchors = pd ? [pd.hi, pd.lo] : [];
-    // If OR confluence already required, PDHL is optional boost; when OR off, PDHL can stand alone.
-    if (extras.orConfluencePts <= 0 && !levelNear(level, pdAnchors, extras.pdhlConfluencePts)) {
-      return wait6("S/R not at prior-day high/low", { sh, sl, ema, pd, setup });
-    }
+    return wait6("No S/R trap / bounce", { sh, sl, ema });
   }
   const risk = Math.abs(cc - stop);
   const bank = /bank/i.test(ctx.instrumentId ?? "");
@@ -5000,21 +4788,12 @@ function runSrTrapConfirm(ctx, state, settings) {
     dir,
     stop,
     signalClose: cc,
-    barSeq: state.barSeq,
-    setup,
-    srLevel: level,
-    srSource,
-    sweepExtreme
+    barSeq: state.barSeq
   };
-  return wait6(dir === 1 ? "S/R trap BUY armed \u2014 wait confirm" : "S/R trap SELL armed \u2014 wait confirm", {
+  return wait6(dir === 1 ? "Trap BUY armed \u2014 wait confirm" : "Trap SELL armed \u2014 wait confirm", {
     sh,
     sl,
     ema,
-    or: orLevels,
-    setup,
-    srSource,
-    sweepExtreme,
-    stop,
     armed: dir
   });
 }
@@ -5024,20 +4803,6 @@ function srTrapExitLogic(candle, open, closes, settings, ctx) {
     open.lotsMultiplier
   );
   const optionMarksKnown = typeof open.optionPeakMfeRs === "number" && open.optionEntryPremium != null && open.optionEntryPremium > 0 && open.optionBarLow != null && open.optionLotUnits != null && open.optionLotUnits > 0;
-  // Live Green: hard option-₹ stand-down (cuts before index SL / trail lag).
-  // Band is defined per 1 lot — scale with desk lots (MAE already includes lotUnits).
-  const standDownRs =
-    num2(settings.extras?.optionStandDownRs, 0) * clampTrailLots(open.lotsMultiplier);
-  if (standDownRs > 0 && optionMarksKnown) {
-    const maeRs = Math.max(0, (open.optionEntryPremium - open.optionBarLow) * open.optionLotUnits);
-    if (maeRs >= standDownRs) {
-      return {
-        exitPrice: candle.close,
-        reason: `Option stand-down \u2212\u20B9${Math.round(maeRs)}`,
-        optionExitPremium: open.optionBarLow
-      };
-    }
-  }
   const armedIndex = armPeakTrailFloor(candle, open, settings, ctx.instrumentId ?? "");
   const cutoff = applySlConfirmCutoff(candle, open, settings, ctx.instrumentId ?? "");
   if (cutoff) {
@@ -5159,6 +4924,28 @@ var TRAP_DEFAULTS = defaultStrategySettings({
     ...TRAP_1LOT_DAILY_DNA_EXTRAS
   }
 });
+var trapV2Caps = dnaCapsForStrategy(MANAGED_STRATEGY_IDS.SR_TRAP_CONFIRM_V2, "nifty");
+var TRAP_V2_DEFAULTS = defaultStrategySettings({
+  entryTimeStart: "09:45",
+  entryTimeEnd: "14:45",
+  exitTime: "15:15",
+  orEnd: "09:45",
+  stopLossPts: 30,
+  bankStopLossPts: 50,
+  emaLength: 50,
+  maxTradesPerDay: trapV2Caps.maxTradesPerDay,
+  instrumentType: "futures",
+  dayStopPts: 60,
+  dayProfitLockPts: 0,
+  targetRMultiple: trapV2Caps.targetRMultiple ?? 3.5,
+  profitProtectEnabled: true,
+  profitProtectArmR: 1,
+  profitProtectLockR: 0,
+  regimeFilterEnabled: false,
+  positionSizeLots: 1,
+  extras: { ...TRAP_V2_ENTRY_DNA_EXTRAS }
+});
+var STRATEGY_BUNDLE_VERSION = "sr-trap-v2.2026-08-22.2";
 var GENIE_DEFAULTS = defaultStrategySettings({
   entryTimeStart: "10:15",
   entryTimeEnd: "14:30",
@@ -5234,21 +5021,77 @@ function createTrapStrategy() {
     exitLogic(candle, open, closes, ctx) {
       return srTrapExitLogic(candle, open, closes, settings, ctx);
     },
-    onTradeClosed(points, _day, optionRs) {
-      const useMoney = settings.dayProfitLockRs > 0 || settings.dayStopRs > 0;
-      const money = useMoney
-        ? {
-            netRs: optionRs != null ? Number(optionRs) : 0,
-            dayProfitLockRs: settings.dayProfitLockRs || 0,
-            dayStopRs: settings.dayStopRs || 0
-          }
-        : null;
+    onTradeClosed(points) {
       recordSrTrapTradeClosed(
         state,
         points,
-        useMoney ? 0 : settings.dayStopPts,
-        useMoney ? 0 : settings.dayProfitLockPts ?? 0,
-        money
+        settings.dayStopPts,
+        settings.dayProfitLockPts ?? 0
+      );
+    },
+    getSettings() {
+      return { ...settings, extras: { ...settings.extras } };
+    },
+    updateSettings(partial) {
+      settings = mergeSettings(settings, partial);
+    }
+  };
+  return api;
+}
+function createTrapStrategyV2() {
+  let settings = mergeSettings(TRAP_V2_DEFAULTS, {});
+  let state = createSrTrapDayState();
+  const api = {
+    id: MANAGED_STRATEGY_IDS.SR_TRAP_CONFIRM_V2,
+    name: "Trap V2",
+    version: "2.0.0",
+    description: "Server Live Trap V2 \xB7 pierce20 \xB7 Bank40 \xB7 peak\u20B9100 \xB7 max3 \xB7 3.5R \xB7 hard \u20B9300/lot cap \xB7 Paper\u2261Live",
+    supports: ["nifty", "bank"],
+    defaultSettings: TRAP_V2_DEFAULTS,
+    initialize(partial) {
+      settings = mergeSettings(TRAP_V2_DEFAULTS, partial);
+      state = createSrTrapDayState();
+    },
+    reset() {
+      state = createSrTrapDayState();
+    },
+    analyze(ctx) {
+      const signal = api.generateSignal(ctx);
+      return { lastReason: signal.reason, ...signal.analysis };
+    },
+    generateSignal(ctx) {
+      const bank = /bank/i.test(ctx.instrumentId ?? "");
+      const effective = mergeSettings(settings, {
+        extras: {
+          ...settings.extras,
+          maxRiskPts: bank ? 50 : 28,
+          minRiskPts: bank ? 8 : 4
+        }
+      });
+      return runSrTrapConfirm(ctx, state, effective);
+    },
+    calculateStopLoss(_ctx, entryPrice, direction) {
+      const bank = /bank/i.test(_ctx.instrumentId ?? "");
+      const cap = bank ? settings.bankStopLossPts : settings.stopLossPts;
+      return direction === "BUY" ? entryPrice - cap : entryPrice + cap;
+    },
+    calculateTarget(_ctx, entryPrice, stopLoss, direction) {
+      const risk = Math.abs(entryPrice - stopLoss);
+      const mult = settings.targetRMultiple > 0 ? settings.targetRMultiple : 3.5;
+      return {
+        target: direction === "BUY" ? entryPrice + risk * mult : entryPrice - risk * mult,
+        riskRewardRatio: mult
+      };
+    },
+    exitLogic(candle, open, closes, ctx) {
+      return srTrapExitLogic(candle, open, closes, settings, ctx);
+    },
+    onTradeClosed(points) {
+      recordSrTrapTradeClosed(
+        state,
+        points,
+        settings.dayStopPts,
+        settings.dayProfitLockPts ?? 0
       );
     },
     getSettings() {
@@ -5345,11 +5188,13 @@ function createGenieStrategy() {
   BANK_NIFTY_INSTRUMENT,
   CRUDE_OIL_MINI_INSTRUMENT,
   NIFTY_50_INSTRUMENT,
+  STRATEGY_BUNDLE_VERSION,
   applySlConfirmCutoff,
   armPeakTrailFloor,
   computeProtectiveSlTrigger,
   createGenieStrategy,
   createTrapStrategy,
+  createTrapStrategyV2,
   effectiveProtectiveStop,
   replayPaperOnCrude,
   replayPaperOnIndex,

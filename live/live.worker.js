@@ -6,7 +6,7 @@
  */
 const {
   NIFTY_50_INSTRUMENT,
-  createTrapStrategy,
+  createTrapStrategyV2,
   replayPaperOnIndex,
   effectiveProtectiveStop,
 } = require('./strategy-core.cjs');
@@ -19,8 +19,9 @@ const {
   moneyTotals,
   publicTrades,
 } = require('./live-trades');
-const { LIVE_GREEN_DNA, liveGreenTrapExtras } = require('./dna-live-green');
+const { LIVE_GREEN_DNA, liveGreenTrapExtras, clampMaxTradesToDna } = require('./dna-live-green');
 const { livePathReplayOpts, isEstimatedOrSynthetic } = require('./live-path');
+const { archiveInstruments } = require('./instrument-archive');
 
 const LOOKBACK_DAYS = 12;
 
@@ -78,6 +79,13 @@ function toLiveOpen(replayOpen) {
   };
 }
 
+/**
+ * Only genuine live-only/UI overrides go here — everything else comes from
+ * createTrapStrategyV2()'s own defaultSettings (single source: doc 51 RCA
+ * fix). `maxTradesPerDay` defaults to the strategy's own cap (3) unless the
+ * UI explicitly asks for a different budget; `optionStandDownRs` is a
+ * user-tunable secondary soft check on top of the hard broker-side cap.
+ */
 function trapInitOverrides(config, instrumentId) {
   const risk =
     indexDayRiskOverrides({
@@ -93,20 +101,9 @@ function trapInitOverrides(config, instrumentId) {
   }
   const bank = /bank/i.test(String(instrumentId || ''));
   const fromUi = bank ? config.bankMaxTradesDay : config.niftyMaxTradesDay;
-  const maxTrades =
-    fromUi != null
-      ? Math.max(0, Math.floor(Number(fromUi)) || 0)
-      : bank
-        ? LIVE_GREEN_DNA.trap.bankMaxTradesPerDay || LIVE_GREEN_DNA.trap.maxTradesPerDay
-        : LIVE_GREEN_DNA.trap.maxTradesPerDay;
-  return {
-    ...risk,
-    maxTradesPerDay: maxTrades,
-    targetRMultiple: LIVE_GREEN_DNA.trap.targetRMultiple,
-    entryTimeStart: LIVE_GREEN_DNA.trap.entryTimeStart,
-    entryTimeEnd: LIVE_GREEN_DNA.trap.entryTimeEnd,
-    extras,
-  };
+  const overrides = { ...risk, extras };
+  overrides.maxTradesPerDay = clampMaxTradesToDna(fromUi);
+  return overrides;
 }
 
 class LiveWorker {
@@ -176,6 +173,9 @@ class LiveWorker {
       'DATA',
       `Instruments loaded · ${this.instruments.length} rows (Nifty 50 only)`,
     );
+    // Feeds the historical instrument archive so future backtests can
+    // resolve this week's contracts by real expiry date after they expire.
+    archiveInstruments(this.instruments).catch(() => {});
     return this.instruments;
   }
 
@@ -270,7 +270,7 @@ class LiveWorker {
           today,
           livePath,
           makeStrategy: () => {
-            const s = createTrapStrategy();
+            const s = createTrapStrategyV2();
             s.initialize(trapInitOverrides(config, NIFTY_50_INSTRUMENT.id));
             return s;
           },

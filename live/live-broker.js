@@ -220,6 +220,8 @@ class LiveBroker {
       exchange: pos.exchange,
       tradingSymbol: pos.tradingSymbol,
       ltp,
+      maxLossRs: (LIVE_GREEN_DNA.liveOps.maxOptionLossRs || 0) * this.lotsFor(pos.instrumentId),
+      lotUnits: pos.quantity,
     });
     if (!(trigger > 0)) return;
     const res = await kiteService.placeOrder(
@@ -457,6 +459,8 @@ class LiveBroker {
       exchange,
       tradingSymbol: sym,
       ltp,
+      maxLossRs: (LIVE_GREEN_DNA.liveOps.maxOptionLossRs || 0) * lotsMult,
+      lotUnits: quantity,
     });
 
     const slRes = await kiteService.placeOrder(
@@ -535,6 +539,8 @@ class LiveBroker {
       exchange: pos.exchange,
       tradingSymbol: pos.tradingSymbol,
       ltp,
+      maxLossRs: (LIVE_GREEN_DNA.liveOps.maxOptionLossRs || 0) * this.lotsFor(pos.instrumentId),
+      lotUnits: pos.quantity,
     });
 
     const units = Math.max(1, Number(pos.quantity) || 0);
