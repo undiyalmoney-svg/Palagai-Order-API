@@ -99,14 +99,23 @@ function parseInstrumentsCsv(csv) {
     const itype = (cols[9] || '').trim().toUpperCase();
     const sym = (cols[2] || '').trim().toUpperCase();
     const name = (cols[3] || '').trim().toUpperCase();
-    // Keep desk rows only (memory on 512MB droplet) — Nifty 50 only (no Bank/Crude).
+    // Keep desk rows only (memory on 512MB droplet) — Nifty 50 + Bank Nifty.
+    // Other NIFTY-prefixed indices (FINNIFTY / MIDCPNIFTY / NIFTYNXT) are NOT
+    // traded and must not leak into ATM resolution.
     let keep = false;
+    const isBank = sym.startsWith('BANKNIFTY') || name === 'BANKNIFTY';
+    const excluded =
+      sym.startsWith('FINNIFTY') ||
+      name === 'FINNIFTY' ||
+      sym.startsWith('MIDCPNIFTY') ||
+      name === 'MIDCPNIFTY' ||
+      sym.startsWith('NIFTYNXT');
     if (exchange === 'NFO' && (itype === 'CE' || itype === 'PE' || itype === 'FUT')) {
-      if (sym.startsWith('NIFTY') || name === 'NIFTY' || name === 'NIFTY 50') {
+      if (!excluded && (isBank || sym.startsWith('NIFTY') || name === 'NIFTY' || name === 'NIFTY 50')) {
         keep = true;
       }
     } else if (exchange === 'NSE' && (itype === 'EQ' || itype === 'INDEX')) {
-      if (sym === 'NIFTY 50' || name === 'NIFTY 50') {
+      if (sym === 'NIFTY 50' || name === 'NIFTY 50' || sym === 'NIFTY BANK' || name === 'NIFTY BANK') {
         keep = true;
       }
     }

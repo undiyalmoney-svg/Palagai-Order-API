@@ -8,6 +8,7 @@ const {
   evaluateOptionPeakTrail,
   optionPeakTrailSettingsFromExtras,
   NIFTY_50_INSTRUMENT,
+  BANK_NIFTY_INSTRUMENT,
 } = require('./strategy-core.cjs');
 const { LIVE_GREEN_DNA, liveGreenTrapExtras } = require('./dna-live-green');
 const { evaluateChargeEntryGate } = require('./charge-entry-gate');
@@ -44,9 +45,15 @@ function slOrderFields({ exchange, tradingsymbol, quantity, product, trigger }) 
   };
 }
 
-/** Map a broker option symbol back to the desk instrument id (Nifty 50 only). */
+/** Map a broker option symbol back to the desk instrument id. */
 function instrumentIdForSymbol(sym) {
   const s = String(sym || '').toUpperCase();
+  // BANKNIFTY must be tested first — plain startsWith('NIFTY') would miss it,
+  // and mapping a Bank leg to the Nifty book breaks reconcile/exit.
+  if (s.startsWith('BANKNIFTY')) return BANK_NIFTY_INSTRUMENT.id;
+  if (s.startsWith('FINNIFTY') || s.startsWith('MIDCPNIFTY') || s.startsWith('NIFTYNXT')) {
+    return null;
+  }
   if (s.startsWith('NIFTY')) return NIFTY_50_INSTRUMENT.id;
   return null;
 }

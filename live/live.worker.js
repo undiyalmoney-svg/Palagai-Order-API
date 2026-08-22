@@ -6,6 +6,7 @@
  */
 const {
   NIFTY_50_INSTRUMENT,
+  BANK_NIFTY_INSTRUMENT,
   createTrapStrategyV2,
   replayPaperOnIndex,
   effectiveProtectiveStop,
@@ -123,11 +124,12 @@ class LiveWorker {
     this.instrumentsAt = 0;
     this.candles = {
       nifty: [],
+      bank: [],
     };
     this.warmed = false;
     this.reconciled = false;
     this.tickBusy = false;
-    this.lastSignals = { nifty: '' };
+    this.lastSignals = { nifty: '', bank: '' };
     this.lastDeskHalt = '';
   }
 
@@ -190,8 +192,22 @@ class LiveWorker {
       from,
       today,
     );
+    // Only fetch Bank history when the Bank book is actually enabled — keeps
+    // the tick cheap (and the 512MB droplet calm) on a Nifty-only desk.
+    if (this.getConfig()?.enableBank) {
+      this.candles.bank = await fetchHistorical5m(
+        authorization,
+        BANK_NIFTY_INSTRUMENT.instrumentToken,
+        from,
+        today,
+      );
+    }
     this.warmed = true;
-    this.pushEvent('DATA', `Warm OK · Nifty ${this.candles.nifty.length} bars`);
+    this.pushEvent(
+      'DATA',
+      `Warm OK · Nifty ${this.candles.nifty.length} bars` +
+        (this.getConfig()?.enableBank ? ` · Bank ${this.candles.bank.length} bars` : ''),
+    );
   }
 
   async refreshToday(authorization) {
@@ -203,6 +219,15 @@ class LiveWorker {
       today,
     );
     this.candles.nifty = mergeCandles(this.candles.nifty, n);
+    if (this.getConfig()?.enableBank) {
+      const b = await fetchHistorical5m(
+        authorization,
+        BANK_NIFTY_INSTRUMENT.instrumentToken,
+        today,
+        today,
+      );
+      this.candles.bank = mergeCandles(this.candles.bank, b);
+    }
   }
 
   async onTick() {
@@ -258,44 +283,40 @@ class LiveWorker {
       });
 
       if (config.enableNifty && indexSession) {
-        const replay = await this.replayIndexLive({
+        await this.runBook({
           authorization,
+          book: 'nifty',
           instrument: NIFTY_50_INSTRUMENT,
-          kind: 'nifty',
-          candles: this.candles.nifty,
+          label: 'Nifty Trap',
           lots: config.niftyLots || config.deskLots || config.lots || 1,
-          forceClose: now >= '15:15',
-          enableKutty,
-          kuttyAlone: !!config.kuttyAlone,
+          config,
+          now,
           today,
           livePath,
-          makeStrategy: () => {
-            const s = createTrapStrategyV2();
-            s.initialize(trapInitOverrides(config, NIFTY_50_INSTRUMENT.id));
-            return s;
-          },
+          enableKutty,
         });
-        ingestReplayTrades(this.liveTrades, replay.trades, { rejectEstimated: true });
-        await this.broker.syncInstrument({
+      }
+
+      if (config.enableBank && indexSession) {
+        await this.runBook({
           authorization,
-          instrumentId: NIFTY_50_INSTRUMENT.id,
-          instrumentName: 'Nifty Trap',
-          open: this.liveOpenForSync(NIFTY_50_INSTRUMENT.id, replay.open),
-          lots: config.niftyLots || config.deskLots || config.lots || 1,
+          book: 'bank',
+          instrument: BANK_NIFTY_INSTRUMENT,
+          label: 'Bank Trap',
+          lots: config.bankLots || config.deskLots || config.lots || 1,
+          config,
+          now,
+          today,
+          livePath,
+          enableKutty,
         });
-        const niftySig =
-          `Nifty Trap · ${replay.lastSignal}` +
-          (replay.open ? ` · OPEN ${replay.open.direction}` : '');
-        if (niftySig !== this.lastSignals.nifty) {
-          this.lastSignals.nifty = niftySig;
-          this.pushEvent('SIGNAL', niftySig);
-        }
       }
 
       const riskBits = riskStatusLabels(config);
       const riskTxt = riskBits.length ? ` · ${riskBits.join(' · ')}` : '';
       this.heartbeat(
-        `Live tick · ${now} IST · real=${!!config.realOrders} · N${config.enableNifty ? 1 : 0}${riskTxt}`,
+        `Live tick · ${now} IST · real=${!!config.realOrders} · N${config.enableNifty ? 1 : 0}` +
+          `B${config.enableBank ? 1 : 0}${riskTxt}`,
       );
     } catch (err) {
       const msg = err?.message || String(err);
@@ -304,6 +325,59 @@ class LiveWorker {
       console.error('[live-worker]', err);
     } finally {
       this.tickBusy = false;
+    }
+  }
+
+  /**
+   * Replay one index book and sync it to the broker.
+   *
+   * Books are independent strategy instances over their own candles; the desk's
+   * maxOpenLegs (in liveOpenForSync / LiveBroker) is what decides whether Nifty
+   * and Bank may hold legs at the same time. Lots come from the UI per book.
+   */
+  async runBook({
+    authorization,
+    book,
+    instrument,
+    label,
+    lots,
+    config,
+    now,
+    today,
+    livePath,
+    enableKutty,
+  }) {
+    const replay = await this.replayIndexLive({
+      authorization,
+      instrument,
+      kind: book === 'bank' ? 'banknifty' : 'nifty',
+      candles: this.candles[book],
+      lots,
+      forceClose: now >= '15:15',
+      enableKutty,
+      kuttyAlone: !!config.kuttyAlone,
+      today,
+      livePath,
+      makeStrategy: () => {
+        const s = createTrapStrategyV2();
+        s.initialize(trapInitOverrides(config, instrument.id));
+        return s;
+      },
+    });
+    ingestReplayTrades(this.liveTrades, replay.trades, { rejectEstimated: true });
+    await this.broker.syncInstrument({
+      authorization,
+      instrumentId: instrument.id,
+      instrumentName: label,
+      open: this.liveOpenForSync(instrument.id, replay.open),
+      lots,
+    });
+    const sig =
+      `${label} · ${replay.lastSignal}` +
+      (replay.open ? ` · OPEN ${replay.open.direction}` : '');
+    if (sig !== this.lastSignals[book]) {
+      this.lastSignals[book] = sig;
+      this.pushEvent('SIGNAL', sig);
     }
   }
 
@@ -574,7 +648,7 @@ class LiveWorker {
     this.reconciled = false;
     this.broker.clear();
     this.liveTrades = [];
-    this.lastSignals = { nifty: '' };
+    this.lastSignals = { nifty: '', bank: '' };
     this.lastDeskHalt = '';
   }
 }
