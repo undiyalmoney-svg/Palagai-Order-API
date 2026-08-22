@@ -17,15 +17,42 @@
  * Usage: node scripts/bs-backtest.js <fromDate> <toDate> [lots]
  * Env:   KITE_API_KEY, KITE_ACCESS_TOKEN
  */
-const { NIFTY_50_INSTRUMENT, createTrapStrategyV2 } = require('../live/strategy-core.cjs');
+const { createTrapStrategyV2 } = require('../live/strategy-core.cjs');
 const { fetchHistorical5m } = require('../live/kite-market');
 const { blackScholesPrice, realizedVolAnnualized } = require('../live/bs-option-pricer');
 const { estimateRoundTripCharges } = require('../live/charge-entry-gate');
 const { DAY_PROFIT_LOCK_RS, STRICT_DAY_STOP_RS } = require('../live/daily-desk-defaults');
 
-const NIFTY_LOT_SIZE = 65;
-const STRIKE_STEP = 50;
 const COOLDOWN_MIN = 12;
+
+/**
+ * Per-instrument contract spec. Lot sizes mirror daily-desk-defaults.js
+ * (*_RS_PER_POINT), which is what the desk's money math already assumes.
+ *
+ * Expiry conventions are approximations of NSE history:
+ *  - Nifty weekly moved Thu -> Tue around Sep 2025.
+ *  - Bank Nifty weeklies were discontinued ~Nov 2024; monthly (last Tue) after.
+ * Time-to-expiry drives theta in the BS model, so these matter; they are
+ * modelled to the right week but not to holiday-shifted exact dates.
+ */
+const INSTRUMENTS = {
+  nifty: {
+    id: 'nifty-50',
+    label: 'Nifty 50',
+    token: 256265,
+    lotSize: 65,
+    strikeStep: 50,
+    expiry: 'weekly',
+  },
+  bank: {
+    id: 'bank-nifty',
+    label: 'Bank Nifty',
+    token: 260105,
+    lotSize: 30,
+    strikeStep: 100,
+    expiry: 'bank',
+  },
+};
 const RISK_FREE_RATE = 0.065;
 /** Matches live-path.js's fillFrictionPremium — BS has no bid-ask spread of
  * its own, so without this every fill is an unrealistically perfect midpoint. */
@@ -54,12 +81,41 @@ function dayOfWeekUTC(dateIso) {
   return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
 }
 
-function nextExpiryIso(dateIso) {
-  const targetDow = dateIso >= EXPIRY_DOW_SWITCH_DATE ? 2 : 4; // Tue : Thu
+function nextWeeklyIso(dateIso, targetDow) {
   const dow = dayOfWeekUTC(dateIso);
   let add = (targetDow - dow + 7) % 7;
-  if (add === 0) add = 7; // never same-day expiry — always roll to next week
+  if (add === 0) add = 7; // never same-day expiry — always roll
   return addDaysIso(dateIso, add);
+}
+
+/** Last `dow` of the month containing dateIso; rolls to next month if passed. */
+function lastDowOfMonthIso(dateIso, dow) {
+  const [y, m] = dateIso.split('-').map(Number);
+  const pick = (yy, mm) => {
+    const last = new Date(Date.UTC(yy, mm, 0)); // last day of month mm (1-based)
+    const back = (last.getUTCDay() - dow + 7) % 7;
+    last.setUTCDate(last.getUTCDate() - back);
+    return last.toISOString().slice(0, 10);
+  };
+  let iso = pick(y, m);
+  if (iso <= dateIso) {
+    const ny = m === 12 ? y + 1 : y;
+    const nm = m === 12 ? 1 : m + 1;
+    iso = pick(ny, nm);
+  }
+  return iso;
+}
+
+/** Bank Nifty: weekly Wed until ~Nov 2024, monthly last-Tue after. */
+const BANK_WEEKLY_END_DATE = '2024-11-20';
+
+function nextExpiryIso(dateIso, kind = 'weekly') {
+  if (kind === 'bank') {
+    return dateIso >= BANK_WEEKLY_END_DATE
+      ? lastDowOfMonthIso(dateIso, 2)
+      : nextWeeklyIso(dateIso, 3); // Wed
+  }
+  return nextWeeklyIso(dateIso, dateIso >= EXPIRY_DOW_SWITCH_DATE ? 2 : 4);
 }
 
 function yearsBetween(dateTimeIso, expiryDateIso) {
@@ -112,8 +168,8 @@ function buildContext(candles, index, instrumentId) {
   };
 }
 
-function roundStrike(spot) {
-  return Math.round(spot / STRIKE_STEP) * STRIKE_STEP;
+function roundStrike(spot, step) {
+  return Math.round(spot / step) * step;
 }
 
 /** CE value rises with spot, PE falls — map candle high/low to option high/low accordingly. */
@@ -127,11 +183,17 @@ function optionHighLow(type, candle, strike, tYears, vol, r) {
 }
 
 async function main() {
-  const [, , fromDate, toDate, lotsArg] = process.argv;
+  const [, , fromDate, toDate, lotsArg, instArg] = process.argv;
+  const instKey = (instArg || process.env.BS_INSTRUMENT || 'nifty').toLowerCase();
+  const INST = INSTRUMENTS[instKey];
+  if (!INST) {
+    console.error(`Unknown instrument "${instKey}". Options: ${Object.keys(INSTRUMENTS).join(', ')}`);
+    process.exit(1);
+  }
   const apiKey = process.env.KITE_API_KEY;
   const accessToken = process.env.KITE_ACCESS_TOKEN;
   if (!fromDate || !toDate) {
-    console.error('Usage: node scripts/bs-backtest.js <fromDate> <toDate> [lots]');
+    console.error('Usage: node scripts/bs-backtest.js <fromDate> <toDate> [lots] [nifty|bank]');
     process.exit(1);
   }
   if (!apiKey || !accessToken) {
@@ -144,10 +206,10 @@ async function main() {
   const VOL_WARMUP_DAYS = 40; // trading-day-ish calendar buffer for realized-vol lookback
   const warmFrom = addDaysIso(fromDate, -VOL_WARMUP_DAYS);
 
-  console.error(`Fetching Nifty 50 5-min candles ${warmFrom} -> ${toDate} (chunked)...`);
+  console.error(`Fetching ${INST.label} 5-min candles ${warmFrom} -> ${toDate} (chunked)...`);
   const candles = await fetchHistorical5mChunked(
     authorization,
-    NIFTY_50_INSTRUMENT.instrumentToken,
+    INST.token,
     warmFrom,
     toDate,
   );
@@ -218,7 +280,7 @@ async function main() {
       dayStopped = false;
     }
 
-    const ctx = buildContext(candles, i, NIFTY_50_INSTRUMENT.id);
+    const ctx = buildContext(candles, i, INST.id);
     const closes = candles.slice(0, i + 1).map((c) => c.close);
     const vol = volAt(day);
 
@@ -318,8 +380,8 @@ async function main() {
     const signal = strategy.generateSignal(ctx);
     if (signal.action !== 'BUY' && signal.action !== 'SELL') continue;
 
-    const strike = roundStrike(signal.entryPrice);
-    const expiry = nextExpiryIso(day);
+    const strike = roundStrike(signal.entryPrice, INST.strikeStep);
+    const expiry = nextExpiryIso(day, INST.expiry);
     const optionType = signal.action === 'BUY' ? 'CE' : 'PE';
     const tYears = yearsBetween(candle.date, expiry);
     const rawEntryPremium = blackScholesPrice(
@@ -345,7 +407,7 @@ async function main() {
       optionEntryPremium,
       optionPeakMfeRs: 0,
       optionBarLow: optionEntryPremium,
-      optionLotUnits: NIFTY_LOT_SIZE * lots,
+      optionLotUnits: INST.lotSize * lots,
       initialRiskPts: Math.abs(signal.entryPrice - signal.stopLoss),
     };
   }
@@ -377,6 +439,9 @@ async function main() {
   }
 
   const summary = {
+    instrument: INST.label,
+    instrumentId: INST.id,
+    lotSize: INST.lotSize,
     fromDate,
     toDate,
     lots,

@@ -71,13 +71,22 @@ const rt = normalizeStartConfig({ ...DAILY_3K_PRESET, capitalRs: 40000 });
 check('preset niftyMaxTradesDay', DAILY_3K_PRESET.niftyMaxTradesDay, 3, 'must mirror DNA, never 0');
 check('after round-trip', rt.niftyMaxTradesDay, 3, '0 here means UNLIMITED');
 
-// The UI sends niftyMaxTradesDay on EVERY start with a hardcoded 0 fallback.
-// The DNA must be a ceiling the UI cannot raise or disable.
+// OWNERSHIP CONTRACT: UI supplies LOTS only. Trade counts / instruments are
+// code-owned and must survive a hostile Start payload untouched.
+const hostile = normalizeStartConfig({
+  niftyMaxTradesDay: 0, bankMaxTradesDay: 0, deskMaxTradesDay: 0, // "unlimited"
+  enableBank: true, enableCrude: true,                            // enable everything
+  niftyLots: 2, capitalRs: 80000,                                 // legitimate: lots
+});
+check('hostile UI: niftyMaxTradesDay', hostile.niftyMaxTradesDay, 3, 'client 0 must be ignored');
+check('hostile UI: deskMaxTradesDay', hostile.deskMaxTradesDay, 3, 'client 0 must be ignored');
+check('hostile UI: enableBank', hostile.enableBank, false, 'client cannot enable Bank');
+check('hostile UI: enableCrude', hostile.enableCrude, false, 'client cannot enable Crude');
+check('UI DOES own lots', hostile.niftyLots, 2, 'lots must pass through from UI');
+
 const { clampMaxTradesToDna } = require(path.join(__dirname, '../live/dna-live-green.js'));
-check('UI sends 0 (unlimited)', clampMaxTradesToDna(0), 3, 'MUST fall back to DNA cap, not unlimited');
-check('UI sends undefined', clampMaxTradesToDna(undefined), 3);
-check('UI sends 99 (raise attempt)', clampMaxTradesToDna(99), 3, 'UI must not be able to raise the cap');
-check('UI sends 2 (lower)', clampMaxTradesToDna(2), 2, 'lowering is allowed');
+check('clamp: 0 -> DNA', clampMaxTradesToDna(0), 3);
+check('clamp: 99 -> DNA', clampMaxTradesToDna(99), 3, 'cannot raise the cap');
 check('lots @ Rs40,000 capital', rt.niftyLots, 1);
 check('realOrders defaults off', rt.realOrders !== true, true, 'live must be opt-in');
 

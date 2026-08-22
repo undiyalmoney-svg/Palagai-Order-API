@@ -52,13 +52,24 @@ curl -X PUT https://<host>/live/auth \
   -d '{"apiKey":"<API_KEY>","accessToken":"<TODAYS_ACCESS_TOKEN>"}'
 ```
 
+## Ownership contract
+
+The **UI sends LOTS only** (plus capital). Trade count, entry, exit, instrument
+selection and strategy are decided by the Order-API from the strategy DNA, and
+the server **ignores** client values for them. Sending
+`niftyMaxTradesDay: 0` or `enableBank: true` changes nothing — verified by
+pre-flight against a deliberately hostile payload.
+
+To change lots: use the Lots field in the UI (or `niftyLots` in the payload).
+To change trade count / instruments: change the DNA in code and redeploy.
+
 ## Step 5a — MONDAY: start in paper
 
 ```bash
 curl -X POST https://<host>/live/start \
   -H "Authorization: Bearer <SITE_JWT>" \
   -H "Content-Type: application/json" \
-  -d '{"realOrders":false,"capitalRs":40000,"enableNifty":true,"enableBank":false,"enableCrude":false,"niftyMaxTradesDay":3,"dayProfitLock":true,"strictDayStop":true}'
+  -d '{"realOrders":false,"capitalRs":40000,"niftyLots":1,"dayProfitLock":true,"strictDayStop":true}'
 ```
 
 ## Step 5b — TUESDAY: same command, `realOrders:true`
@@ -67,7 +78,7 @@ curl -X POST https://<host>/live/start \
 curl -X POST https://<host>/live/start \
   -H "Authorization: Bearer <SITE_JWT>" \
   -H "Content-Type: application/json" \
-  -d '{"realOrders":true,"capitalRs":40000,"enableNifty":true,"enableBank":false,"enableCrude":false,"niftyMaxTradesDay":3,"dayProfitLock":true,"strictDayStop":true}'
+  -d '{"realOrders":true,"capitalRs":40000,"niftyLots":1,"dayProfitLock":true,"strictDayStop":true}'
 ```
 
 Stop any time:

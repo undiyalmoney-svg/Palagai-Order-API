@@ -1,10 +1,18 @@
 /**
- * Daily desk — Friday pivot S/R (v8) + UI lots.
- * Nifty 50 ONLY — Bank Nifty & Crude are hard-disabled (AUTOBOT_ALLOW_* false).
+ * Daily desk config — Nifty 50 only (Bank & Crude hard-off, AUTOBOT_ALLOW_*).
  *
- * Lots: UI `lots` / `deskLots` / `niftyLots` are used as-is (integer ≥ 1, cap 10).
- * If omitted, UI `capitalRs` maps to lots (~1 Nifty lot per ₹40k).
- * Trade counts: niftyMaxTradesDay (0 = unlimited). Stop→Start to apply.
+ * OWNERSHIP CONTRACT
+ *   UI owns:   LOTS only (`lots` / `deskLots` / `niftyLots`, integer >= 1, cap 10;
+ *              or `capitalRs`, which maps ~1 Nifty lot per Rs40k when lots are
+ *              not sent explicitly).
+ *   Code owns: trade counts, entry, exit, instrument selection, and every risk
+ *              rail. These are read from the strategy DNA and CANNOT be changed
+ *              by the Start payload - client values for them are ignored
+ *              outright (see resolveTradeCounts / normalizeStartConfig).
+ *
+ * That split exists because the UI previously sent trade counts with a
+ * hardcoded 0 ("unlimited") fallback, which silently overrode the strategy cap
+ * and reproduced the Aug-10 churn loss (docs/owner-private/51).
  */
 
 const APP_VERSION = '1.3.138';
@@ -96,18 +104,17 @@ const DAILY_3K_PRESET = {
   paperLivePath: true,
   bankOnlyAfterNifty: false,
   /**
-   * MUST mirror the DNA, never hardcode 0. These are served by /live/defaults
-   * and the UI sends them straight back on Start, where parseTradeCount treats
-   * an explicit 0 as "unlimited" and overrides the strategy's own cap. Hardcoding
-   * 0 here silently re-created exactly the unlimited-trades churn the Aug-10 RCA
-   * (docs/owner-private/51) blamed for an all-red day.
+   * DISPLAY ONLY — mirrors the DNA so /live/defaults can show the desk's real
+   * budget. The server no longer reads trade counts from the Start payload
+   * (see resolveTradeCounts), so a client value cannot change them.
    */
   niftyMaxTradesDay: Math.max(0, Number(LIVE_GREEN_DNA.trap.maxTradesPerDay) || 0),
   bankMaxTradesDay: Math.max(0, Number(LIVE_GREEN_DNA.trap.bankMaxTradesPerDay) || 0),
   crudeMaxTradesDay: 0,
   deskMaxTradesDay: Math.max(0, Number(LIVE_GREEN_DNA.liveOps.deskMaxTradesDay) || 0),
   tradeCountsNote:
-    'Send niftyMaxTradesDay on Start. 0 = unlimited (DNA default is 3). Stop→Start to apply.',
+    'Decided by the server strategy DNA, not the UI. Shown for reference only; ' +
+    'values sent on Start are ignored. The UI controls LOTS only.',
   researchNote:
     'Pivot S/R · Nifty 50 only · lots from UI (lots / niftyLots)',
   dnaId: LIVE_GREEN_DNA.id,
@@ -228,47 +235,32 @@ function riskStatusLabels(config) {
   return parts;
 }
 
-function parseTradeCount(raw) {
-  if (raw == null || raw === '') return null;
-  const n = Math.floor(Number(raw));
-  if (!Number.isFinite(n) || n < 0) return null;
-  return n;
-}
-
-/** UI Start fields. 0 = unlimited. Missing → DNA default. */
-function resolveTradeCounts(config = {}) {
-  const nifty = parseTradeCount(
-    config.niftyMaxTradesDay ?? config.niftyTrades ?? config.maxNiftyTrades,
-  );
-  const bank = parseTradeCount(
-    config.bankMaxTradesDay ?? config.bankTrades ?? config.maxBankTrades,
-  );
-  const crude = parseTradeCount(
-    config.crudeMaxTradesDay ?? config.crudeTrades ?? config.maxCrudeTrades,
-  );
-  const desk = parseTradeCount(config.deskMaxTradesDay ?? config.maxTradesDay);
+/**
+ * Trade counts are OWNED BY THE CODE, not the UI.
+ *
+ * Contract: the UI supplies LOTS only. Trade count, entry, exit and instrument
+ * selection are decided here. Client-sent niftyMaxTradesDay / bankMaxTradesDay
+ * / crudeMaxTradesDay / deskMaxTradesDay are deliberately IGNORED.
+ *
+ * Why this is not merely tidier: the UI shipped a hardcoded `0` fallback for
+ * these fields, and 0 meant "unlimited" — so one failed /live/defaults fetch
+ * silently re-armed the churn setting the Aug-10 RCA (doc 51) blamed for an
+ * all-red day. Reading them at all is the bug class; the fix is to not read
+ * them. Values come from the same DNA the strategy and backtests use.
+ */
+function resolveTradeCounts(_config = {}) {
+  const trapCap = Math.max(0, Number(LIVE_GREEN_DNA.trap.maxTradesPerDay) || 0);
   return {
-    niftyMaxTradesDay:
-      nifty != null ? nifty : Math.max(0, Number(LIVE_GREEN_DNA.trap.maxTradesPerDay) || 0),
-    bankMaxTradesDay:
-      bank != null
-        ? bank
-        : Math.max(
-            0,
-            Number(LIVE_GREEN_DNA.trap.bankMaxTradesPerDay) ||
-              Number(LIVE_GREEN_DNA.trap.maxTradesPerDay) ||
-              0,
-          ),
-    crudeMaxTradesDay:
-      crude != null
-        ? crude
-        : Math.max(0, Number(LIVE_CRUDE_GREEN_DNA.signal.maxTradesDay) || 0),
+    niftyMaxTradesDay: trapCap,
+    bankMaxTradesDay: Math.max(
+      0,
+      Number(LIVE_GREEN_DNA.trap.bankMaxTradesPerDay) || trapCap,
+    ),
+    crudeMaxTradesDay: Math.max(0, Number(LIVE_CRUDE_GREEN_DNA.signal.maxTradesDay) || 0),
     deskMaxTradesDay:
-      desk != null
-        ? desk
-        : LIVE_GREEN_DNA.liveOps.deskMaxTradesDay != null
-          ? Math.max(0, Number(LIVE_GREEN_DNA.liveOps.deskMaxTradesDay) || 0)
-          : 0,
+      LIVE_GREEN_DNA.liveOps.deskMaxTradesDay != null
+        ? Math.max(0, Number(LIVE_GREEN_DNA.liveOps.deskMaxTradesDay) || 0)
+        : trapCap,
   };
 }
 
@@ -336,7 +328,7 @@ function normalizeStartConfig(config = {}) {
     crudeLots,
     capitalRs: capitalRaw != null && Number(capitalRaw) > 0 ? Number(capitalRaw) : null,
     bankStrategy: config.bankStrategy === 'genie' ? 'genie' : 'trap',
-    niftyStrategy: 'trap',
+    niftyStrategy: LIVE_GREEN_DNA.niftyStrategy || 'trap-v2',
     /** Autobot always uses fee-capped LIVE_CRUDE_GREEN (ignore UI 'selective'/'all-green'). */
     crudeStrategy: AUTOBOT_ALLOW_CRUDE
       ? 'live-crude-green'
@@ -400,7 +392,6 @@ module.exports = {
   resolveBookLots,
   resolveDeskLots,
   resolveTradeCounts,
-  parseTradeCount,
   MAX_DESK_LOTS,
   CAPITAL_RS_PER_LOT,
   AUTOBOT_ALLOW_CRUDE,
