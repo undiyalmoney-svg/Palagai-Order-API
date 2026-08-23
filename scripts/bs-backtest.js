@@ -243,6 +243,16 @@ async function main() {
       extras: { profitLockArmRs: arm, profitLockLockRs: lock, profitLockGivebackRs: giveback },
     });
     console.error(`Peak-trail set to arm₹${arm}/lock₹${lock}/giveback₹${giveback}.`);
+  } else if (process.env.TARGET_R) {
+    // Lower R:R -> higher win rate -> fewer red days, smaller wins. This is the
+    // only structural lever on red-day COUNT that does not depend on the
+    // spread-fragile micro-trail.
+    const rr = Number(process.env.TARGET_R);
+    strategy.initialize({
+      targetRMultiple: rr,
+      extras: { profitLockArmRs: 1e9, profitLockLockRs: 1e9, profitLockGivebackRs: 0 },
+    });
+    console.error(`Target ${rr}R, peak-trail OFF.`);
   } else {
     strategy.initialize();
   }
