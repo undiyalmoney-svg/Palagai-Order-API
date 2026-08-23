@@ -72,6 +72,40 @@ function bookLotsFromCapitalRs(capitalRs) {
   return { niftyLots, bankLots, crudeLots: niftyLots };
 }
 
+/**
+ * Cap UI lots to what the account can actually fund.
+ *
+ * The UI owns lots (risk appetite is the user's call), but it must not be able
+ * to ask for size the capital cannot pay for: long options are paid in full at
+ * entry, so premium x lotSize x lots must fit inside capital. Without this a
+ * fat-fingered "10" on a Rs40k account sends an order the broker rejects or
+ * part-fills mid-session, which is far worse than simply trading smaller.
+ *
+ * Budget = CAPITAL_PREMIUM_BUDGET_PCT of capital, so a spike in premium (or the
+ * day's losses) cannot leave the account unable to fund the position.
+ * Worst-case premium per lot is the configured entry cap (maxNiftyEntryPremium).
+ * Returns the requested lots unchanged when capital is unknown (0/null).
+ */
+const CAPITAL_PREMIUM_BUDGET_PCT = 0.8;
+
+function capLotsToCapital(lots, capitalRs, instrumentId = 'nifty-50') {
+  const want = Math.max(1, Math.floor(Number(lots)) || 1);
+  const cap = Math.max(0, Number(capitalRs) || 0);
+  if (!(cap > 0)) return want;
+  const bank = /bank/i.test(String(instrumentId));
+  const lotSize = bank ? BANK_RS_PER_POINT : NIFTY_RS_PER_POINT;
+  const maxPrem = Number(
+    bank
+      ? LIVE_GREEN_DNA.liveOps.maxBankEntryPremium
+      : LIVE_GREEN_DNA.liveOps.maxNiftyEntryPremium,
+  );
+  // No configured premium cap -> nothing reliable to size against; leave as-is.
+  if (!(maxPrem > 0)) return want;
+  const perLotRs = maxPrem * lotSize;
+  const affordable = Math.floor((cap * CAPITAL_PREMIUM_BUDGET_PCT) / perLotRs);
+  return Math.max(1, Math.min(want, affordable || 1));
+}
+
 /** Nifty lot count only (desk is Nifty 50 only). */
 function deskLotsFromCapitalRs(capitalRs) {
   const books = bookLotsFromCapitalRs(capitalRs);
@@ -285,8 +319,17 @@ function resolveBookLots(config = {}, preset = DAILY_3K_PRESET) {
   const capitalRaw = config.capitalRs != null ? config.capitalRs : config.capital;
   const fromCap = bookLotsFromCapitalRs(capitalRaw);
   if (uiN != null || uiB != null || uiC != null || uiDesk != null) {
-    const niftyLots = cap(uiN || uiDesk || fromCap?.niftyLots || preset.niftyLots || 1);
-    const bankLots = cap(uiB || uiDesk || fromCap?.bankLots || preset.bankLots || BANK_BASE_LOTS);
+    // UI owns lots, but never beyond what the account can fund (capLotsToCapital).
+    const niftyLots = capLotsToCapital(
+      cap(uiN || uiDesk || fromCap?.niftyLots || preset.niftyLots || 1),
+      capitalRaw,
+      'nifty-50',
+    );
+    const bankLots = capLotsToCapital(
+      cap(uiB || uiDesk || fromCap?.bankLots || preset.bankLots || BANK_BASE_LOTS),
+      capitalRaw,
+      'bank-nifty',
+    );
     const crudeLots = cap(uiC || 1);
     return { niftyLots, bankLots, crudeLots };
   }
@@ -388,6 +431,7 @@ module.exports = {
   APP_VERSION,
   APP_BUILD,
   bookLotsFromCapitalRs,
+  capLotsToCapital,
   deskLotsFromCapitalRs,
   resolveBookLots,
   resolveDeskLots,

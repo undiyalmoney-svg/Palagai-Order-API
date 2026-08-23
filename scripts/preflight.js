@@ -88,6 +88,13 @@ const { clampMaxTradesToDna } = require(path.join(__dirname, '../live/dna-live-g
 check('clamp: 0 -> DNA', clampMaxTradesToDna(0), 3);
 check('clamp: 99 -> DNA', clampMaxTradesToDna(99), 3, 'cannot raise the cap');
 check('lots @ Rs40,000 capital', rt.niftyLots, 1);
+
+// UI owns lots, but never beyond what capital can fund.
+const lotsAt = (lots, capitalRs) =>
+  normalizeStartConfig({ capitalRs, niftyLots: lots }).niftyLots;
+check('UI 2 lots @ Rs40k (intended)', lotsAt(2, 40000), 2, 'must pass through');
+check('UI 10 lots @ Rs40k (fat finger)', lotsAt(10, 40000), 3, 'must clamp to affordable');
+check('UI 10 lots @ Rs5L', lotsAt(10, 500000), 10, 'big capital must not be clamped');
 check('realOrders defaults off', rt.realOrders !== true, true, 'live must be opt-in');
 
 // 4) Hard per-trade loss cap actually reaches the broker SL order.
