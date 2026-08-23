@@ -26,6 +26,17 @@ const { archiveInstruments } = require('./instrument-archive');
 
 const LOOKBACK_DAYS = 12;
 
+/** "NIFTY26AUG24200CE" -> "Nifty 24200 CE" for human-readable event logs. */
+function niceOption(sym) {
+  const s = String(sym || '').toUpperCase();
+  const m = /^(BANKNIFTY|NIFTY)\w*?(\d{4,6})(CE|PE)$/.exec(s);
+  if (!m) return sym || 'option';
+  return `${m[1] === 'BANKNIFTY' ? 'Bank' : 'Nifty'} ${m[2]} ${m[3]}`;
+}
+function money(n) {
+  return '\u20B9' + Math.round(Number(n) || 0).toLocaleString('en-IN');
+}
+
 function istParts(d = new Date()) {
   const fmt = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Kolkata',
@@ -137,16 +148,38 @@ class LiveWorker {
     const row = applyBrokerFill(this.liveTrades, fill);
     if (!row) return;
     const px = Number(fill.premium);
-    const pnl =
-      row.netOptionPnlRs != null
-        ? ` · net ₹${Math.round(row.netOptionPnlRs)}`
-        : row.optionPnlRs != null
-          ? ` · ₹${Math.round(row.optionPnlRs)}`
-          : '';
-    this.pushEvent(
-      'FILL',
-      `${fill.instrumentName || fill.instrumentId || ''}: ${String(fill.side).toUpperCase()} ${fill.tradingSymbol} @ ${px.toFixed(2)}${pnl}`.trim(),
-    );
+    const opt = niceOption(fill.tradingSymbol);
+    const side = String(fill.side || '').toLowerCase();
+
+    // Entry: just say what was bought and at what price.
+    if (side === 'entry') {
+      this.pushEvent('FILL', `BOUGHT ${opt} at \u20B9${px.toFixed(2)}`);
+      return;
+    }
+
+    // Exit / SL: show the whole trade (in -> out -> result) plus the day so far.
+    const entry = row.optionEntryPremium;
+    const net = row.netOptionPnlRs != null ? row.netOptionPnlRs : row.optionPnlRs;
+    const priced =
+      entry != null && entry > 0
+        ? `bought \u20B9${Number(entry).toFixed(2)} \u2192 sold \u20B9${px.toFixed(2)}`
+        : `sold \u20B9${px.toFixed(2)}`;
+    const result =
+      net != null
+        ? ` \u00B7 ${net >= 0 ? 'PROFIT' : 'LOSS'} ${money(Math.abs(net))}`
+        : '';
+    this.pushEvent('FILL', `SOLD ${opt}: ${priced}${result}`);
+
+    const { date: today } = istParts();
+    const d = this.deskDayStats(today);
+    if (d.trades > 0) {
+      this.pushEvent(
+        'DAY',
+        `Today: ${d.net >= 0 ? '+' : '-'}${money(Math.abs(d.net))} ` +
+          `(${d.wins} win${d.wins === 1 ? '' : 's'}, ${d.losses} loss${d.losses === 1 ? '' : 'es'}` +
+          `, won ${money(d.won)} / lost ${money(d.lost)})`,
+      );
+    }
   }
 
   /** Snapshot for GET /live/status — broker fills when real, else live-path paper. */
@@ -173,7 +206,7 @@ class LiveWorker {
     this.instrumentsAt = Date.now();
     this.pushEvent(
       'DATA',
-      `Instruments loaded · ${this.instruments.length} rows (Nifty 50 only)`,
+      `Option list loaded (${this.instruments.length.toLocaleString('en-IN')} contracts)`,
     );
     // Feeds the historical instrument archive so future backtests can
     // resolve this week's contracts by real expiry date after they expire.
@@ -205,8 +238,10 @@ class LiveWorker {
     this.warmed = true;
     this.pushEvent(
       'DATA',
-      `Warm OK · Nifty ${this.candles.nifty.length} bars` +
-        (this.getConfig()?.enableBank ? ` · Bank ${this.candles.bank.length} bars` : ''),
+      `Ready — ${this.candles.nifty.length.toLocaleString('en-IN')} Nifty candles loaded` +
+        (this.getConfig()?.enableBank
+          ? ` and ${this.candles.bank.length.toLocaleString('en-IN')} Bank candles`
+          : ''),
     );
   }
 
@@ -242,7 +277,7 @@ class LiveWorker {
       const authorization = this.authHeader();
       if (!authorization) {
         this.heartbeat('Waiting for Kite auth — Push token from Auto Trader');
-        this.pushEvent('AUTH_WAIT', 'No apiKey/accessToken — PUT /live/auth');
+        this.pushEvent('AUTH_WAIT', 'Waiting for Kite token — press "Push Kite token to server"');
         return;
       }
 
@@ -312,15 +347,19 @@ class LiveWorker {
         });
       }
 
-      const riskBits = riskStatusLabels(config);
-      const riskTxt = riskBits.length ? ` · ${riskBits.join(' · ')}` : '';
+      const d = this.deskDayStats(today);
+      const pnlTxt =
+        d.trades > 0
+          ? `${d.net >= 0 ? '+' : '-'}${money(Math.abs(d.net))} on ${d.trades} trade${d.trades === 1 ? '' : 's'}`
+          : 'no trades yet';
       this.heartbeat(
-        `Live tick · ${now} IST · real=${!!config.realOrders} · N${config.enableNifty ? 1 : 0}` +
-          `B${config.enableBank ? 1 : 0}${riskTxt}`,
+        `${now} IST \u00B7 ${config.realOrders ? 'LIVE money' : 'PAPER'} \u00B7 ` +
+          `Nifty ${config.niftyLots || 1} lot${(config.niftyLots || 1) > 1 ? 's' : ''} \u00B7 ${pnlTxt}` +
+          (halt ? ` \u00B7 STOPPED: ${halt}` : ''),
       );
     } catch (err) {
       const msg = err?.message || String(err);
-      this.pushEvent('ERROR', `Tick failed: ${msg}`);
+      this.pushEvent('ERROR', `Something went wrong: ${msg}`);
       this.heartbeat(`Tick error: ${msg}`);
       console.error('[live-worker]', err);
     } finally {
@@ -372,9 +411,13 @@ class LiveWorker {
       open: this.liveOpenForSync(instrument.id, replay.open),
       lots,
     });
-    const sig =
-      `${label} · ${replay.lastSignal}` +
-      (replay.open ? ` · OPEN ${replay.open.direction}` : '');
+    // replay.lastSignal is engine-speak ("Waiting swing lookback", "S/R trap
+    // confirm BUY · 3.5R"). Surface only what a person needs: are we in a
+    // trade, or waiting.
+    const sig = replay.open
+      ? `IN TRADE — ${replay.open.direction === 'BUY' ? 'Call' : 'Put'} ` +
+        `${niceOption(replay.open.option?.tradingSymbol)} (Nifty ${Math.round(replay.open.entry)})`
+      : `Watching for a setup — ${String(replay.lastSignal || '').replace(/\s*·\s*[\d.]+R$/, '')}`;
     if (sig !== this.lastSignals[book]) {
       this.lastSignals[book] = sig;
       this.pushEvent('SIGNAL', sig);
@@ -455,6 +498,10 @@ class LiveWorker {
   deskDayStats(today) {
     let net = 0;
     let trades = 0;
+    let wins = 0;
+    let losses = 0;
+    let won = 0;
+    let lost = 0;
     for (const t of this.liveTrades || []) {
       if (String(t.entryTime || '').slice(0, 10) !== today) continue;
       if (t.premiumEstimated) continue;
@@ -467,8 +514,15 @@ class LiveWorker {
       if (n == null || !Number.isFinite(n)) continue;
       net += n;
       trades += 1;
+      if (n > 0) {
+        wins += 1;
+        won += n;
+      } else if (n < 0) {
+        losses += 1;
+        lost += Math.abs(n);
+      }
     }
-    return { net, trades };
+    return { net, trades, wins, losses, won, lost };
   }
 
   /**

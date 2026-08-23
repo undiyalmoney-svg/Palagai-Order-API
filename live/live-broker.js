@@ -14,6 +14,18 @@ const { LIVE_GREEN_DNA, liveGreenTrapExtras } = require('./dna-live-green');
 const { evaluateChargeEntryGate } = require('./charge-entry-gate');
 const { fetchQuotes } = require('./kite-market');
 
+/** "NIFTY26AUG24200CE" -> "Nifty 24200 CE" for human-readable event logs. */
+function niceOption(sym) {
+  const s = String(sym || '').toUpperCase();
+  const m = /^(BANKNIFTY|NIFTY)\w*?(\d{4,6})(CE|PE)$/.exec(s);
+  if (!m) return sym || 'option';
+  const name = m[1] === 'BANKNIFTY' ? 'Bank' : 'Nifty';
+  return `${name} ${m[2]} ${m[3]}`;
+}
+function rs(n) {
+  return '\u20B9' + Math.round(Number(n) || 0).toLocaleString('en-IN');
+}
+
 const TICK = 0.05;
 function tickStr(p) {
   const v = Math.max(TICK, Math.round((Number(p) || 0) / TICK) * TICK);
@@ -246,11 +258,11 @@ class LiveBroker {
     if (res.status < 400 && id) {
       pos.slOrderId = id;
       pos.slTrigger = trigger;
-      this.pushEvent('SL', `${pos.tradingSymbol}: SL (ensured) @ ${tickStr(trigger)} id ${id}`);
+      this.pushEvent('SL', `Safety stop restored at \u20B9${tickStr(trigger)} on ${niceOption(pos.tradingSymbol)}`);
     } else {
       this.pushEvent(
         'ERROR',
-        `${pos.tradingSymbol}: SL ensure failed — ${res.data?.message || res.status}`,
+        `Could not place safety stop on ${niceOption(pos.tradingSymbol)} — ${res.data?.message || res.status}. Position is unprotected.`,
       );
     }
   }
@@ -261,7 +273,7 @@ class LiveBroker {
       if (open?.option) {
         this.pushEvent(
           'PAPER',
-          `${instrumentName}: paper ${open.direction} ${open.option.tradingSymbol} @ ${open.indexEntry}`,
+          `PAPER: would buy ${niceOption(open.option.tradingSymbol)} (Nifty at ${open.indexEntry})`,
         );
       }
       return;
@@ -279,8 +291,8 @@ class LiveBroker {
           (await this.resolveOrderFillPremium(authorization, current.slOrderId));
         this.pushEvent(
           'SL',
-          `${instrumentName}: SL filled ${current.tradingSymbol}` +
-            (fillPx ? ` @ ${tickStr(fillPx)}` : ''),
+          `Safety stop hit — sold ${niceOption(current.tradingSymbol)}` +
+            (fillPx ? ` at \u20B9${tickStr(fillPx)}` : ''),
         );
         current.status = 'flat';
         current.closedBy = 'sl';
@@ -344,7 +356,7 @@ class LiveBroker {
       }
       this.pushEvent(
         'EXIT',
-        `${instrumentName}: handoff ${current.tradingSymbol} → ${open.option?.tradingSymbol || '?'}`,
+        `Switching from ${niceOption(current.tradingSymbol)} to ${niceOption(open.option?.tradingSymbol)}`,
       );
       await this.placeExit(authorization, current, instrumentName);
       // Only enter the new leg if the prior exit actually flattened.
@@ -369,7 +381,7 @@ class LiveBroker {
     if (!option || option.source === 'synthetic' || !(option.instrumentToken > 0)) {
       this.pushEvent(
         'SKIP',
-        `${instrumentName}: no tradeable option (synthetic/missing) — refresh instruments`,
+        `Skipped — could not find that option to trade. Refresh instruments.`,
       );
       return;
     }
@@ -377,7 +389,7 @@ class LiveBroker {
     if (open.premiumEstimated) {
       this.pushEvent(
         'SKIP',
-        `${instrumentName}: estimated premium — skip live entry (paper mark only)`,
+        `Skipped — no live price for that option yet.`,
       );
       return;
     }
@@ -389,7 +401,7 @@ class LiveBroker {
       if (existing && existing.instrumentId !== instrumentId) {
         this.pushEvent(
           'SKIP',
-          `${instrumentName}: maxOpenLegs ${this.maxOpenLegs} — wait for ${existing.tradingSymbol} flat`,
+          `Skipped — already holding ${niceOption(existing.tradingSymbol)}. One trade at a time.`,
         );
         return;
       }
@@ -418,7 +430,7 @@ class LiveBroker {
       ops: LIVE_GREEN_DNA.liveOps,
     });
     if (chargeGate.skip) {
-      this.pushEvent('SKIP', `${instrumentName}: ${chargeGate.reason}`);
+      this.pushEvent('SKIP', `Skipped — ${chargeGate.reason}`);
       return;
     }
 
@@ -436,7 +448,7 @@ class LiveBroker {
     const entryOrderId = response.data?.data?.order_id;
     if (response.status >= 400 || !entryOrderId) {
       const msg = response.data?.message || `entry HTTP ${response.status}`;
-      this.pushEvent('ERROR', `${instrumentName}: ENTRY failed — ${msg}`);
+      this.pushEvent('ERROR', `Buy order failed — ${msg}`);
       this.positions.set(instrumentId, {
         status: 'error',
         tradingSymbol: sym,
@@ -447,7 +459,7 @@ class LiveBroker {
 
     this.pushEvent(
       'ENTRY',
-      `${instrumentName}: BUY ${quantity} ${sym} MIS (${lotsMult}×${lotSize})`,
+      `Bought ${lotsMult} lot${lotsMult > 1 ? 's' : ''} ${niceOption(sym)} (${quantity} qty)`,
     );
 
     await delay(900);
@@ -479,10 +491,14 @@ class LiveBroker {
     if (slRes.status >= 400 || !slOrderId) {
       this.pushEvent(
         'ERROR',
-        `${instrumentName}: SL failed — ${slRes.data?.message || slRes.status} (entry live!)`,
+        `Bought, but safety stop FAILED — ${slRes.data?.message || slRes.status}. Retrying; watch this position.`,
       );
     } else {
-      this.pushEvent('SL', `${instrumentName}: SL @ ${tickStr(slTrigger)} id ${slOrderId}`);
+      this.pushEvent(
+        'SL',
+        `Safety stop set at \u20B9${tickStr(slTrigger)} — most this trade can lose is ` +
+          `${rs((fillPremium - slTrigger) * quantity)}`,
+      );
     }
 
     this.positions.set(instrumentId, {
@@ -619,7 +635,7 @@ class LiveBroker {
     if (forceExit) {
       this.pushEvent(
         'EXIT',
-        `${instrumentName || pos.instrumentId}: live trail drain LTP ${tickStr(ltp)} ≤ floor ${tickStr(floorPremium)}`,
+        `Taking profit — price fell back to the locked level (\u20B9${tickStr(ltp)})`,
       );
       await this.placeExit(authorization, pos, instrumentName);
       return;
@@ -641,7 +657,7 @@ class LiveBroker {
     if (res.status >= 400) {
       this.pushEvent(
         'ERROR',
-        `MODIFY_SL ${pos.tradingSymbol}: ${res.data?.message || res.status}`,
+        `Could not move stop on ${niceOption(pos.tradingSymbol)} — ${res.data?.message || res.status}`,
       );
       return;
     }
@@ -649,8 +665,8 @@ class LiveBroker {
     pos.indexStop = open.indexStop;
     this.pushEvent(
       'MODIFY_SL',
-      `${pos.tradingSymbol}: SL → ${tickStr(next)}` +
-        (pos.livePeakMfeRs ? ` · peak₹${Math.round(pos.livePeakMfeRs)}` : ''),
+      `Stop moved up to \u20B9${tickStr(next)} on ${niceOption(pos.tradingSymbol)}` +
+        (pos.livePeakMfeRs ? ` — locking in profit (best so far ${rs(pos.livePeakMfeRs)})` : ''),
     );
   }
 
