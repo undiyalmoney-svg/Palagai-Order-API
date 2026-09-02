@@ -170,42 +170,18 @@ function liveGreenRecoveryTrailExtras() {
   return liveGreenTrapExtras();
 }
 
-function liveGreenStartConfig() {
-  const ops = LIVE_GREEN_DNA.liveOps;
-  return {
-    enableNifty: LIVE_GREEN_DNA.enableNifty,
-    enableBank: LIVE_GREEN_DNA.enableBank,
-    enableCrude: LIVE_GREEN_DNA.enableCrude,
-    niftyLots: LIVE_GREEN_DNA.niftyLots,
-    bankLots: LIVE_GREEN_DNA.bankLots,
-    niftyStrategy: LIVE_GREEN_DNA.niftyStrategy,
-    bankStrategy: LIVE_GREEN_DNA.bankStrategy,
-    dayProfitLock: LIVE_GREEN_DNA.dayProfitLock,
-    strictDayStop: LIVE_GREEN_DNA.strictDayStop,
-    enableKutty: false,
-    kuttyAlone: false,
-    realOrders: true,
-    dnaId: LIVE_GREEN_DNA.id,
-    maxOpenLegs: ops.maxOpenLegs,
-    optionStandDownRs: ops.optionStandDownRs,
-    paperLivePath: true,
-    fillFrictionPremium: ops.fillFrictionPremium,
-    crudeAfterIndexClose: true,
-    bankOnlyAfterNifty: ops.bankOnlyAfterNifty,
-    bankOnlyAfterNiftyGreen: ops.bankOnlyAfterNiftyGreen,
-    winStreakToBand: ops.winStreakToBand,
-    indexFirstWinLock: ops.indexFirstWinLock,
-    deskGreenLockRs: ops.deskGreenLockRs,
-    recoveryMaxExtra: ops.recoveryMaxExtra,
-    crudeOnlyBelowBand: ops.crudeOnlyBelowBand,
-  };
-}
 
+/**
+ * liveGreenStartConfig() was REMOVED 2026-08-28 (Phase 3.0 section 21).
+ * It returned `realOrders: true` and was reachable by any caller while being
+ * referenced by nothing — a dead function that would have silently enabled
+ * real-money orders if ever wired up. No default, test, backtest or shadow
+ * configuration may return realOrders:true.
+ */
 module.exports = {
   LIVE_GREEN_DNA,
   clampMaxTradesToDna,
   liveGreenTrapExtras,
   liveGreenBankTrapExtras,
   liveGreenRecoveryTrailExtras,
-  liveGreenStartConfig,
 };

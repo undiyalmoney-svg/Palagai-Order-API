@@ -5,6 +5,7 @@
 const express = require('express');
 const { asyncHandler } = require('../utils/asyncHandler');
 const ctrl = require('./live.controller');
+const srCtrl = require('./sr-breakout.controller');
 const { requireSiteUser } = require('../auth/auth.middleware');
 
 const router = express.Router();
@@ -26,6 +27,7 @@ router.get('/events', asyncHandler(ctrl.events));
 router.post('/start', asyncHandler(ctrl.start));
 router.post('/stop', asyncHandler(ctrl.stop));
 router.post('/backtest', asyncHandler(ctrl.backtest));
+  router.post('/sr-breakout', asyncHandler(srCtrl.srBreakout));
 router.put('/auth', asyncHandler(ctrl.putAuth));
 
 module.exports = router;

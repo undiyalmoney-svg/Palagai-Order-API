@@ -1,0 +1,66 @@
+#!/usr/bin/env node
+/** PHASE 28 — exhaustion fade, SELECTION study. Instead of a random qualifying
+ *  stock, rank the day's exhaustion signals by STRENGTH (how real traders pick
+ *  the most climactic reversal) and take the top one. All ranking inputs are
+ *  known at signal time (no look-ahead). Hold to close, honest 1x, slip 0.03%. */
+const fs=require('fs'),path=require('path');
+const {estimateEquityRoundTripCharges:MIS}=require('../live/equity-charges.js');
+const DIR=process.env.EQDIR, SLIP=0.03, RB=6, RP=2.5, VM=3.0;
+const mean=a=>a.length?a.reduce((x,y)=>x+y,0)/a.length:0;
+const sd=a=>{const m=mean(a);return a.length<2?0:Math.sqrt(a.reduce((x,y)=>x+(y-m)**2,0)/(a.length-1));};
+const sum=a=>a.reduce((x,y)=>x+y,0);
+const S=new Map();
+for(const f of fs.readdirSync(DIR).filter(x=>x.endsWith('.json'))){
+  const bs=new Map();
+  for(const r of JSON.parse(fs.readFileSync(path.join(DIR,f),'utf8'))){
+    const d=r[0].slice(0,10); if(!bs.has(d))bs.set(d,[]);
+    bs.get(d).push({hm:r[0].slice(11,16),o:r[1],h:r[2],l:r[3],c:r[4],v:r[5]||0});
+  }
+  S.set(f.replace('.json',''),bs);
+}
+const dates=[...new Set([].concat(...[...S.values()].map(m=>[...m.keys()])))].sort();
+function sig(a){
+  for(let i=25;i<a.length-2;i++){
+    if(a[i].hm<'10:15'||a[i].hm>'14:30') continue;
+    const run=(a[i].c-a[i-RB].c)/a[i-RB].c*100, av=mean(a.slice(i-20,i).map(x=>x.v)); if(av<=0) continue;
+    const volx=a[i].v/av, rg=a[i].h-a[i].l; if(rg<=0) continue;
+    if(run>=RP&&volx>=VM&&(a[i].c-a[i].l)/rg<=0.34) return {i,dir:-1,run:Math.abs(run),volx};
+    if(run<=-RP&&volx>=VM&&(a[i].h-a[i].c)/rg<=0.34) return {i,dir:1,run:Math.abs(run),volx};
+  }
+  return null;
+}
+function run(SEL,N){
+  let seed=99; const rnd=()=>((seed=(seed*1103515245+12345)&0x7fffffff)/0x7fffffff);
+  let eq=50000; const D=[];
+  for(const d of dates){
+    let cands=[];
+    for(const [sym,bs] of S){ const a=bs.get(d); if(a&&a.length>=45){const s=sig(a); if(s){s.a=a;s.sym=sym;s.strength=s.run*s.volx;cands.push(s);}} }
+    if(!cands.length) continue;
+    if(SEL==='random'){ for(let k=cands.length-1;k>0;k--){const j=Math.floor(rnd()*(k+1));[cands[k],cands[j]]=[cands[j],cands[k]];} }
+    else if(SEL==='strongest') cands.sort((x,y)=>y.strength-x.strength);
+    else if(SEL==='weakest') cands.sort((x,y)=>x.strength-y.strength);
+    else if(SEL==='bigrun') cands.sort((x,y)=>y.run-x.run);
+    else if(SEL==='bigvol') cands.sort((x,y)=>y.volx-x.volx);
+    const per=eq/N;
+    for(const c of cands.slice(0,N)){
+      const a=c.a, e=c.i+1; if(e>=a.length-1) continue;
+      const dir=c.dir, fill=a[e].o*(1+dir*SLIP/100), qty=Math.floor(per/fill); if(qty<1) continue;
+      let px=null; for(let j=e;j<a.length;j++){ if(a[j].hm>='15:15'){px=a[j].c;break;} if(j===a.length-1)px=a[j].c; }
+      const ex=px*(1-dir*SLIP/100);
+      const net=dir*(ex-fill)*qty-MIS({entryPrice:fill,exitPrice:ex,quantity:qty}).totalRs;
+      eq+=net; D.push({d,net,gross:dir*(ex-fill)*qty,notional:fill*qty});
+    }
+  }
+  return D;
+}
+const seg=(D,lo,hi)=>D.filter(x=>x.d>=lo&&x.d<=hi);
+const st=D=>{const dm=new Map();for(const t of D)dm.set(t.d,(dm.get(t.d)||0)+t.net);const dn=[...dm.values()];
+  return D.length?{net:sum(D.map(x=>x.net)),n:D.length,green:100*dn.filter(v=>v>0).length/dn.length,
+  gR:100*sum(D.map(x=>x.gross))/sum(D.map(x=>x.notional)),t:mean(dn)/(sd(dn)/Math.sqrt(dn.length))}:null;};
+console.log('PHASE 28 - SELECTION STUDY');
+console.log('  selection    DEV net   VALID net   TEST net   TESTg%  TESTgreen  ALLt');
+for(const SEL of ['random','strongest','bigrun','bigvol','weakest']){
+  const D=run(SEL,1);
+  const A=st(seg(D,'2018-01-01','2019-12-31')),B=st(seg(D,'2020-01-01','2022-12-31')),Z=st(seg(D,'2023-01-01','2099-12-31')),ALL=st(D);
+  console.log(`  ${SEL.padEnd(11)} ${A.net.toFixed(0).padStart(8)} ${B.net.toFixed(0).padStart(10)} ${Z.net.toFixed(0).padStart(10)}  ${Z.gR.toFixed(3)}   ${Z.green.toFixed(0)}%    ${ALL.t.toFixed(2)}`);
+}

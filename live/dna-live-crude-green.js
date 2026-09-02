@@ -108,31 +108,13 @@ function liveCrudeGreenProfileOverrides() {
   };
 }
 
-function liveCrudeGreenStartConfig(opts = {}) {
-  const withIndex = !!opts.withIndex;
-  return {
-    enableNifty: withIndex,
-    enableBank: withIndex,
-    enableCrude: true,
-    niftyLots: 1,
-    bankLots: 1,
-    crudeLots: LIVE_CRUDE_GREEN_DNA.crudeLots,
-    niftyStrategy: 'trap',
-    bankStrategy: 'trap',
-    crudeStrategy: LIVE_CRUDE_GREEN_DNA.crudeStrategy,
-    dayProfitLock: true,
-    strictDayStop: true,
-    enableKutty: false,
-    kuttyAlone: false,
-    realOrders: true,
-    dnaId: withIndex ? 'live-green+crude-v3' : LIVE_CRUDE_GREEN_DNA.id,
-    maxOpenLegs: LIVE_CRUDE_GREEN_DNA.liveOps.maxOpenLegs,
-    crudeAfterIndexClose: true,
-  };
-}
 
+/**
+ * liveCrudeGreenStartConfig() was REMOVED 2026-08-28 (Phase 3.0 section 21),
+ * same reason as liveGreenStartConfig(): it returned `realOrders: true`,
+ * nothing referenced it, and it was reachable by any future caller.
+ */
 module.exports = {
   LIVE_CRUDE_GREEN_DNA,
   liveCrudeGreenProfileOverrides,
-  liveCrudeGreenStartConfig,
 };

@@ -17,7 +17,7 @@
  * Usage: node scripts/bs-backtest.js <fromDate> <toDate> [lots]
  * Env:   KITE_API_KEY, KITE_ACCESS_TOKEN
  */
-const { createTrapStrategyV2 } = require('../live/strategy-core.cjs');
+const { createTrapStrategyV2, createGenieStrategy } = require('../live/strategy-core.cjs');
 const { fetchHistorical5m } = require('../live/kite-market');
 const { blackScholesPrice, realizedVolAnnualized } = require('../live/bs-option-pricer');
 const { estimateRoundTripCharges } = require('../live/charge-entry-gate');
@@ -228,11 +228,19 @@ async function main() {
   const dailyCloses = dailyDates.map((d) => dailyCloseByDate.get(d));
   const dailyIndexOfDate = new Map(dailyDates.map((d, i) => [d, i]));
 
-  const strategy = createTrapStrategyV2();
+  // STRATEGY=genie drives the already-bundled Smart Pullback PRO / GENIE
+  // router (align-combo-genie) instead of Trap V2 — same rigorous pipeline
+  // (real 5yr index candles, real BS option pricing, real Rs80 charges,
+  // train/holdout discipline), so the two are honestly comparable.
+  const useGenie = (process.env.STRATEGY || '').toLowerCase() === 'genie';
+  const strategy = useGenie ? createGenieStrategy() : createTrapStrategyV2();
+  if (useGenie) console.error('Strategy: Genie / Smart Pullback PRO (align-combo-genie)');
   // DISABLE_TRAIL=1 arms the peak-trail at an unreachable level so trades
   // only close via structural stop/target/EOD — isolates the signal's
   // "clean" edge from the friction-sensitive ₹100/₹50/₹50 micro-trail.
-  if (process.env.DISABLE_TRAIL) {
+  if (useGenie) {
+    strategy.initialize();
+  } else if (process.env.DISABLE_TRAIL) {
     strategy.initialize({ extras: { profitLockArmRs: 1e9, profitLockLockRs: 1e9, profitLockGivebackRs: 0 } });
     console.error('Peak-trail DISABLED — structural SL/target/EOD exits only.');
   } else if (process.env.TRAIL_ARM_RS) {
@@ -256,6 +264,11 @@ async function main() {
   } else {
     strategy.initialize();
   }
+
+  // 0 = unlimited, matching the strategy's own declared setting (Genie relies
+  // on its router/cooldown rather than a flat count; Trap V2 declares 3).
+  const maxTradesPerDay = Math.max(0, Math.floor(Number(strategy.getSettings().maxTradesPerDay)) || 0);
+  console.error(`maxTradesPerDay: ${maxTradesPerDay || 'unlimited'}`);
 
   let startIndex = 0;
   for (let i = 0; i < candles.length; i += 1) {
@@ -381,7 +394,7 @@ async function main() {
     }
 
     if (dayStopped) continue;
-    if (dayTradeCount >= 3) continue; // matches TRAP_V2 maxTradesPerDay
+    if (maxTradesPerDay > 0 && dayTradeCount >= maxTradesPerDay) continue;
     if (lastExitAt) {
       const minsSince = (new Date(candle.date) - new Date(lastExitAt)) / 60000;
       if (minsSince < COOLDOWN_MIN) continue;

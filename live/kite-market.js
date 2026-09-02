@@ -42,8 +42,13 @@ async function getWithRetry(url, opts, label = 'kite', retries = 3) {
     } catch (err) {
       lastErr = err;
       const code = String(err.code || '');
+      // EPIPE belongs here: a pooled keep-alive socket that the server closed
+      // between requests fails the NEXT write with EPIPE, not ECONNRESET. Long
+      // chunked history pulls (5-min candles need ~23 requests per symbol) hit
+      // this reliably once Kite recycles the connection — it is transient by
+      // definition, since the retry opens a fresh socket.
       const transient =
-        /ETIMEDOUT|ECONNRESET|ECONNREFUSED|ECONNABORTED|EAI_AGAIN|ENETUNREACH|ENOTFOUND/.test(
+        /ETIMEDOUT|ECONNRESET|ECONNREFUSED|ECONNABORTED|EAI_AGAIN|ENETUNREACH|ENOTFOUND|EPIPE/.test(
           code,
         ) || /timeout/i.test(err.message || '');
       if (!transient) throw err;
@@ -154,9 +159,10 @@ async function fetchInstruments(authorization) {
   return parseInstrumentsCsv(res.data);
 }
 
-async function fetchHistorical5m(authorization, instrumentToken, fromDate, toDate) {
+/** interval: 'minute' | '5minute' | '60minute' | 'day' etc (Kite Connect intervals). */
+async function fetchHistoricalCandles(authorization, instrumentToken, fromDate, toDate, interval = '5minute') {
   const res = await getWithRetry(
-    `/instruments/historical/${instrumentToken}/5minute`,
+    `/instruments/historical/${instrumentToken}/${interval}`,
     {
       headers: headers(authorization),
       params: { from: fromDate, to: toDate },
@@ -177,6 +183,10 @@ async function fetchHistorical5m(authorization, instrumentToken, fromDate, toDat
     close: Number(r[4]),
     volume: Number(r[5]) || 0,
   }));
+}
+
+async function fetchHistorical5m(authorization, instrumentToken, fromDate, toDate) {
+  return fetchHistoricalCandles(authorization, instrumentToken, fromDate, toDate, '5minute');
 }
 
 async function fetchQuotes(authorization, keys) {
@@ -200,6 +210,7 @@ async function fetchQuotes(authorization, keys) {
 module.exports = {
   fetchInstruments,
   fetchHistorical5m,
+  fetchHistoricalCandles,
   fetchQuotes,
   parseInstrumentsCsv,
 };
