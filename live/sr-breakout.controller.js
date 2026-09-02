@@ -7,7 +7,10 @@
  */
 const https = require('https');
 const market = require('./kite-market');
+const store = require('./live.store');
 const { runSrBreakout } = require('./sr-breakout');
+
+function userId(req) { return req.user?.id || 'anonymous'; }
 
 // Instrument registry. NIFTY 50 / NIFTY BANK have fixed index tokens; Crude Oil
 // Mini is an MCX monthly future resolved to its front month at request time.
@@ -15,17 +18,17 @@ const INSTRUMENTS = {
   nifty: {
     key: 'nifty', name: 'Nifty 50', token: '256265',
     session: { entryStartHm: '09:45', entryEndHm: '14:30', squareOffHm: '15:15' },
-    defaults: { entryPts: 40, bigPts: 70, cutHm: '12:30', lotSize: 75 },
+    defaults: { entryPts: 40, bigPts: 70, targetPts: 70, cutHm: '12:30', lotSize: 75 },
   },
   banknifty: {
     key: 'banknifty', name: 'Bank Nifty', token: '260105',
     session: { entryStartHm: '09:45', entryEndHm: '14:30', squareOffHm: '15:15' },
-    defaults: { entryPts: 90, bigPts: 150, cutHm: '12:30', lotSize: 35 },
+    defaults: { entryPts: 90, bigPts: 150, targetPts: 150, cutHm: '12:30', lotSize: 35 },
   },
   crude: {
     key: 'crude', name: 'Crude Oil Mini', token: null, // resolved at runtime
     session: { entryStartHm: '09:30', entryEndHm: '22:00', squareOffHm: '23:20' },
-    defaults: { entryPts: 27, bigPts: 0, cutHm: '', lotSize: 10 },
+    defaults: { entryPts: 27, bigPts: 0, targetPts: 0, cutHm: '', lotSize: 10 },
   },
 };
 
@@ -77,7 +80,8 @@ function todayIso() { return new Date().toISOString().slice(0, 10); }
 async function srBreakout(req, res) {
   const authorization =
     req.headers['x-kite-authorization'] ||
-    req.headers['x-kite-authorisation'];
+    req.headers['x-kite-authorisation'] ||
+    (await store.getAuthorizationFor(userId(req)));
   if (!authorization) {
     res.status(400).json({ status: 'error', message: 'Kite session required — Get Token (or Push Kite token), then retry Paper.' });
     return;
@@ -86,7 +90,6 @@ async function srBreakout(req, res) {
   const keys = Array.isArray(body.instruments) && body.instruments.length ? body.instruments : ['nifty'];
   const fromDate = body.fromDate || todayIso();
   const toDate = body.toDate || todayIso();
-  const targetPts = Number(body.targetPts) || 0;   // 0 = hold to close
 
   const results = [];
   for (const key of keys) {
@@ -100,6 +103,7 @@ async function srBreakout(req, res) {
       const entryPts = numOr(body.entryPts, spec.defaults.entryPts);
       const bigPts = numOr(body.bigPts, spec.defaults.bigPts);
       const cutHm = body.cutHm != null ? body.cutHm : spec.defaults.cutHm;
+      const targetPts = numOr(body.targetPts, spec.defaults.targetPts);   // blank = default
       const lots = Math.max(1, numOr(body.lots, 1));
       const unitsPerLot = spec.defaults.lotSize;          // standard contract size
       const { trades, summary } = runSrBreakout(candles, {
