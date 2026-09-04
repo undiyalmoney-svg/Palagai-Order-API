@@ -29,6 +29,7 @@ router.post('/stop', asyncHandler(ctrl.stop));
 router.post('/backtest', asyncHandler(ctrl.backtest));
   router.post('/sr-breakout', asyncHandler(srCtrl.srBreakout));
   router.post('/sr-observe', asyncHandler(srCtrl.srObserve));
+  router.post('/sr-breakout/debug', asyncHandler(srCtrl.srDebug));
   router.get('/sr-observe/status', asyncHandler(srCtrl.srObserveStatus));
   router.get('/sr-observe/history', asyncHandler(srCtrl.srObserveHistory));
   router.post('/sr-observe/confirm', asyncHandler(srCtrl.srLiveConfirm));

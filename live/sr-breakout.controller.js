@@ -11,6 +11,7 @@ const store = require('./live.store');
 const { runSrBreakout } = require('./sr-breakout');
 const { observe, history: obsHistory, confirmLiveEntry, confirmLiveExit } = require('./sr-observe');
 const collector = require('./sr-collector');
+const { auditDay } = require('./sr-debug');
 
 function userId(req) { return req.user?.id || 'anonymous'; }
 
@@ -179,6 +180,36 @@ function srObserveStatus(req, res) {
   res.json({ status: 'ok', ...collector.status() });
 }
 
+/**
+ * POST /live/sr-breakout/debug — candle-by-candle audit for a day ("Why no
+ * trade?"). Read-only; does not change the strategy or thresholds. Shows every
+ * completed 15-min candle with the gate trace + rejection reason, plus the
+ * intrabar developing-state trace. body: { instruments?, date? }
+ */
+async function srDebug(req, res) {
+  const authorization =
+    req.headers['x-kite-authorization'] || req.headers['x-kite-authorisation'] ||
+    (await store.getAuthorizationFor(userId(req)));
+  if (!authorization) { res.status(400).json({ status: 'error', message: 'Kite session required — Get Token, then retry.' }); return; }
+  const body = req.body || {};
+  const date = body.date || todayIso();
+  const keys = Array.isArray(body.instruments) && body.instruments.length ? body.instruments : ['nifty'];
+  const results = [];
+  for (const key of keys) {
+    const spec = INSTRUMENTS[key];
+    if (!spec) { results.push({ key, error: 'unknown instrument' }); continue; }
+    try {
+      let token = spec.token, contract = spec.name;
+      if (key === 'crude') { const r = await resolveCrudeToken(authorization); token = r.token; contract = r.symbol; }
+      const candles = await market.fetchHistorical5m(authorization, token, shiftDays(date, -12), date);
+      const b5 = candles.map((x) => ({ date: x.date, open: x.open, high: x.high, low: x.low, close: x.close }));
+      const audit = auditDay(b5, { entryPts: numOr(body.entryPts, spec.entryPts), trendBars: 20, ...spec.session }, date);
+      results.push({ key, name: spec.name, contract, ...audit });
+    } catch (e) { results.push({ key, name: spec.name, error: String(e.message || e) }); }
+  }
+  res.json({ status: 'ok', date, results });
+}
+
 /** GET /live/sr-observe/history — full permanent observation + paper history. */
 function srObserveHistory(req, res) {
   res.json({ status: 'ok', records: obsHistory() });
@@ -205,5 +236,5 @@ function srLiveExit(req, res) {
 }
 
 module.exports = {
-  srBreakout, srObserve, srObserveStatus, srObserveHistory, srLiveConfirm, srLiveExit, INSTRUMENTS,
+  srBreakout, srObserve, srObserveStatus, srObserveHistory, srLiveConfirm, srLiveExit, srDebug, INSTRUMENTS,
 };
