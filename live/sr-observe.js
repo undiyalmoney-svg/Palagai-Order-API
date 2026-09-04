@@ -168,7 +168,10 @@ async function observe(authorization, opts = {}) {
           if (!optState || optState.type !== type) optState = { type, ...(await optionMap(authorization, spec.root, type)) };
           const spot = t.entryPrice; // underlying entry ≈ spot at signal
           const atm = Math.round(spot / spec.step) * spec.step;
-          const expiry = optState.expiries.find((e) => e >= today) || null;
+          // Roll on expiry day: require expiry strictly AFTER today, so on an
+          // option's expiry date we trade the NEXT expiry, not the expiring one
+          // (matches the Crude future roll and the "next expiry on expiry day" spec).
+          const expiry = optState.expiries.find((e) => e > today) || optState.expiries.find((e) => e >= today) || null;
           const candStrikes = dir > 0 ? [atm - spec.step, atm, atm + spec.step] : [atm + spec.step, atm, atm - spec.step];
           const candKeys = [];
           const candMeta = [];
