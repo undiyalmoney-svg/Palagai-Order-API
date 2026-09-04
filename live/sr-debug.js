@@ -61,7 +61,12 @@ function auditDay(bars5, spec, date) {
     if (j >= 0) { if (isPH[j]) lastRes = B[j].h; if (isPL[j]) lastSup = B[j].l; }
     const b = B[i];
     if (b.d !== date) continue;
-    if (b.hm < entryStartHm || b.hm > entryEndHm) continue;
+    // Audit the FULL day — do NOT hide candles outside the entry window; instead
+    // flag them, so a qualifying morning/afternoon breakout is visible with its
+    // exact reason rather than silently dropped.
+    const inWindow = b.hm >= entryStartHm && b.hm <= entryEndHm;
+    const squareOff = spec.squareOffHm || '15:15';
+    const isSquareOffBar = b.hm >= squareOff;
 
     const body = +(b.c - b.o).toFixed(2);
     const range = +(b.h - b.l).toFixed(2);
@@ -75,13 +80,20 @@ function auditDay(bars5, spec, date) {
     const brokeWall = wall != null && (dir > 0 ? b.c > lastRes : b.c < lastSup);
     const withTrend = trend != null && ((dir > 0 && trend > 0) || (dir < 0 && trend < 0));
 
-    // rejection reason — first failed gate, in strategy order
+    // Would this candle pass the core strategy test (size + wall break + trend),
+    // ignoring the time window? Kept separate so we can show qualifying candles
+    // that were only excluded by the entry window.
+    const coreQualifies = lastRes != null && lastSup != null && trend != null && reachedThreshold && brokeWall && withTrend;
+
+    // rejection reason — first failed gate, in strategy order (time window last)
     let rejection = null, signal = false, option = null;
     if (lastRes == null || lastSup == null) rejection = 'No confirmed S/R yet (warming up)';
     else if (trend == null) rejection = 'Trend not established (early bar)';
     else if (!reachedThreshold) rejection = `Body ${Math.abs(body)} < required ${entryPts}`;
     else if (!brokeWall) rejection = `Wall not broken (close ${b.c} did not clear ${wallType} ${wall})`;
     else if (!withTrend) rejection = 'Breakout against trend';
+    else if (!inWindow) rejection = `WOULD QUALIFY — but outside entry window ${entryStartHm}–${entryEndHm}`;
+    else if (isSquareOffBar) rejection = 'WOULD QUALIFY — but square-off bar (no time to hold)';
     else { signal = true; option = dir > 0 ? 'CE' : 'PE'; }
     if (reachedThreshold) candidates += 1;
     if (signal) signals += 1; else rej[rejection] = (rej[rejection] || 0) + 1;
@@ -112,7 +124,8 @@ function auditDay(bars5, spec, date) {
     candles.push({
       time: `${b.hm}`, open: b.o, high: b.h, low: b.l, close: b.c,
       body, range, dir: dir > 0 ? 'up' : 'down', nearestWall: wall, wallType, distToWall,
-      trend, threshold: entryPts, reachedThreshold, brokeWall, withTrend, signal, option, rejection,
+      trend, threshold: entryPts, reachedThreshold, brokeWall, withTrend, inWindow,
+      coreQualifies, signal, option, rejection,
       developing: { finalState, developingAt, thresholdCrossedAt, trace },
     });
   }
@@ -123,10 +136,14 @@ function auditDay(bars5, spec, date) {
     summary: {
       completedCandles: candles.length,
       candidatesReachedThreshold: candidates,
+      coreQualifiers: candles.filter((c) => c.coreQualifies).length,        // pass size+wall+trend
+      tradeableSignals: signals,                                            // core + in-window + not square-off
+      qualifiedButOutsideWindow: candles.filter((c) => c.coreQualifies && !c.signal).length,
       signals,
       rejected: candles.length - signals,
       rejectionReasons: rej,
       detectorRan: candles.length > 0,
+      entryWindow: `${entryStartHm}–${entryEndHm}`,
     },
   };
 }

@@ -203,7 +203,14 @@ async function srDebug(req, res) {
       if (key === 'crude') { const r = await resolveCrudeToken(authorization); token = r.token; contract = r.symbol; }
       const candles = await market.fetchHistorical5m(authorization, token, shiftDays(date, -12), date);
       const b5 = candles.map((x) => ({ date: x.date, open: x.open, high: x.high, low: x.low, close: x.close }));
-      const audit = auditDay(b5, { entryPts: numOr(body.entryPts, spec.entryPts), trendBars: 20, ...spec.session }, date);
+      // Entry window is overridable per request so a qualifying open/close candle
+      // can be inspected — the strategy default (spec.session) is unchanged.
+      const session = {
+        entryStartHm: body.entryStartHm || spec.session.entryStartHm,
+        entryEndHm: body.entryEndHm || spec.session.entryEndHm,
+        squareOffHm: body.squareOffHm || spec.session.squareOffHm,
+      };
+      const audit = auditDay(b5, { entryPts: numOr(body.entryPts, spec.entryPts), trendBars: 20, ...session }, date);
       results.push({ key, name: spec.name, contract, ...audit });
     } catch (e) { results.push({ key, name: spec.name, error: String(e.message || e) }); }
   }
