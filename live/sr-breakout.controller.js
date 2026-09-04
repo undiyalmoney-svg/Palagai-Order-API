@@ -74,6 +74,7 @@ function parseExpiry(sym, expiryField) {
 }
 
 function todayIso() { return new Date().toISOString().slice(0, 10); }
+function shiftDays(iso, delta) { const d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + delta); return d.toISOString().slice(0, 10); }
 
 /**
  * POST /live/sr-breakout
@@ -103,7 +104,10 @@ async function srBreakout(req, res) {
       let token = spec.token;
       let contract = spec.name;
       if (key === 'crude') { const r = await resolveCrudeToken(authorization); token = r.token; contract = r.symbol; }
-      const candles = await market.fetchHistorical5m(authorization, token, fromDate, toDate);
+      // Fetch ~12 calendar days of warm-up before fromDate so S/R + trend are
+      // primed; those bars build context but produce no reported trades.
+      const warmupFrom = shiftDays(fromDate, -12);
+      const candles = await market.fetchHistorical5m(authorization, token, warmupFrom, toDate);
       const entryPts = numOr(body.entryPts, spec.entryPts);
       const lots = Math.max(1, numOr(body.lots, 1));
       const unitsPerLot = spec.unitsPerLot;
@@ -114,7 +118,7 @@ async function srBreakout(req, res) {
       const maxTradesPerDay = Math.max(1, numOr(body.maxTradesPerDay, 3));
       const { trades, summary } = runSrBreakout(candles, {
         entryPts, trendBars: 20, gapLo: spec.gapLo, gapHi: spec.gapHi, targetByScore: spec.targetByScore,
-        maxTradesPerDay, dayLossStop, dayProfitTarget, ...spec.session,
+        maxTradesPerDay, dayLossStop, dayProfitTarget, reportFromDate: fromDate, ...spec.session,
       });
       // ₹ = points × unitsPerLot × lots (futures-equivalent; option premium differs).
       const rupees = (pts) => Math.round(pts * perPoint);

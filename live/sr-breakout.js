@@ -60,6 +60,9 @@ function runSrBreakout(bars5, opts) {
   const maxTradesPerDay = num(opts.maxTradesPerDay, 3);
   const dayLossStop = num(opts.dayLossStop, 0);
   const dayProfitTarget = num(opts.dayProfitTarget, 0);
+  // Bars before this date only warm up S/R + trend; they produce no reported
+  // trades. Lets a single-day / live-today run see signals from the open.
+  const reportFromDate = opts.reportFromDate || '';
 
   const bars15 = to15(bars5);
   const day5 = new Map();
@@ -83,6 +86,7 @@ function runSrBreakout(bars5, opts) {
     if (b.hm < entryStartHm || b.hm > entryEndHm) continue;
     if (cutHm && b.hm >= cutHm) continue;
     if (lastRes == null || lastSup == null || i < trendBars) continue;
+    if (reportFromDate && b.d < reportFromDate) continue;  // warm-up day: skip trade
 
     let st = dayState.get(b.d);
     if (!st) { st = { trades: 0, pnl: 0, stopped: false }; dayState.set(b.d, st); }
