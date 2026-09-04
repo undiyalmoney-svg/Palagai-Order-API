@@ -9,6 +9,7 @@ const https = require('https');
 const market = require('./kite-market');
 const store = require('./live.store');
 const { runSrBreakout } = require('./sr-breakout');
+const { observe } = require('./sr-observe');
 
 function userId(req) { return req.user?.id || 'anonymous'; }
 
@@ -144,4 +145,27 @@ async function srBreakout(req, res) {
 
 function numOr(v, d) { const n = Number(v); return Number.isFinite(n) && v !== '' && v != null ? n : d; }
 
-module.exports = { srBreakout, INSTRUMENTS };
+/**
+ * POST /live/sr-observe  — REAL-OPTION OBSERVATION (paper data collection).
+ * Detects today's validated underlying signals and captures the real option
+ * snapshot + price path for each. Places NO orders. body: { instruments?, lots? }
+ */
+async function srObserve(req, res) {
+  const authorization =
+    req.headers['x-kite-authorization'] ||
+    req.headers['x-kite-authorisation'] ||
+    (await store.getAuthorizationFor(userId(req)));
+  if (!authorization) {
+    res.status(400).json({ status: 'error', message: 'Kite session required — Get Token (or Push Kite token), then retry.' });
+    return;
+  }
+  const body = req.body || {};
+  try {
+    const out = await observe(authorization, { instruments: body.instruments, lots: numOr(body.lots, 1) });
+    res.json({ status: 'ok', mode: 'observe', ...out });
+  } catch (e) {
+    res.status(500).json({ status: 'error', message: String(e.message || e) });
+  }
+}
+
+module.exports = { srBreakout, srObserve, INSTRUMENTS };

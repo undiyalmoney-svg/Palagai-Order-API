@@ -28,6 +28,7 @@ router.post('/start', asyncHandler(ctrl.start));
 router.post('/stop', asyncHandler(ctrl.stop));
 router.post('/backtest', asyncHandler(ctrl.backtest));
   router.post('/sr-breakout', asyncHandler(srCtrl.srBreakout));
+  router.post('/sr-observe', asyncHandler(srCtrl.srObserve));
 router.put('/auth', asyncHandler(ctrl.putAuth));
 
 module.exports = router;
