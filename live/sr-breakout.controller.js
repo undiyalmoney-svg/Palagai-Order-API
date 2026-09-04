@@ -16,19 +16,19 @@ function userId(req) { return req.user?.id || 'anonymous'; }
 // Mini is an MCX monthly future resolved to its front month at request time.
 const INSTRUMENTS = {
   nifty: {
-    key: 'nifty', name: 'Nifty 50', token: '256265',
+    key: 'nifty', name: 'Nifty 50', token: '256265', unitsPerLot: 75,
     session: { entryStartHm: '09:45', entryEndHm: '14:30', squareOffHm: '15:15' },
-    defaults: { entryPts: 40, bigPts: 70, targetPts: 70, cutHm: '12:30', lotSize: 75 },
+    entryPts: 27, gapLo: 100, gapHi: 175, targetByScore: { 1: 20, 2: 25, 3: 30 },
   },
   banknifty: {
-    key: 'banknifty', name: 'Bank Nifty', token: '260105',
+    key: 'banknifty', name: 'Bank Nifty', token: '260105', unitsPerLot: 35,
     session: { entryStartHm: '09:45', entryEndHm: '14:30', squareOffHm: '15:15' },
-    defaults: { entryPts: 90, bigPts: 150, targetPts: 150, cutHm: '12:30', lotSize: 35 },
+    entryPts: 60, gapLo: 275, gapHi: 465, targetByScore: { 1: 40, 2: 50, 3: 60 },
   },
   crude: {
-    key: 'crude', name: 'Crude Oil Mini', token: null, // resolved at runtime
+    key: 'crude', name: 'Crude Oil Mini', token: null, unitsPerLot: 10, // token resolved at runtime
     session: { entryStartHm: '09:30', entryEndHm: '22:00', squareOffHm: '23:20' },
-    defaults: { entryPts: 27, bigPts: 0, targetPts: 0, cutHm: '', lotSize: 10 },
+    entryPts: 27, gapLo: 78, gapHi: 130, targetByScore: { 1: 20, 2: 25, 3: 30 },
   },
 };
 
@@ -100,21 +100,24 @@ async function srBreakout(req, res) {
       let contract = spec.name;
       if (key === 'crude') { const r = await resolveCrudeToken(authorization); token = r.token; contract = r.symbol; }
       const candles = await market.fetchHistorical5m(authorization, token, fromDate, toDate);
-      const entryPts = numOr(body.entryPts, spec.defaults.entryPts);
-      const bigPts = numOr(body.bigPts, spec.defaults.bigPts);
-      const cutHm = body.cutHm != null ? body.cutHm : spec.defaults.cutHm;
-      const targetPts = numOr(body.targetPts, spec.defaults.targetPts);   // blank = default
+      const entryPts = numOr(body.entryPts, spec.entryPts);
       const lots = Math.max(1, numOr(body.lots, 1));
-      const unitsPerLot = spec.defaults.lotSize;          // standard contract size
+      const unitsPerLot = spec.unitsPerLot;
+      const perPoint = unitsPerLot * lots;                // ₹ per point
+      // Daily risk stops arrive in ₹ from the UI; convert to points for the engine.
+      const dayLossStop = numOr(body.dayLossStopRs, 0) > 0 ? numOr(body.dayLossStopRs, 0) / perPoint : 0;
+      const dayProfitTarget = numOr(body.dayProfitTargetRs, 0) > 0 ? numOr(body.dayProfitTargetRs, 0) / perPoint : 0;
+      const maxTradesPerDay = Math.max(1, numOr(body.maxTradesPerDay, 3));
       const { trades, summary } = runSrBreakout(candles, {
-        entryPts, bigPts, targetPts, cutHm, ...spec.session,
+        entryPts, trendBars: 20, gapLo: spec.gapLo, gapHi: spec.gapHi, targetByScore: spec.targetByScore,
+        maxTradesPerDay, dayLossStop, dayProfitTarget, ...spec.session,
       });
       // ₹ = points × unitsPerLot × lots (futures-equivalent; option premium differs).
-      const rupees = (pts) => Math.round(pts * unitsPerLot * lots);
+      const rupees = (pts) => Math.round(pts * perPoint);
       const tradesR = trades.map((t) => ({ ...t, instrument: spec.name, contract, rupees: rupees(t.points) }));
       results.push({
         key, name: spec.name, contract, token, candles: candles.length,
-        params: { entryPts, bigPts, targetPts, cutHm, lots, unitsPerLot },
+        params: { entryPts, gapLo: spec.gapLo, gapHi: spec.gapHi, targetByScore: spec.targetByScore, lots, unitsPerLot, maxTradesPerDay, dayLossStopRs: numOr(body.dayLossStopRs, 0), dayProfitTargetRs: numOr(body.dayProfitTargetRs, 0) },
         summary: {
           ...summary,
           totalProfitRupees: rupees(summary.profitPoints),
