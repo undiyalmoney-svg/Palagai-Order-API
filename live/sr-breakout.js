@@ -94,6 +94,10 @@ function runSrBreakout(bars5, opts) {
 
     const body = b.c - b.o;
     const trend = b.c - bars15[i - trendBars].c;
+    // ENTRY: big candle (>= entryPts) closing BEYOND the S/R wall, in the trend
+    // direction. The wall break is essential — dropping it to catch mid-range
+    // momentum candles was tested and lost money (those candles reverse and the
+    // held-to-close losers dwarf the wins). Verified Aug'26: −₹17,551 without it.
     let dir = 0, level = null;
     if (body >= entryPts && b.c > lastRes && trend > 0) { dir = 1; level = lastRes; }
     else if (-body >= entryPts && b.c < lastSup && trend < 0) { dir = -1; level = lastSup; }

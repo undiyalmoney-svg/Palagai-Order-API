@@ -85,7 +85,7 @@ function auditDay(bars5, spec, date) {
     // that were only excluded by the entry window.
     const coreQualifies = lastRes != null && lastSup != null && trend != null && reachedThreshold && brokeWall && withTrend;
 
-    // rejection reason — first failed gate, in strategy order (time window last)
+    // rejection reason — first failed gate, in strategy order (time window last).
     let rejection = null, signal = false, option = null;
     if (lastRes == null || lastSup == null) rejection = 'No confirmed S/R yet (warming up)';
     else if (trend == null) rejection = 'Trend not established (early bar)';
