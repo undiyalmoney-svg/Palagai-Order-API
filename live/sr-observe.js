@@ -25,6 +25,22 @@ const fs = require('fs');
 const path = require('path');
 const market = require('./kite-market');
 const { runSrBreakout } = require('./sr-breakout');
+const { EXECUTION_MODE } = require('./sr-execution-guard');
+
+// Approved paper exit rule (configurable). Loser is NOT held to premium-zero;
+// the option premium is a risk boundary, not the normal stop.
+const MAX_HOLD_BARS = Number(process.env.SR_MAX_HOLD_BARS || 12); // 12 x 5m = 60 min
+
+/** Zerodha options round-trip cost (buy+sell), rupees. Real model, not a guess. */
+function optionCosts(entryPrem, exitPrem, qty) {
+  const brokerage = 40;                              // ₹20 buy + ₹20 sell
+  const turnover = (entryPrem + exitPrem) * qty;
+  const txn = 0.0003503 * turnover;                  // NSE txn charge (approx)
+  const stt = 0.000625 * exitPrem * qty;             // STT 0.0625% on sell premium
+  const stamp = 0.00003 * entryPrem * qty;           // stamp on buy
+  const gst = 0.18 * (brokerage + txn);
+  return Math.round(brokerage + txn + stt + stamp + gst);
+}
 
 const DIR = path.join(__dirname, '..', 'sr-observations');
 const LOG = path.join(DIR, 'observations.jsonl');
@@ -229,6 +245,32 @@ async function observe(authorization, opts = {}) {
                 C_option_plus10pct: pctExit(0.10), D_option_plus20pct: pctExit(0.20), E_option_plus30pct: pctExit(0.30),
                 close: oAfter[oAfter.length - 1].c,
               };
+
+              // ── APPROVED PAPER EXIT (real prices) — closes the record ──────
+              // First of: Target 1 hit, structural failure, or max holding time;
+              // else, once the session is over, square-off. Never premium-zero.
+              let exitIdx = -1, reason = null;
+              for (let i = 0; i < uAfter.length; i++) {
+                const ub = uAfter[i];
+                const tgtHit = dir > 0 ? ub.high >= rec.target_1 : ub.low <= rec.target_1;
+                const failed = dir > 0 ? ub.close < rec.underlying_invalidation : ub.close > rec.underlying_invalidation;
+                if (tgtHit) { exitIdx = i; reason = 'TARGET_1'; break; }
+                if (failed) { exitIdx = i; reason = 'STRUCTURAL_FAILURE'; break; }
+                if (i >= MAX_HOLD_BARS - 1) { exitIdx = i; reason = 'MAX_HOLDING_TIME'; break; }
+              }
+              const sessionOver = uAfter.length && uAfter[uAfter.length - 1].hm >= spec.session.squareOffHm;
+              if (exitIdx >= 0 || sessionOver) {
+                const exitHm = exitIdx >= 0 ? uAfter[exitIdx].hm : uAfter[uAfter.length - 1].hm;
+                if (!reason) reason = 'SESSION_CLOSE';
+                const exitPrem = optAt(exitHm);               // real option premium at exit bar
+                const gross = Math.round((exitPrem - e) * rec.quantity);
+                const cost = optionCosts(e, exitPrem, rec.quantity);
+                rec.exit_timestamp = `${today}T${exitHm}`;
+                rec.exit_price = exitPrem; rec.exit_reason = reason;
+                rec.gross_PnL = gross; rec.estimated_costs = cost; rec.net_PnL = gross - cost;
+                rec.holding_bars = (exitIdx >= 0 ? exitIdx + 1 : uAfter.length);
+                rec.status = 'CLOSED';
+              }
             } else { rec.data_quality = 'option-path-missing'; }
           } catch (e) { rec.data_quality = 'option-fetch-error'; }
         }
@@ -252,16 +294,32 @@ function dashboard(all, today) {
   const optMae = entered.filter((r) => r.option_MAE != null).map((r) => r.option_MAE);
   const med = (a) => a.length ? [...a].sort((x, y) => x - y)[Math.floor(a.length / 2)] : null;
   const mean = (a) => a.length ? +(a.reduce((x, y) => x + y, 0) / a.length).toFixed(2) : null;
+  // real P&L stats from CLOSED paper records
+  const nets = closed.map((r) => r.net_PnL);
+  const winNets = nets.filter((x) => x > 0), lossNets = nets.filter((x) => x <= 0);
+  const grossWin = winNets.reduce((a, b) => a + b, 0), grossLoss = Math.abs(lossNets.reduce((a, b) => a + b, 0));
+  const todayClosed = todays.filter((r) => r.net_PnL != null);
+  const dayPnl = todayClosed.reduce((a, r) => a + r.net_PnL, 0);
+  // max drawdown on the cumulative net-P&L curve
+  let peak = 0, run = 0, maxDD = 0;
+  for (const r of closed) { run += r.net_PnL; peak = Math.max(peak, run); maxDD = Math.min(maxDD, run - peak); }
   return {
     today: {
       signals: todays.length, paperEntries: todays.filter((r) => r.option_entry_price != null).length,
       armed: todays.filter((r) => String(r.status).startsWith('ARMED')).length,
       open: todays.filter((r) => r.status === 'OPEN').length,
+      closed: todayClosed.length, dayPnl: Math.round(dayPnl),
+      brake: todayClosed.length >= 3 ? 'MAX_TRADES' : dayPnl >= LOT_DAY_PROFIT ? 'PROFIT_LIMIT' : dayPnl <= -LOT_DAY_LOSS ? 'LOSS_LIMIT' : null,
     },
     cumulative: {
       totalSignals: all.length, optionTradesRecorded: entered.length, closed: closed.length,
       wins: wins.length, losses: closed.length - wins.length,
       winRate: closed.length ? Math.round(100 * wins.length / closed.length) : null,
+      grossPnL: Math.round(nets.reduce((a, b) => a + b, 0)), netPnL: Math.round(nets.reduce((a, b) => a + b, 0)),
+      avgWin: winNets.length ? Math.round(mean(winNets)) : null, avgLoss: lossNets.length ? Math.round(mean(lossNets)) : null,
+      profitFactor: grossLoss ? +(grossWin / grossLoss).toFixed(2) : null,
+      expectedValue: closed.length ? Math.round(nets.reduce((a, b) => a + b, 0) / closed.length) : null,
+      maxDrawdown: Math.round(maxDD),
     },
     optionStats: {
       avgOptionMFE: mean(optMfe), medOptionMFE: med(optMfe),
@@ -273,7 +331,50 @@ function dashboard(all, today) {
       minSampleForFirstValidation: MIN_SAMPLE, recommended: 50,
       optionEdgeStatus: entered.length === 0 ? 'UNTESTED' : entered.length < MIN_SAMPLE ? 'COLLECTING DATA' : 'PRELIMINARY',
     },
+    executionMode: EXECUTION_MODE, liveBrokerOrders: 'DISABLED',
   };
 }
 
-module.exports = { observe, loadRecords, dashboard, INSTR };
+/**
+ * Manual LIVE position confirmation. The system NEVER assumes a broker fill —
+ * the user confirms their own real entry/exit. Records user fields separately
+ * from the simulated paper fields, so nothing is fabricated.
+ */
+function confirmLiveEntry(signalId, { price, quantity, timestamp } = {}) {
+  const all = loadRecords();
+  const rec = all.find((r) => r.SIGNAL_ID === signalId);
+  if (!rec) return { ok: false, error: 'unknown SIGNAL_ID' };
+  if (price == null || !Number.isFinite(Number(price))) return { ok: false, error: 'a real entry price is required (no fabricated fill)' };
+  rec.user_entered = true;
+  rec.user_entry_price = Number(price);
+  rec.user_quantity = quantity != null ? Number(quantity) : rec.quantity;
+  rec.user_entry_timestamp = timestamp || new Date().toISOString();
+  rec.user_position_state = 'USER_ENTERED';
+  saveRecords(all);
+  return { ok: true, record: rec };
+}
+function confirmLiveExit(signalId, { price, timestamp, reason } = {}) {
+  const all = loadRecords();
+  const rec = all.find((r) => r.SIGNAL_ID === signalId);
+  if (!rec) return { ok: false, error: 'unknown SIGNAL_ID' };
+  if (!rec.user_entered) return { ok: false, error: 'position was never confirmed as entered' };
+  if (price == null || !Number.isFinite(Number(price))) return { ok: false, error: 'a real exit price is required (no fabricated fill)' };
+  const qty = rec.user_quantity || rec.quantity;
+  const gross = Math.round((Number(price) - rec.user_entry_price) * qty);
+  const cost = optionCosts(rec.user_entry_price, Number(price), qty);
+  rec.user_exit_price = Number(price);
+  rec.user_exit_timestamp = timestamp || new Date().toISOString();
+  rec.user_exit_reason = reason || 'manual';
+  rec.user_gross_PnL = gross; rec.user_net_PnL = gross - cost;
+  rec.user_position_state = 'CLOSED';
+  saveRecords(all);
+  return { ok: true, record: rec };
+}
+
+/** Full permanent history (newest first). Read-only. */
+function history() { return loadRecords().slice().reverse(); }
+
+module.exports = {
+  observe, loadRecords, dashboard, history,
+  confirmLiveEntry, confirmLiveExit, optionCosts, INSTR,
+};

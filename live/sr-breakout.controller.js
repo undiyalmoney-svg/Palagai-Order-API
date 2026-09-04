@@ -9,7 +9,7 @@ const https = require('https');
 const market = require('./kite-market');
 const store = require('./live.store');
 const { runSrBreakout } = require('./sr-breakout');
-const { observe } = require('./sr-observe');
+const { observe, history: obsHistory, confirmLiveEntry, confirmLiveExit } = require('./sr-observe');
 const collector = require('./sr-collector');
 
 function userId(req) { return req.user?.id || 'anonymous'; }
@@ -179,4 +179,31 @@ function srObserveStatus(req, res) {
   res.json({ status: 'ok', ...collector.status() });
 }
 
-module.exports = { srBreakout, srObserve, srObserveStatus, INSTRUMENTS };
+/** GET /live/sr-observe/history — full permanent observation + paper history. */
+function srObserveHistory(req, res) {
+  res.json({ status: 'ok', records: obsHistory() });
+}
+
+/**
+ * POST /live/sr-observe/confirm — user confirms their OWN real Live entry.
+ * The system never assumes a fill. body: { signalId, price, quantity?, timestamp? }
+ * No broker order is placed here — this only records what the user did in Kite.
+ */
+function srLiveConfirm(req, res) {
+  const b = req.body || {};
+  if (!b.signalId) { res.status(400).json({ status: 'error', message: 'signalId required' }); return; }
+  const out = confirmLiveEntry(String(b.signalId), { price: b.price, quantity: b.quantity, timestamp: b.timestamp });
+  res.status(out.ok ? 200 : 400).json({ status: out.ok ? 'ok' : 'error', ...out });
+}
+
+/** POST /live/sr-observe/exit — user confirms their OWN real Live exit. */
+function srLiveExit(req, res) {
+  const b = req.body || {};
+  if (!b.signalId) { res.status(400).json({ status: 'error', message: 'signalId required' }); return; }
+  const out = confirmLiveExit(String(b.signalId), { price: b.price, timestamp: b.timestamp, reason: b.reason });
+  res.status(out.ok ? 200 : 400).json({ status: out.ok ? 'ok' : 'error', ...out });
+}
+
+module.exports = {
+  srBreakout, srObserve, srObserveStatus, srObserveHistory, srLiveConfirm, srLiveExit, INSTRUMENTS,
+};

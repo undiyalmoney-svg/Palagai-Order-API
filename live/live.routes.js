@@ -30,6 +30,9 @@ router.post('/backtest', asyncHandler(ctrl.backtest));
   router.post('/sr-breakout', asyncHandler(srCtrl.srBreakout));
   router.post('/sr-observe', asyncHandler(srCtrl.srObserve));
   router.get('/sr-observe/status', asyncHandler(srCtrl.srObserveStatus));
+  router.get('/sr-observe/history', asyncHandler(srCtrl.srObserveHistory));
+  router.post('/sr-observe/confirm', asyncHandler(srCtrl.srLiveConfirm));
+  router.post('/sr-observe/exit', asyncHandler(srCtrl.srLiveExit));
 router.put('/auth', asyncHandler(ctrl.putAuth));
 
 // Auto-start the read-only real-option collector at server boot (singleton-
