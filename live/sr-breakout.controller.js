@@ -26,9 +26,13 @@ const INSTRUMENTS = {
     entryPts: 60, gapLo: 275, gapHi: 465, targetByScore: { 1: 40, 2: 50, 3: 60 },
   },
   crude: {
+    // PROVISIONAL / under observation — only ~80 days of history, not enough to
+    // trust. Stricter defaults (bigger candle, no new entries in the thin late-US
+    // session) turn it from bleeding to green in-sample; the forward paper run is
+    // what actually validates it. Bank Nifty + Nifty 50 are the proven books.
     key: 'crude', name: 'Crude Oil Mini', token: null, unitsPerLot: 10, // token resolved at runtime
-    session: { entryStartHm: '09:30', entryEndHm: '22:00', squareOffHm: '23:20' },
-    entryPts: 27, gapLo: 78, gapHi: 130, targetByScore: { 1: 20, 2: 25, 3: 30 },
+    session: { entryStartHm: '09:30', entryEndHm: '20:00', squareOffHm: '23:20' },
+    entryPts: 50, gapLo: 78, gapHi: 130, targetByScore: { 1: 20, 2: 25, 3: 30 },
   },
 };
 
