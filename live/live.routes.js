@@ -29,6 +29,11 @@ router.post('/stop', asyncHandler(ctrl.stop));
 router.post('/backtest', asyncHandler(ctrl.backtest));
   router.post('/sr-breakout', asyncHandler(srCtrl.srBreakout));
   router.post('/sr-observe', asyncHandler(srCtrl.srObserve));
+  router.get('/sr-observe/status', asyncHandler(srCtrl.srObserveStatus));
 router.put('/auth', asyncHandler(ctrl.putAuth));
+
+// Auto-start the read-only real-option collector at server boot (singleton-
+// guarded, market-hours gated). Additive; does not touch the live-order worker.
+try { require('./sr-collector').boot(); } catch (e) { console.error('[sr-collector] boot skipped:', e.message); }
 
 module.exports = router;

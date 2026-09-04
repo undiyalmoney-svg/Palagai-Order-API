@@ -10,6 +10,7 @@ const market = require('./kite-market');
 const store = require('./live.store');
 const { runSrBreakout } = require('./sr-breakout');
 const { observe } = require('./sr-observe');
+const collector = require('./sr-collector');
 
 function userId(req) { return req.user?.id || 'anonymous'; }
 
@@ -168,4 +169,14 @@ async function srObserve(req, res) {
   }
 }
 
-module.exports = { srBreakout, srObserve, INSTRUMENTS };
+/**
+ * GET /live/sr-observe/status — collector heartbeat + dashboard (read-only).
+ * Lazily boots the backend collector (singleton-guarded) so it self-heals after
+ * a process restart even before the trading worker touches it. No orders.
+ */
+function srObserveStatus(req, res) {
+  try { collector.boot(); } catch (e) { /* boot is best-effort */ }
+  res.json({ status: 'ok', ...collector.status() });
+}
+
+module.exports = { srBreakout, srObserve, srObserveStatus, INSTRUMENTS };

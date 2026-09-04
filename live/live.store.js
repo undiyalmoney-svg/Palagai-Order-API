@@ -399,6 +399,28 @@ async function getAuthorizationFor(userId) {
   return `token ${plain.apiKey}:${plain.accessToken}`;
 }
 
+/**
+ * Headless auth for the read-only S/R observation collector (single-owner
+ * system): return the first stored `token apiKey:accessToken` without needing a
+ * request/userId. In-memory sessions first, then the encrypted kite_auth doc.
+ * Returns null when no token has been pushed. Never used to place orders.
+ */
+async function getAnyAuthorization() {
+  for (const [uid] of sessions) {
+    const a = await getAuthorizationFor(uid);
+    if (a) return a;
+  }
+  if (mongoDb) {
+    try {
+      const doc = await mongoDb.collection('kite_auth').findOne({ apiKeyEnc: { $exists: true } });
+      if (doc?._id) return getAuthorizationFor(String(doc._id));
+    } catch (err) {
+      console.error('[live-store] getAnyAuthorization lookup failed', err.message);
+    }
+  }
+  return null;
+}
+
 module.exports = {
   attachMongo,
   statusFor,
@@ -407,4 +429,5 @@ module.exports = {
   putAuth,
   getSession,
   getAuthorizationFor,
+  getAnyAuthorization,
 };
