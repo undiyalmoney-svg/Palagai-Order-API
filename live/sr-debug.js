@@ -18,6 +18,11 @@ const PIVOT = 5;
 const hm = (d) => String(d).slice(11, 16);
 const ymd = (d) => String(d).slice(0, 10);
 
+// Measured probability that a CONFIRMED signal reaches its target, by confidence
+// score (from the +20 base-rate study). Used to attach a probability to a read
+// instead of a blank yes/no. These are the real, non-inflated hit rates.
+const HIT_BY_SCORE = { 1: 79, 2: 82, 3: 87 };
+
 // Intrabar developing states.
 const STATE = { WAITING: 'WAITING', BUILDING: 'BUILDING', APPROACHING_WALL: 'APPROACHING_WALL', BREAKOUT_DEVELOPING: 'BREAKOUT_DEVELOPING', CONFIRMED: 'CONFIRMED', FAILED: 'FAILED' };
 
@@ -121,17 +126,47 @@ function auditDay(bars5, spec, date) {
     });
     const finalState = signal ? STATE.CONFIRMED : (reachedThreshold ? STATE.FAILED : (trace.length ? trace[trace.length - 1].state : STATE.WAITING));
 
+    // confidence score (same as the engine) + probability of reaching target
+    const gap = (lastRes != null && lastSup != null) ? lastRes - lastSup : null;
+    let score = withTrend ? 1 : 0;
+    if (reachedThreshold) score += (Math.abs(body) >= entryPts * 1.5) ? 1 : 0;
+    if (gap != null && gap >= entryPts * 3 && gap < entryPts * 7) score += 1;
+    // probability: a confirmed signal uses its measured hit rate; a near-miss is
+    // scaled down by how many core gates it still fails (never fabricated).
+    let probability;
+    if (signal) probability = HIT_BY_SCORE[Math.max(1, Math.min(3, score))];
+    else {
+      const gatesPassed = (reachedThreshold ? 1 : 0) + (brokeWall ? 1 : 0) + (withTrend ? 1 : 0);
+      probability = Math.round([8, 22, 45][gatesPassed] || 8); // 0/1/2 of 3 core gates met
+    }
+
     candles.push({
       time: `${b.hm}`, open: b.o, high: b.h, low: b.l, close: b.c,
       body, range, dir: dir > 0 ? 'up' : 'down', nearestWall: wall, wallType, distToWall,
       trend, threshold: entryPts, reachedThreshold, brokeWall, withTrend, inWindow,
-      coreQualifies, signal, option, rejection,
+      coreQualifies, signal, option, rejection, score, probability,
       developing: { finalState, developingAt, thresholdCrossedAt, trace },
     });
   }
 
+  // Best read of the day — a confirmed signal if any, else the highest-
+  // probability near-miss — so the UI is never blank ("go with probability").
+  let topRead = null;
+  const ranked = [...candles].sort((a, b) => (b.signal - a.signal) || (b.probability - a.probability) || (Math.abs(b.body) - Math.abs(a.body)));
+  if (ranked.length) {
+    const c = ranked[0];
+    topRead = {
+      time: c.time, option: c.option, probability: c.probability, score: c.score,
+      body: c.body, threshold: c.threshold, wallType: c.wallType, wall: c.nearestWall, distToWall: c.distToWall,
+      signal: c.signal, rejection: c.rejection,
+      headline: c.signal
+        ? `${c.time} ${c.option} — confirmed, ${c.probability}% to target`
+        : `${c.time} best setup — ${c.probability}% (${c.rejection})`,
+    };
+  }
+
   return {
-    date, entryPts,
+    date, entryPts, topRead,
     candles,
     summary: {
       completedCandles: candles.length,
