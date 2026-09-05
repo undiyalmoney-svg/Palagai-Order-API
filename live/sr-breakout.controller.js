@@ -66,6 +66,10 @@ const STRATEGIES = {
     oos: { causal: true, pf: 1.73, rsDay: 441, trades: 1278, net: 279330, window: '2024-01..2026' },
   },
 };
+// Auto-routing: each instrument runs its OWN validated eligible strategy (no
+// manual selector). An instrument with no eligible strategy falls back to Baseline.
+const AUTO_STRATEGY = { nifty: 'nifty_retest_v1', banknifty: 'bank_intraday_v1', crude: 'baseline' };
+function autoStrategyFor(key) { return STRATEGIES[AUTO_STRATEGY[key]] || STRATEGIES.baseline; }
 function resolveStrategy(name) { return STRATEGIES[String(name || 'baseline').toLowerCase()] || STRATEGIES.baseline; }
 function isSelectable(s) { return s && (s.status === 'production' || s.status === 'eligible'); }
 function strategyList() {
@@ -152,10 +156,12 @@ async function srBreakout(req, res) {
       const dayLossStop = numOr(body.dayLossStopRs, 0) > 0 ? numOr(body.dayLossStopRs, 0) / perPoint : 0;
       const dayProfitTarget = numOr(body.dayProfitTargetRs, 0) > 0 ? numOr(body.dayProfitTargetRs, 0) / perPoint : 0;
       const maxTradesPerDay = Math.max(1, numOr(body.maxTradesPerDay, 3));
-      // PROFITABILITY GATE: only production/eligible strategies run in Paper/Live.
-      // A non-selectable id falls back to baseline (never silently runs an ungated one).
-      let strat = resolveStrategy(body.strategy);
-      if (!isSelectable(strat)) strat = STRATEGIES.baseline;
+      // AUTO per instrument (no selector): each instrument runs its own eligible
+      // strategy. An explicit body.strategy still works as a research override,
+      // but only if it passes the gate; otherwise fall back to the instrument's
+      // auto strategy. Real orders stay DISABLED regardless.
+      let strat = body.strategy ? resolveStrategy(body.strategy) : autoStrategyFor(key);
+      if (!isSelectable(strat)) strat = autoStrategyFor(key);
       const { trades, summary } = runSrBreakout(candles, {
         entryPts, trendBars: 20, gapLo: spec.gapLo, gapHi: spec.gapHi, targetByScore: spec.targetByScore,
         maxTradesPerDay, dayLossStop, dayProfitTarget, reportFromDate: fromDate, ...spec.session,
@@ -166,6 +172,7 @@ async function srBreakout(req, res) {
       const tradesR = trades.map((t) => ({ ...t, instrument: spec.name, contract, rupees: rupees(t.points) }));
       results.push({
         key, name: spec.name, contract, token, candles: candles.length,
+        strategy: strat.label, strategyStatus: strat.status,   // auto-routed per instrument
         params: { entryPts, gapLo: spec.gapLo, gapHi: spec.gapHi, targetByScore: spec.targetByScore, lots, unitsPerLot, maxTradesPerDay, dayLossStopRs: numOr(body.dayLossStopRs, 0), dayProfitTargetRs: numOr(body.dayProfitTargetRs, 0) },
         summary: {
           ...summary,
@@ -180,12 +187,9 @@ async function srBreakout(req, res) {
       results.push({ key, name: spec.name, error: String(e.message || e) });
     }
   }
-  const reqStrat = resolveStrategy(body.strategy);
   res.json({
-    status: 'ok', mode: 'paper',
-    strategy: isSelectable(reqStrat) ? reqStrat.label : STRATEGIES.baseline.label,
-    strategyGated: !isSelectable(reqStrat) ? `${body.strategy} is not eligible — ran Baseline` : null,
-    strategies: strategyList(), gate: GATE,
+    status: 'ok', mode: 'paper', strategy: 'Auto (best eligible per instrument)',
+    autoRouting: AUTO_STRATEGY, gate: GATE,
     fromDate, toDate, isToday: toDate === todayIso(), ranAt: new Date().toISOString(), results,
   });
 }
