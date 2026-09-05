@@ -13,6 +13,7 @@ const { observe, history: obsHistory, confirmLiveEntry, confirmLiveExit } = requ
 const collector = require('./sr-collector');
 const { auditDay } = require('./sr-debug');
 const { research } = require('./sr-research');
+const srLive = require('./sr-live');
 
 function userId(req) { return req.user?.id || 'anonymous'; }
 
@@ -322,6 +323,27 @@ function srLiveExit(req, res) {
   res.status(out.ok ? 200 : 400).json({ status: out.ok ? 'ok' : 'error', ...out });
 }
 
+/** POST /live/sr-breakout/live/start — real MIS when a signal fires. */
+async function srLiveStart(req, res) {
+  try {
+    const out = await srLive.start(userId(req), req.body || {});
+    res.json(out);
+  } catch (e) {
+    res.status(e.status || 400).json({ status: 'error', message: String(e.message || e) });
+  }
+}
+
+/** POST /live/sr-breakout/live/stop */
+async function srLiveStop(req, res) {
+  res.json(await srLive.stop(userId(req)));
+}
+
+/** GET /live/sr-breakout/live/status */
+function srLiveStatus(req, res) {
+  res.json(srLive.status(userId(req)));
+}
+
 module.exports = {
-  srBreakout, srObserve, srObserveStatus, srObserveHistory, srLiveConfirm, srLiveExit, srDebug, srResearch, INSTRUMENTS,
+  srBreakout, srObserve, srObserveStatus, srObserveHistory, srLiveConfirm, srLiveExit, srDebug, srResearch,
+  srLiveStart, srLiveStop, srLiveStatus, INSTRUMENTS,
 };

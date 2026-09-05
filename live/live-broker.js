@@ -419,19 +419,21 @@ class LiveBroker {
     const lotsMult = this.lotsFor(instrumentId);
     const quantity = lotSize * lotsMult;
     const product = 'MIS';
-    const chargeGate = evaluateChargeEntryGate({
-      instrumentId,
-      entryPremium: open.optionEntryPremium,
-      quantity,
-      indexEntry: open.indexEntry,
-      indexStop: open.indexStop,
-      indexTarget: open.indexTarget,
-      targetRMultiple: LIVE_GREEN_DNA.trap.targetRMultiple,
-      ops: LIVE_GREEN_DNA.liveOps,
-    });
-    if (chargeGate.skip) {
-      this.pushEvent('SKIP', `Skipped — ${chargeGate.reason}`);
-      return;
+    if (!open.skipChargeGate) {
+      const chargeGate = evaluateChargeEntryGate({
+        instrumentId,
+        entryPremium: open.optionEntryPremium,
+        quantity,
+        indexEntry: open.indexEntry,
+        indexStop: open.indexStop,
+        indexTarget: open.indexTarget,
+        targetRMultiple: LIVE_GREEN_DNA.trap.targetRMultiple,
+        ops: LIVE_GREEN_DNA.liveOps,
+      });
+      if (chargeGate.skip) {
+        this.pushEvent('SKIP', `Skipped — ${chargeGate.reason}`);
+        return;
+      }
     }
 
     const response = await kiteService.placeOrder(authorization, 'regular', {

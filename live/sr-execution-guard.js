@@ -8,17 +8,16 @@
  * modules import live-broker.js — but this module makes it EXPLICIT and
  * testable rather than relying on a hidden frontend button.
  *
- * EXECUTION_MODE is a hard constant here. LIVE_BROKER execution is DISABLED.
- * Any code on the S/R path that is about to touch broker execution must call
- * assertBrokerDisabled() first; it throws, so a mistaken wiring fails loudly in
- * tests and at runtime instead of sending an order.
+ * EXECUTION_MODE is a hard constant here. Paper / observe / collector stay
+ * firewalled (assertBrokerDisabled). The dedicated S/R Live worker
+ * (sr-live.js) is the only path allowed to place MIS orders, and only after
+ * the user presses Start Live.
  */
 
 const MODES = Object.freeze({ PAPER: 'PAPER', LIVE_SIGNAL: 'LIVE_SIGNAL', LIVE_BROKER: 'LIVE_BROKER' });
 
-// The only execution modes the S/R subsystem is permitted to run in.
-// LIVE_BROKER is intentionally absent — broker execution stays DISABLED.
 const EXECUTION_MODE = process.env.SR_EXECUTION_MODE || MODES.LIVE_SIGNAL;
+/** Paper/observe remain disabled. S/R Live worker is a separate opt-in path. */
 const LIVE_BROKER_DISABLED = true;
 
 function brokerOrdersEnabled() {
