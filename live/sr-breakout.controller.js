@@ -12,6 +12,7 @@ const { runSrBreakout } = require('./sr-breakout');
 const { observe, history: obsHistory, confirmLiveEntry, confirmLiveExit } = require('./sr-observe');
 const collector = require('./sr-collector');
 const { auditDay } = require('./sr-debug');
+const { research } = require('./sr-research');
 
 function userId(req) { return req.user?.id || 'anonymous'; }
 
@@ -217,6 +218,37 @@ async function srDebug(req, res) {
   res.json({ status: 'ok', date, results });
 }
 
+/**
+ * POST /live/sr-research — causal entry-model comparison over a date range.
+ * Runs all models read-only; separates UNDERLYING result from option result
+ * (option marked UNAVAILABLE unless real historical premiums exist). No orders.
+ * body: { instruments?, fromDate?, toDate? }
+ */
+async function srResearch(req, res) {
+  const authorization =
+    req.headers['x-kite-authorization'] || req.headers['x-kite-authorisation'] ||
+    (await store.getAuthorizationFor(userId(req)));
+  if (!authorization) { res.status(400).json({ status: 'error', message: 'Kite session required — Get Token, then retry.' }); return; }
+  const body = req.body || {};
+  const keys = Array.isArray(body.instruments) && body.instruments.length ? body.instruments : ['nifty', 'banknifty', 'crude'];
+  const fromDate = body.fromDate || shiftDays(todayIso(), -120);
+  const toDate = body.toDate || todayIso();
+  const results = [];
+  for (const key of keys) {
+    const spec = INSTRUMENTS[key];
+    if (!spec) { results.push({ key, error: 'unknown instrument' }); continue; }
+    try {
+      let token = spec.token, contract = spec.name;
+      if (key === 'crude') { const r = await resolveCrudeToken(authorization); token = r.token; contract = r.symbol; }
+      const candles = await market.fetchHistorical5m(authorization, token, fromDate, toDate);
+      const b5 = candles.map((x) => ({ date: x.date, open: x.open, high: x.high, low: x.low, close: x.close }));
+      const r = research(b5, { entryPts: spec.entryPts, trendBars: 20, unitsPerLot: spec.unitsPerLot, ...spec.session });
+      results.push({ key, name: spec.name, contract, best: r.best, models: r.models, optionResult: 'UNAVAILABLE — historical option premiums not fetchable for expired contracts' });
+    } catch (e) { results.push({ key, name: spec.name, error: String(e.message || e) }); }
+  }
+  res.json({ status: 'ok', fromDate, toDate, results });
+}
+
 /** GET /live/sr-observe/history — full permanent observation + paper history. */
 function srObserveHistory(req, res) {
   res.json({ status: 'ok', records: obsHistory() });
@@ -243,5 +275,5 @@ function srLiveExit(req, res) {
 }
 
 module.exports = {
-  srBreakout, srObserve, srObserveStatus, srObserveHistory, srLiveConfirm, srLiveExit, srDebug, INSTRUMENTS,
+  srBreakout, srObserve, srObserveStatus, srObserveHistory, srLiveConfirm, srLiveExit, srDebug, srResearch, INSTRUMENTS,
 };
