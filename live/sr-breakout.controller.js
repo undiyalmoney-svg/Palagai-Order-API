@@ -40,18 +40,37 @@ const INSTRUMENTS = {
   },
 };
 
-// Selectable strategy versions. BASELINE = the existing production behavior
-// (pivot breakout + confidence targets, hold to close). Additive: a version's
-// opts are spread over the baseline call, so BASELINE stays byte-for-byte the
-// same. NIFTY_RETEST_V1 is the validated research candidate (NOT production).
+// Selectable strategy versions + PROFITABILITY GATE.
+//   status: 'production'  — the incumbent Baseline (default; kept unchanged)
+//           'eligible'    — passed all OOS criteria → Paper/Live-candidate selectable
+//           'research_only'— has backtests but not OOS-registered → NOT selectable
+//           'not_eligible'— OOS-tested and failed a criterion → NOT selectable
+// Eligibility is sourced from the recorded OOS validation (below), not a fresh
+// single backtest. Real-order execution stays DISABLED for every status.
+// Criteria for 'eligible': causal (no-look-ahead PASS) + OOS net>0 + OOS Rs/day>0
+//   + OOS profit factor >= 1.30 + OOS trades >= 200. All futures-equivalent.
+const GATE = { minOosPf: 1.3, minOosTrades: 200 };
 const STRATEGIES = {
-  baseline: { label: 'Baseline', opts: {} },
+  baseline: {
+    label: 'Baseline (production)', status: 'production', instrument: 'nifty+bank', opts: {},
+    oos: { note: 'incumbent control; OOS PF ~1.1 (marginal) — kept as default, not gated' },
+  },
   nifty_retest_v1: {
-    label: 'Nifty Retest V1 (candidate)',
+    label: 'Nifty Retest V1 (candidate)', status: 'eligible', instrument: 'nifty',
     opts: { wallMode: 'intraday', retest: true, timeStopBars: 6, targetByScore: { 1: 20, 2: 20, 3: 20 } },
+    oos: { causal: true, pf: 2.08, rsDay: 1264, trades: 1612, net: 801285, window: '2024-01..2026' },
+  },
+  bank_intraday_v1: {
+    label: 'Bank Intraday V1 (candidate)', status: 'eligible', instrument: 'banknifty',
+    opts: { wallMode: 'intraday', timeStopBars: 9, targetByScore: { 1: 20, 2: 20, 3: 20 } },
+    oos: { causal: true, pf: 1.73, rsDay: 441, trades: 1278, net: 279330, window: '2024-01..2026' },
   },
 };
 function resolveStrategy(name) { return STRATEGIES[String(name || 'baseline').toLowerCase()] || STRATEGIES.baseline; }
+function isSelectable(s) { return s && (s.status === 'production' || s.status === 'eligible'); }
+function strategyList() {
+  return Object.entries(STRATEGIES).map(([id, s]) => ({ id, label: s.label, status: s.status, instrument: s.instrument, selectable: isSelectable(s), oos: s.oos || null }));
+}
 
 const MONTHS = { JAN: 0, FEB: 1, MAR: 2, APR: 3, MAY: 4, JUN: 5, JUL: 6, AUG: 7, SEP: 8, OCT: 9, NOV: 10, DEC: 11 };
 
@@ -133,7 +152,10 @@ async function srBreakout(req, res) {
       const dayLossStop = numOr(body.dayLossStopRs, 0) > 0 ? numOr(body.dayLossStopRs, 0) / perPoint : 0;
       const dayProfitTarget = numOr(body.dayProfitTargetRs, 0) > 0 ? numOr(body.dayProfitTargetRs, 0) / perPoint : 0;
       const maxTradesPerDay = Math.max(1, numOr(body.maxTradesPerDay, 3));
-      const strat = resolveStrategy(body.strategy);   // default: baseline (unchanged)
+      // PROFITABILITY GATE: only production/eligible strategies run in Paper/Live.
+      // A non-selectable id falls back to baseline (never silently runs an ungated one).
+      let strat = resolveStrategy(body.strategy);
+      if (!isSelectable(strat)) strat = STRATEGIES.baseline;
       const { trades, summary } = runSrBreakout(candles, {
         entryPts, trendBars: 20, gapLo: spec.gapLo, gapHi: spec.gapHi, targetByScore: spec.targetByScore,
         maxTradesPerDay, dayLossStop, dayProfitTarget, reportFromDate: fromDate, ...spec.session,
@@ -158,7 +180,14 @@ async function srBreakout(req, res) {
       results.push({ key, name: spec.name, error: String(e.message || e) });
     }
   }
-  res.json({ status: 'ok', mode: 'paper', strategy: resolveStrategy(body.strategy).label, strategies: Object.entries(STRATEGIES).map(([id, s]) => ({ id, label: s.label })), fromDate, toDate, isToday: toDate === todayIso(), ranAt: new Date().toISOString(), results });
+  const reqStrat = resolveStrategy(body.strategy);
+  res.json({
+    status: 'ok', mode: 'paper',
+    strategy: isSelectable(reqStrat) ? reqStrat.label : STRATEGIES.baseline.label,
+    strategyGated: !isSelectable(reqStrat) ? `${body.strategy} is not eligible — ran Baseline` : null,
+    strategies: strategyList(), gate: GATE,
+    fromDate, toDate, isToday: toDate === todayIso(), ranAt: new Date().toISOString(), results,
+  });
 }
 
 function numOr(v, d) { const n = Number(v); return Number.isFinite(n) && v !== '' && v != null ? n : d; }
