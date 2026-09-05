@@ -60,9 +60,17 @@ function runSrBreakout(bars5, opts) {
   const maxTradesPerDay = num(opts.maxTradesPerDay, 3);
   const dayLossStop = num(opts.dayLossStop, 0);
   const dayProfitTarget = num(opts.dayProfitTarget, 0);
+  // Time exit: if a trade hasn't hit target within N 5-min bars, exit at market.
+  // Validated to beat hold-to-close (cuts the big losers; winners pay fast). 0=off.
+  const timeStopBars = num(opts.timeStopBars, 0);
   // Bars before this date only warm up S/R + trend; they produce no reported
   // trades. Lets a single-day / live-today run see signals from the open.
   const reportFromDate = opts.reportFromDate || '';
+  // Wall mode: 'pivot' = confirmed multi-day pivot (default); 'intraday' = the
+  // break of the prior N 15-min candles' high/low (the intraday range breakout).
+  const wallMode = opts.wallMode === 'intraday' ? 'intraday' : 'pivot';
+  const intradayLookback = num(opts.intradayLookback, 3);
+  const failStop = !!opts.failStop;               // exit if the broken level fails to hold
 
   const bars15 = to15(bars5);
   const day5 = new Map();
@@ -85,8 +93,19 @@ function runSrBreakout(bars5, opts) {
     const b = bars15[i];
     if (b.hm < entryStartHm || b.hm > entryEndHm) continue;
     if (cutHm && b.hm >= cutHm) continue;
-    if (lastRes == null || lastSup == null || i < trendBars) continue;
+    if (i < trendBars) continue;
     if (reportFromDate && b.d < reportFromDate) continue;  // warm-up day: skip trade
+
+    // Resolve the wall(s) for this bar per mode.
+    let wallHi = lastRes, wallLo = lastSup;
+    if (wallMode === 'intraday') {
+      // prior N 15-min candles on the SAME day (need them, else skip)
+      if (i < intradayLookback || bars15[i - intradayLookback].d !== b.d) continue;
+      wallHi = -Infinity; wallLo = Infinity;
+      for (let k = i - intradayLookback; k < i; k++) { if (bars15[k].d !== b.d) { wallHi = null; break; } wallHi = Math.max(wallHi, bars15[k].h); wallLo = Math.min(wallLo, bars15[k].l); }
+      if (wallHi == null) continue;
+    }
+    if (wallHi == null || wallLo == null) continue;
 
     let st = dayState.get(b.d);
     if (!st) { st = { trades: 0, pnl: 0, stopped: false }; dayState.set(b.d, st); }
@@ -94,17 +113,23 @@ function runSrBreakout(bars5, opts) {
 
     const body = b.c - b.o;
     const trend = b.c - bars15[i - trendBars].c;
-    // ENTRY: big candle (>= entryPts) closing BEYOND the S/R wall, in the trend
-    // direction. The wall break is essential — dropping it to catch mid-range
-    // momentum candles was tested and lost money (those candles reverse and the
-    // held-to-close losers dwarf the wins). Verified Aug'26: −₹17,551 without it.
+    // ENTRY per mode:
+    //  pivot   : big candle (>= entryPts) closing beyond the pivot wall, with trend.
+    //  intraday: close breaks the prior-N-candle high/low, with trend (the
+    //            intraday range breakout — a big body is not required, the range
+    //            break IS the signal).
     let dir = 0, level = null;
-    if (body >= entryPts && b.c > lastRes && trend > 0) { dir = 1; level = lastRes; }
-    else if (-body >= entryPts && b.c < lastSup && trend < 0) { dir = -1; level = lastSup; }
+    if (wallMode === 'intraday') {
+      if (b.c > wallHi && trend > 0) { dir = 1; level = wallHi; }
+      else if (b.c < wallLo && trend < 0) { dir = -1; level = wallLo; }
+    } else {
+      if (body >= entryPts && b.c > wallHi && trend > 0) { dir = 1; level = wallHi; }
+      else if (-body >= entryPts && b.c < wallLo && trend < 0) { dir = -1; level = wallLo; }
+    }
     if (!dir) continue;
 
     // confidence score
-    const gap = lastRes - lastSup;
+    const gap = (lastRes != null && lastSup != null) ? lastRes - lastSup : 0;
     let score = 1;                                   // with-trend (we only take these)
     if (Math.abs(body) >= entryPts * 1.5) score++;   // big body
     if (gap >= gapLo && gap < gapHi) score++;        // mid gap
@@ -114,11 +139,14 @@ function runSrBreakout(bars5, opts) {
     const after = (day5.get(b.d) || []).filter(x => hhmm(x.date) > b.hm && hhmm(x.date) <= squareOffHm);
     if (!after.length) continue;
     let exit = after[after.length - 1].close, exitTime = hhmm(after[after.length - 1].date), reason = 'CLOSE';
-    if (target > 0) {
-      for (const bar of after) {
-        const fav = dir * ((dir > 0 ? bar.high : bar.low) - entry);
-        if (fav >= target) { exit = entry + dir * target; exitTime = hhmm(bar.date); reason = 'TARGET'; break; }
-      }
+    for (let bi = 0; bi < after.length; bi++) {
+      const bar = after[bi];
+      const fav = dir * ((dir > 0 ? bar.high : bar.low) - entry);
+      if (target > 0 && fav >= target) { exit = entry + dir * target; exitTime = hhmm(bar.date); reason = 'TARGET'; break; }
+      // FAIL-STOP: the broken level did not hold (price closed back through it) → cut it.
+      if (failStop && (dir > 0 ? bar.close < level : bar.close > level)) { exit = bar.close; exitTime = hhmm(bar.date); reason = 'FAIL'; break; }
+      // TIME EXIT: not paying by the time limit → get out at market (this bar's close).
+      if (timeStopBars > 0 && bi >= timeStopBars - 1) { exit = bar.close; exitTime = hhmm(bar.date); reason = 'TIME'; break; }
     }
     const pts = dir * (exit - entry);
     st.trades++; st.pnl += pts;
