@@ -40,6 +40,19 @@ const INSTRUMENTS = {
   },
 };
 
+// Selectable strategy versions. BASELINE = the existing production behavior
+// (pivot breakout + confidence targets, hold to close). Additive: a version's
+// opts are spread over the baseline call, so BASELINE stays byte-for-byte the
+// same. NIFTY_RETEST_V1 is the validated research candidate (NOT production).
+const STRATEGIES = {
+  baseline: { label: 'Baseline', opts: {} },
+  nifty_retest_v1: {
+    label: 'Nifty Retest V1 (candidate)',
+    opts: { wallMode: 'intraday', retest: true, timeStopBars: 6, targetByScore: { 1: 20, 2: 20, 3: 20 } },
+  },
+};
+function resolveStrategy(name) { return STRATEGIES[String(name || 'baseline').toLowerCase()] || STRATEGIES.baseline; }
+
 const MONTHS = { JAN: 0, FEB: 1, MAR: 2, APR: 3, MAY: 4, JUN: 5, JUL: 6, AUG: 7, SEP: 8, OCT: 9, NOV: 10, DEC: 11 };
 
 /** GET /instruments/MCX (CSV) directly — fetchInstruments only returns NSE/NFO. */
@@ -120,9 +133,11 @@ async function srBreakout(req, res) {
       const dayLossStop = numOr(body.dayLossStopRs, 0) > 0 ? numOr(body.dayLossStopRs, 0) / perPoint : 0;
       const dayProfitTarget = numOr(body.dayProfitTargetRs, 0) > 0 ? numOr(body.dayProfitTargetRs, 0) / perPoint : 0;
       const maxTradesPerDay = Math.max(1, numOr(body.maxTradesPerDay, 3));
+      const strat = resolveStrategy(body.strategy);   // default: baseline (unchanged)
       const { trades, summary } = runSrBreakout(candles, {
         entryPts, trendBars: 20, gapLo: spec.gapLo, gapHi: spec.gapHi, targetByScore: spec.targetByScore,
         maxTradesPerDay, dayLossStop, dayProfitTarget, reportFromDate: fromDate, ...spec.session,
+        ...strat.opts,                                 // version overrides (BASELINE = {})
       });
       // ₹ = points × unitsPerLot × lots (futures-equivalent; option premium differs).
       const rupees = (pts) => Math.round(pts * perPoint);
@@ -143,7 +158,7 @@ async function srBreakout(req, res) {
       results.push({ key, name: spec.name, error: String(e.message || e) });
     }
   }
-  res.json({ status: 'ok', mode: 'paper', fromDate, toDate, isToday: toDate === todayIso(), ranAt: new Date().toISOString(), results });
+  res.json({ status: 'ok', mode: 'paper', strategy: resolveStrategy(body.strategy).label, strategies: Object.entries(STRATEGIES).map(([id, s]) => ({ id, label: s.label })), fromDate, toDate, isToday: toDate === todayIso(), ranAt: new Date().toISOString(), results });
 }
 
 function numOr(v, d) { const n = Number(v); return Number.isFinite(n) && v !== '' && v != null ? n : d; }

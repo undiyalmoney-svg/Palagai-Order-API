@@ -71,6 +71,7 @@ function runSrBreakout(bars5, opts) {
   const wallMode = opts.wallMode === 'intraday' ? 'intraday' : 'pivot';
   const intradayLookback = num(opts.intradayLookback, 3);
   const failStop = !!opts.failStop;               // exit if the broken level fails to hold
+  const retest = !!opts.retest;                   // enter on the pullback to the broken level (NIFTY_RETEST_V1)
 
   const bars15 = to15(bars5);
   const day5 = new Map();
@@ -135,9 +136,19 @@ function runSrBreakout(bars5, opts) {
     if (gap >= gapLo && gap < gapHi) score++;        // mid gap
     const target = targetByScore[score] || 0;
 
-    const entry = b.c;
-    const after = (day5.get(b.d) || []).filter(x => hhmm(x.date) > b.hm && hhmm(x.date) <= squareOffHm);
+    const breakoutPrice = b.c, breakoutTime = b.hm;
+    let entry = b.c, entryTime = b.hm, retestTime = null;
+    let after = (day5.get(b.d) || []).filter(x => hhmm(x.date) > b.hm && hhmm(x.date) <= squareOffHm);
     if (!after.length) continue;
+    if (retest) {
+      // Wait CAUSALLY for price to pull back to the broken level, then enter there.
+      // No look-ahead: we scan forward bar-by-bar and enter on the first touch; if
+      // the retest never comes, no trade is taken.
+      const hi = after.findIndex(x => (dir > 0 ? x.low <= level : x.high >= level));
+      if (hi < 0 || hi + 1 >= after.length) continue;      // retest never confirmed → skip
+      entry = level; entryTime = hhmm(after[hi].date); retestTime = entryTime;
+      after = after.slice(hi + 1);
+    }
     let exit = after[after.length - 1].close, exitTime = hhmm(after[after.length - 1].date), reason = 'CLOSE';
     for (let bi = 0; bi < after.length; bi++) {
       const bar = after[bi];
@@ -152,7 +163,8 @@ function runSrBreakout(bars5, opts) {
     st.trades++; st.pnl += pts;
     trades.push({
       date: b.d, side: dir > 0 ? 'BUY' : 'SELL', option: dir > 0 ? 'CE' : 'PE',
-      confidence: score, entryTime: b.hm, entryPrice: round2(entry), level: round2(level),
+      confidence: score, entryTime, entryPrice: round2(entry), level: round2(level),
+      breakoutTime, breakoutPrice: round2(breakoutPrice), retestTime,
       bodyPts: round2(body), target, exitTime, exitPrice: round2(exit), exitReason: reason, points: round2(pts),
     });
     // daily risk stop (checked after the trade completes)
