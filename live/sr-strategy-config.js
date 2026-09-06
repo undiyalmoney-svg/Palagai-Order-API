@@ -29,15 +29,23 @@ const DEFAULT_LOTS = Object.freeze({ nifty: 1, banknifty: 1, crude: 5 });
  * except Crude, which has only 89 days and is marked accordingly.
  */
 const EXIT_RULES = Object.freeze({
-  // Nifty — test window: net Rs428,791, losses -Rs73,450, PF 7.87, 88% win.
+  // Nifty — test window: net Rs433,570, losses -Rs31,198, PF 17.32, 93% win.
   //   maxRetestBars 2  entry meter: a retest slower than 2 bars is a stale
   //                    setup (1-2 bars average +Rs692/trade, 8+ bars -Rs391).
-  //   lockArmPts/AtPts once +12 is reached, exit at +5 — every losing trade
+  //   lockArmPts/AtPts once +8 is reached, exit at +5 — every losing trade
   //                    went green first, half by +10 or more.
+  //     The arm level is what decides how many losers get rescued: once armed,
+  //     the exit sits above entry so the trade cannot end as a loss. Sweeping
+  //     it on the TEST window, losses fall monotonically as it drops —
+  //       +15 -Rs106,073 | +12 -Rs73,450 | +10 -Rs51,138 | +8 -Rs31,198 |
+  //       +6 -Rs20,135 — while net stays flat or improves.
+  //     +8 chosen over +6 (which scores marginally better, Rs440,601 vs
+  //     Rs433,570) because +6 leaves only a 1-point band between arming and
+  //     exiting, which real slippage would swallow. +8 keeps 3 points.
   //   giveUpBar/MinPts no +8 progress within 2 bars → leave; it is not paying.
   nifty: Object.freeze({
     wallMode: 'intraday', retest: true, timeStopBars: 6, maxRetestBars: 2,
-    lockArmPts: 12, lockAtPts: 5, giveUpBar: 2, giveUpMinPts: 8,
+    lockArmPts: 8, lockAtPts: 5, giveUpBar: 2, giveUpMinPts: 8,
     targetByScore: { 1: 20, 2: 20, 3: 20 },
   }),
   // Bank — 6 bars + profit lock. Test window: net Rs211,602, losses -Rs58,488,
