@@ -40,13 +40,27 @@ const EXIT_RULES = Object.freeze({
     lockArmPts: 12, lockAtPts: 5, giveUpBar: 2, giveUpMinPts: 8,
     targetByScore: { 1: 20, 2: 20, 3: 20 },
   }),
-  // Bank — 6 bars, NO failStop and NO rupee cut-off, both measured as harmful:
-  //   9 bars + failStop  net -Rs239,478  PF 0.67
-  //   6 bars, no failStop net +Rs209,770 PF 3.01  (same -Rs10,843 worst trade)
-  // 84% of Bank trades that dip past -Rs3,000 still close as winners, so any
-  // stop sells the winners. The shorter hold gets the same tail for free.
+  // Bank — 6 bars + profit lock. Test window: net Rs211,602, losses -Rs58,488,
+  // PF 6.07, 96% win.
+  // The same audit run on Nifty applies here even more strongly: 75% of Bank's
+  // losing trades reached +10 pts or more before reversing (Nifty was 50%), and
+  // 30 of 76 got within 5 pts of the +20 target. Locking at +5 once +12 is
+  // reached cuts total losses 60% (-Rs146,767 -> -Rs58,488) while net edges up.
+  // NOT applied to Bank, each measured and rejected:
+  //   giveUpBar/MinPts — costs Rs47k of net (b2<8: Rs162,875 vs Rs211,602).
+  //     Bank enters on the raw breakout, not a retest, so there is more early
+  //     noise and it needs longer to get going than Nifty does.
+  //   maxRetestBars   — not applicable, Bank has no retest entry.
+  //   entry filters   — none found. Body size, extension past the wall and
+  //     confidence score all score 92-98% win and Rs249-354/trade across every
+  //     bucket, so there is nothing to filter on. Bank's entries are uniformly
+  //     good; its losses were purely an exit problem.
+  //   failStop / rupee cut-off — both harmful: 9 bars + failStop is
+  //     -Rs239,478 (PF 0.67), and a Rs4,000 cut turns +Rs213,758 into
+  //     -Rs202,151, because 84% of trades that dip past -Rs3,000 still win.
   banknifty: Object.freeze({
     wallMode: 'intraday', timeStopBars: 6,
+    lockArmPts: 12, lockAtPts: 5,
     targetByScore: { 1: 20, 2: 20, 3: 20 },
   }),
   // Crude — had NO time exit, so losers rode to the 23:20 square-off (average

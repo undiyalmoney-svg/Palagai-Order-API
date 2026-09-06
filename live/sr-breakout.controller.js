@@ -153,7 +153,7 @@ const STRATEGIES = {
     // Do not re-enable it, and do not add a per-trade rupee stop, without
     // re-running the train/test split.
     opts: exitOptsFor('banknifty'),    // SHARED — see sr-strategy-config.js
-    oos: { causal: true, pf: 3.01, rsDay: 771, trades: 710, net: 209770, window: '2025-07..2026-09 (walk-forward test)' },
+    oos: { causal: true, pf: 6.07, rsDay: 778, trades: 710, net: 211602, window: '2025-07..2026-09 (walk-forward test)' },
   },
 };
 // Auto-routing: each instrument runs its OWN validated eligible strategy (no
