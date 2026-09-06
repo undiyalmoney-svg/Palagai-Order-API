@@ -1,6 +1,13 @@
 'use strict';
 const assert = require('assert');
 const { decideLiveAction, signalId, hmToMin, SPEC } = require('./sr-live');
+const { exitOptsFor } = require('./sr-strategy-config');
+
+assert.deepStrictEqual(SPEC.nifty.opts, exitOptsFor('nifty'), 'Live Nifty opts must match Paper shared config');
+assert.deepStrictEqual(SPEC.banknifty.opts, exitOptsFor('banknifty'));
+assert.deepStrictEqual(SPEC.crude.opts, exitOptsFor('crude'));
+assert.ok(SPEC.nifty.opts.lockArmPts === 12 && SPEC.nifty.opts.maxRetestBars === 2);
+assert.ok(SPEC.nifty.opts.stopPts > 0, 'Nifty Paper/Live share the Rs5000/lot cut-off in points');
 
 const trade = {
   date: '2026-09-05', side: 'BUY', option: 'CE',
@@ -38,9 +45,17 @@ assert.strictEqual(decideLiveAction({
 }), 'exit');
 
 assert.strictEqual(decideLiveAction({
-  trade: { ...trade, exitReason: 'FAIL', exitTime: '10:25' },
+  trade: { ...trade, exitReason: 'LOCK', exitTime: '10:25' },
   nowHm: '10:26', alreadyOpen: true, squareOffHm: '15:15',
-}), 'exit', 'wall fail must flatten');
+}), 'exit', 'Nifty profit-lock must flatten Live');
+assert.strictEqual(decideLiveAction({
+  trade: { ...trade, exitReason: 'GIVEUP', exitTime: '10:25' },
+  nowHm: '10:26', alreadyOpen: true, squareOffHm: '15:15',
+}), 'exit', 'Nifty give-up must flatten Live');
+assert.strictEqual(decideLiveAction({
+  trade: { ...trade, exitReason: 'STOP', exitTime: '10:25' },
+  nowHm: '10:26', alreadyOpen: true, squareOffHm: '15:15',
+}), 'exit', 'Nifty Rs5000 cut-off must flatten Live');
 
 assert.strictEqual(decideLiveAction({
   trade, nowHm: '15:16', alreadyOpen: false, squareOffHm: '15:15',

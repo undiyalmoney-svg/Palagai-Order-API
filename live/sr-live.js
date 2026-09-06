@@ -65,6 +65,22 @@ function signalId(key, trade) {
   return `${key}|${trade.date}|${trade.entryTime}`;
 }
 
+/** Engine finished this trade — Live must flatten, not hold until TIME/FAIL only. */
+const ENGINE_FLAT = new Set(['TARGET', 'TIME', 'FAIL', 'STOP', 'LOCK', 'GIVEUP', 'CLOSE']);
+
+function stopDistancePts(trade, spec) {
+  const fromOpts = Number(spec?.opts?.stopPts);
+  if (Number.isFinite(fromOpts) && fromOpts > 0) return fromOpts;
+  const t = Number(trade?.target);
+  return Number.isFinite(t) && t > 0 ? t : 20;
+}
+
+function indexStopPrice(trade, spec) {
+  const pts = stopDistancePts(trade, spec);
+  return trade.side === 'BUY' ? trade.entryPrice - pts : trade.entryPrice + pts;
+}
+
+
 /**
  * Decide what Live should do for one engine trade.
  * enter = fresh signal, still in the window, not already filled.
@@ -76,7 +92,7 @@ function decideLiveAction({ trade, nowHm: hm, alreadyOpen, squareOffHm, freshMin
   const entry = hmToMin(trade.entryTime);
   const exit = hmToMin(trade.exitTime);
   const so = hmToMin(squareOffHm);
-  const hardExit = ['TARGET', 'TIME', 'FAIL'].includes(trade.exitReason);
+  const hardExit = ENGINE_FLAT.has(trade.exitReason);
   const pastExit = hardExit && exit <= now;
   const sessionOver = now >= so;
   if (alreadyOpen) {
@@ -422,7 +438,7 @@ async function onTick(session) {
               open = {
                 option: opt,
                 indexEntry: openTrade.entryPrice,
-                indexStop: openTrade.side === 'BUY' ? openTrade.entryPrice - openTrade.target : openTrade.entryPrice + openTrade.target,
+                indexStop: indexStopPrice(openTrade, spec),
                 indexTarget: openTrade.side === 'BUY' ? openTrade.entryPrice + openTrade.target : openTrade.entryPrice - openTrade.target,
                 entryTime: openTrade.entryTime,
                 skipChargeGate: true,
@@ -463,7 +479,7 @@ async function onTick(session) {
               option,
               optionEntryPremium: option.optionEntryPremium,
               indexEntry: t.entryPrice,
-              indexStop: t.side === 'BUY' ? t.entryPrice - (t.target || 20) : t.entryPrice + (t.target || 20),
+              indexStop: indexStopPrice(t, spec),
               indexTarget: t.side === 'BUY' ? t.entryPrice + (t.target || 20) : t.entryPrice - (t.target || 20),
               entryTime: t.entryTime,
               skipChargeGate: true,
