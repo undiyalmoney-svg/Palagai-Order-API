@@ -89,6 +89,13 @@ function runSrBreakout(bars5, opts) {
   // Skipped once the profit lock has armed. 0 = off. Tests PROGRESS, not loss.
   const giveUpBar = num(opts.giveUpBar, 0);
   const giveUpMinPts = num(opts.giveUpMinPts, 0);
+  // Give-up FLOOR. The give-up exits at the checkpoint bar's CLOSE, which on a
+  // violent bar can be far below entry — over 5 years the worst was -49 pts
+  // (-Rs3,690) on a trade whose best was only +5.6. Below this depth the trade
+  // is no longer "not paying", it is a real loser, and handing it to the normal
+  // rules (lock / stop / time) beats crystallising the bar's close.
+  // 0 = no floor (default).
+  const giveUpFloorPts = num(opts.giveUpFloorPts, 0);
   const retest = !!opts.retest;                   // enter on the pullback to the broken level (NIFTY_RETEST_V1)
   // ENTRY METER: reject a retest that takes too long to fill. A quick pullback
   // means the level is still being respected; a slow one means the move has
@@ -196,7 +203,12 @@ function runSrBreakout(bars5, opts) {
       if (lockArmPts > 0 && fav >= lockArmPts) locked = true;
       // GIVE-UP: no meaningful progress by the checkpoint bar → stop waiting.
       if (giveUpBar > 0 && bi === giveUpBar - 1 && !locked && bestFav < giveUpMinPts) {
-        exit = bar.close; exitTime = hhmm(bar.date); reason = 'GIVEUP'; break;
+        const now = dir * (bar.close - entry);
+        // Only walk away while the damage is still small; deeper than the floor
+        // this is a losing trade, not a stalled one — let the other rules run.
+        if (giveUpFloorPts <= 0 || now >= -giveUpFloorPts) {
+          exit = bar.close; exitTime = hhmm(bar.date); reason = 'GIVEUP'; break;
+        }
       }
       // FAIL-STOP: the broken level did not hold (price closed back through it) → cut it.
       if (failStop && (dir > 0 ? bar.close < level : bar.close > level)) { exit = bar.close; exitTime = hhmm(bar.date); reason = 'FAIL'; break; }

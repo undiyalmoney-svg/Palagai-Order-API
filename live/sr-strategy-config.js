@@ -43,6 +43,16 @@ const EXIT_RULES = Object.freeze({
   //     Rs433,570) because +6 leaves only a 1-point band between arming and
   //     exiting, which real slippage would swallow. +8 keeps 3 points.
   //   giveUpBar/MinPts no +8 progress within 2 bars → leave; it is not paying.
+  //   giveUpFloorPts   TESTED AND NOT ADOPTED. The give-up exits at the bar
+  //     CLOSE, so a violent bar can crystallise a big loss (worst over 5 years:
+  //     -49 pts / -Rs3,690 on a trade whose best was +5.6). A floor that skips
+  //     the give-up when already deeper than 10 pts down looked good on the
+  //     2024-25 train and 2025-26 test windows (+Rs7,195 / +Rs5,797 net, lower
+  //     losses), but on the untouched 2021-2023 stretch it was WORSE on exactly
+  //     the metric that matters: losses -Rs69,780 -> -Rs73,444, PF 14.51 ->
+  //     13.85, worst day -Rs2,467 -> -Rs4,610. It relabels give-ups as stops
+  //     rather than removing the damage. The option exists in the engine
+  //     (default 0 = off); leave it off unless a longer study says otherwise.
   nifty: Object.freeze({
     wallMode: 'intraday', retest: true, timeStopBars: 6, maxRetestBars: 2,
     lockArmPts: 8, lockAtPts: 5, giveUpBar: 2, giveUpMinPts: 8,
