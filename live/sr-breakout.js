@@ -96,6 +96,13 @@ function runSrBreakout(bars5, opts) {
   // rules (lock / stop / time) beats crystallising the bar's close.
   // 0 = no floor (default).
   const giveUpFloorPts = num(opts.giveUpFloorPts, 0);
+  // Cap each trade's stop to what is LEFT of the day's loss budget. Without
+  // this the per-trade cut-off and the daily brake are independent: the brake
+  // only runs after a trade closes, so a single trade can blow straight past
+  // the day's limit (a Rs5,000 cut against a Rs3,500 day allowed -Rs5,514 days).
+  // With it, a day that has already lost Rs2,000 of a Rs3,500 budget gives the
+  // next trade a Rs1,500 stop, not Rs5,000. Default off for backward compat.
+  const capStopToDayBudget = !!opts.capStopToDayBudget;
   const retest = !!opts.retest;                   // enter on the pullback to the broken level (NIFTY_RETEST_V1)
   // ENTRY METER: reject a retest that takes too long to fill. A quick pullback
   // means the level is still being respected; a slow one means the move has
@@ -186,6 +193,16 @@ function runSrBreakout(bars5, opts) {
     }
     let exit = after[after.length - 1].close, exitTime = hhmm(after[after.length - 1].date), reason = 'CLOSE';
     let locked = false, bestFav = -Infinity;   // profit-lock / give-up state
+    // Effective stop for THIS trade: never risk more than the day has left.
+    // st.pnl is the day's running P&L in points (negative when down).
+    // Only ever TIGHTENS an existing stop — never creates one. An instrument
+    // with stopPts 0 has deliberately no cut-off (Bank: every stop tested was
+    // harmful, 84% of trades that dip past -Rs3,000 still close as winners),
+    // and the day budget must not smuggle one in.
+    let effStop = stopPts;
+    if (capStopToDayBudget && dayLossStop > 0 && stopPts > 0) {
+      effStop = Math.min(stopPts, Math.max(0, dayLossStop + st.pnl));
+    }
     for (let bi = 0; bi < after.length; bi++) {
       const bar = after[bi];
       const fav = dir * ((dir > 0 ? bar.high : bar.low) - entry);
@@ -198,7 +215,7 @@ function runSrBreakout(bars5, opts) {
       if (locked && adv <= lockAtPts) { exit = entry + dir * lockAtPts; exitTime = hhmm(bar.date); reason = 'LOCK'; break; }
       // HARD STOP: adverse excursion hit the cut-off → out at the stop price.
       // Deliberately evaluated before the target (see stopPts above).
-      if (stopPts > 0 && adv <= -stopPts) { exit = entry - dir * stopPts; exitTime = hhmm(bar.date); reason = 'STOP'; break; }
+      if (effStop > 0 && adv <= -effStop) { exit = entry - dir * effStop; exitTime = hhmm(bar.date); reason = 'STOP'; break; }
       if (target > 0 && fav >= target) { exit = entry + dir * target; exitTime = hhmm(bar.date); reason = 'TARGET'; break; }
       if (lockArmPts > 0 && fav >= lockArmPts) locked = true;
       // GIVE-UP: no meaningful progress by the checkpoint bar → stop waiting.

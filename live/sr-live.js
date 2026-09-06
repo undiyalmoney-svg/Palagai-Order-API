@@ -8,7 +8,7 @@ const market = require('./kite-market');
 const store = require('./live.store');
 const { runSrBreakout } = require('./sr-breakout');
 // Exit/entry rules come from the SHARED config so Live and Paper cannot drift.
-const { exitOptsFor, DEFAULT_LOTS } = require('./sr-strategy-config');
+const { exitOptsFor, DEFAULT_LOTS, DAY_LOSS_STOP_RS, DAY_PROFIT_TARGET_RS } = require('./sr-strategy-config');
 const { LiveBroker } = require('./live-broker');
 const { NIFTY_50_INSTRUMENT, BANK_NIFTY_INSTRUMENT, CRUDE_OIL_MINI_INSTRUMENT } = require('./strategy-core.cjs');
 
@@ -195,8 +195,8 @@ async function start(userId, body = {}) {
     instruments: keys,
     lots: Math.max(1, numOr(body.lots, 1)),
     maxTradesPerDay: Math.max(1, numOr(body.maxTradesPerDay, 3)),
-    dayLossStopRs: numOr(body.dayLossStopRs, 3500),
-    dayProfitTargetRs: numOr(body.dayProfitTargetRs, 3500),
+    dayLossStopRs: numOr(body.dayLossStopRs, DAY_LOSS_STOP_RS),
+    dayProfitTargetRs: numOr(body.dayProfitTargetRs, DAY_PROFIT_TARGET_RS),
     entryPts: body.entryPts != null && body.entryPts !== '' ? numOr(body.entryPts, null) : null,
   };
   session.status = 'running';

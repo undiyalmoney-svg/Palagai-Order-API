@@ -8,7 +8,7 @@
 const https = require('https');
 const market = require('./kite-market');
 // Exit/entry rules come from the SHARED config so Paper and Live cannot drift.
-const { exitOptsFor, CUT_LOSS_RS, DEFAULT_LOTS } = require('./sr-strategy-config');
+const { exitOptsFor, CUT_LOSS_RS, DEFAULT_LOTS, DAY_LOSS_STOP_RS, DAY_PROFIT_TARGET_RS } = require('./sr-strategy-config');
 const store = require('./live.store');
 const { runSrBreakout } = require('./sr-breakout');
 const { observe, history: obsHistory, confirmLiveEntry, confirmLiveExit } = require('./sr-observe');
@@ -248,8 +248,11 @@ async function srBreakout(req, res) {
       const unitsPerLot = spec.unitsPerLot;
       const perPoint = unitsPerLot * lots;                // ₹ per point
       // Daily risk stops arrive in ₹ from the UI; convert to points for the engine.
-      const dayLossStop = numOr(body.dayLossStopRs, 0) > 0 ? numOr(body.dayLossStopRs, 0) / perPoint : 0;
-      const dayProfitTarget = numOr(body.dayProfitTargetRs, 0) > 0 ? numOr(body.dayProfitTargetRs, 0) / perPoint : 0;
+      // Defaults come from the shared config so Paper and Live brake alike.
+      const dayLossStopRs = numOr(body.dayLossStopRs, DAY_LOSS_STOP_RS);
+      const dayProfitTargetRs = numOr(body.dayProfitTargetRs, DAY_PROFIT_TARGET_RS);
+      const dayLossStop = dayLossStopRs > 0 ? dayLossStopRs / perPoint : 0;
+      const dayProfitTarget = dayProfitTargetRs > 0 ? dayProfitTargetRs / perPoint : 0;
       const maxTradesPerDay = Math.max(1, numOr(body.maxTradesPerDay, 3));
       // AUTO per instrument (no selector): each instrument runs its own eligible
       // strategy. An explicit body.strategy still works as a research override,
@@ -272,7 +275,7 @@ async function srBreakout(req, res) {
       results.push({
         key, name: spec.name, contract, token, candles: candles.length,
         strategy: strat.label, strategyStatus: strat.status,   // auto-routed per instrument
-        params: { entryPts, gapLo: spec.gapLo, gapHi: spec.gapHi, targetByScore: spec.targetByScore, lots, unitsPerLot, maxTradesPerDay, dayLossStopRs: numOr(body.dayLossStopRs, 0), dayProfitTargetRs: numOr(body.dayProfitTargetRs, 0) },
+        params: { entryPts, gapLo: spec.gapLo, gapHi: spec.gapHi, targetByScore: spec.targetByScore, lots, unitsPerLot, maxTradesPerDay, dayLossStopRs, dayProfitTargetRs },
         summary: {
           ...summary,
           totalProfitRupees: rupees(summary.profitPoints),

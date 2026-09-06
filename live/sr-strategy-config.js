@@ -20,6 +20,16 @@ const CUT_LOSS_RS = Object.freeze({ nifty: 5000, banknifty: 0, crude: 2500 });
 /** Units per lot — needed to turn the rupee cut-off into points. */
 const LOT_UNITS = Object.freeze({ nifty: 75, banknifty: 35, crude: 10 });
 
+/**
+ * Daily risk brakes, in rupees. Paper previously defaulted these to 0 (off)
+ * while Live defaulted to 3500 — so an un-set field meant "no brake" on one
+ * desk and "Rs3,500" on the other. Shared here so both agree.
+ * NOTE: the brake can only block the NEXT trade; it cannot close one already
+ * open. That is what capStopToDayBudget is for on the Nifty book.
+ */
+const DAY_LOSS_STOP_RS = 3500;
+const DAY_PROFIT_TARGET_RS = 3500;
+
 /** Default position size per instrument. */
 const DEFAULT_LOTS = Object.freeze({ nifty: 1, banknifty: 1, crude: 5 });
 
@@ -29,7 +39,8 @@ const DEFAULT_LOTS = Object.freeze({ nifty: 1, banknifty: 1, crude: 5 });
  * except Crude, which has only 89 days and is marked accordingly.
  */
 const EXIT_RULES = Object.freeze({
-  // Nifty — test window: net Rs433,570, losses -Rs31,198, PF 17.32, 93% win.
+  // Nifty — test window: net Rs435,224, losses -Rs29,544, PF 18.29, 93% win,
+  // worst trade -Rs3,346, worst DAY -Rs3,860.
   //   maxRetestBars 2  entry meter: a retest slower than 2 bars is a stale
   //                    setup (1-2 bars average +Rs692/trade, 8+ bars -Rs391).
   //   lockArmPts/AtPts once +8 is reached, exit at +5 — every losing trade
@@ -43,6 +54,14 @@ const EXIT_RULES = Object.freeze({
   //     Rs433,570) because +6 leaves only a 1-point band between arming and
   //     exiting, which real slippage would swallow. +8 keeps 3 points.
   //   giveUpBar/MinPts no +8 progress within 2 bars → leave; it is not paying.
+  //   capStopToDayBudget  the per-trade stop never exceeds what is LEFT of the
+  //     day's loss budget. The daily brake alone cannot stop a trade that is
+  //     already open — it only blocks the NEXT one — so a Rs5,000 cut against a
+  //     Rs3,500 day allowed -Rs5,514 days. With the cap, a day already down
+  //     Rs2,000 gives the next trade a Rs1,500 stop, not Rs5,000.
+  //     Test window: net Rs433,570 -> Rs435,224, losses -Rs31,198 -> -Rs29,544,
+  //     worst trade -Rs5,000 -> -Rs3,346, worst DAY -Rs5,514 -> -Rs3,860.
+  //     It only ever TIGHTENS an existing stop, never creates one.
   //   giveUpFloorPts   TESTED AND NOT ADOPTED. The give-up exits at the bar
   //     CLOSE, so a violent bar can crystallise a big loss (worst over 5 years:
   //     -49 pts / -Rs3,690 on a trade whose best was +5.6). A floor that skips
@@ -56,6 +75,7 @@ const EXIT_RULES = Object.freeze({
   nifty: Object.freeze({
     wallMode: 'intraday', retest: true, timeStopBars: 6, maxRetestBars: 2,
     lockArmPts: 8, lockAtPts: 5, giveUpBar: 2, giveUpMinPts: 8,
+    capStopToDayBudget: true,
     targetByScore: { 1: 20, 2: 20, 3: 20 },
   }),
   // Bank — 6 bars + profit lock. Test window: net Rs211,602, losses -Rs58,488,
@@ -76,6 +96,11 @@ const EXIT_RULES = Object.freeze({
   //   failStop / rupee cut-off — both harmful: 9 bars + failStop is
   //     -Rs239,478 (PF 0.67), and a Rs4,000 cut turns +Rs213,758 into
   //     -Rs202,151, because 84% of trades that dip past -Rs3,000 still win.
+  //   capStopToDayBudget is NOT set here, and cannot be: it only tightens an
+  //     existing stop, and Bank deliberately has none. Giving Bank a Rs3,500
+  //     stop so the day cap could bind turns +Rs211,022 into -Rs211,330
+  //     (PF 6.06 -> 0.64) and produces 84 days past -Rs3,500 instead of 3.
+  //     Bank's worst day (-Rs10,383) must be managed by LOT SIZE, not a stop.
   banknifty: Object.freeze({
     wallMode: 'intraday', timeStopBars: 6,
     lockArmPts: 12, lockAtPts: 5,
@@ -104,4 +129,7 @@ function exitOptsFor(key) {
   return cut > 0 && units > 0 ? { ...rules, stopPts: cut / units } : { ...rules };
 }
 
-module.exports = { EXIT_RULES, CUT_LOSS_RS, LOT_UNITS, DEFAULT_LOTS, exitOptsFor };
+module.exports = {
+  EXIT_RULES, CUT_LOSS_RS, LOT_UNITS, DEFAULT_LOTS, exitOptsFor,
+  DAY_LOSS_STOP_RS, DAY_PROFIT_TARGET_RS,
+};
