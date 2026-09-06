@@ -14,10 +14,25 @@
  * hours) stay with each caller.
  */
 
-/** Rupee loss cut-off PER LOT. 0 = none. Converted to points by the caller. */
-const CUT_LOSS_RS = Object.freeze({ nifty: 5000, banknifty: 0, crude: 2500 });
+/**
+ * Rupee loss cut-off — a TOTAL position figure, not per lot. The caller divides
+ * by perPoint (unitsPerLot x lots), so the rupee risk is the same at any size
+ * and only the point distance changes. It was per-lot before, which meant the
+ * rupee risk doubled with every lot while the daily brake (already a total)
+ * stayed fixed: at 2 lots a "Rs3,500 day" allowed a -Rs4,999 trade, at 5 lots
+ * -Rs5,374. The two must scale the same way or the caps are meaningless above
+ * one lot.
+ */
+const CUT_LOSS_RS = Object.freeze({ nifty: 2000, banknifty: 0, crude: 2500 });
+// Nifty's cut-off is the hard per-trade ceiling: no single trade may lose more
+// than this, at any lot size. Verified 1/2/5/10 lots -> worst trade -Rs2,000,
+// -Rs1,999, -Rs1,999, -Rs2,002. It costs profit and that is accepted:
+//   TEST window  Rs5,000 cut -> Rs435,224 net, PF 18.29, worst day -Rs3,860
+//                Rs2,000 cut -> Rs389,348 net, PF  9.92, worst day -Rs2,360
+//   5 YEARS      Rs5,000 cut -> Rs17,48,369    Rs2,000 cut -> Rs15,32,555
+// i.e. about 11-12% of net buys a hard Rs2,000 ceiling on every trade.
 
-/** Units per lot — needed to turn the rupee cut-off into points. */
+/** Units per lot — with `lots`, turns a rupee figure into points. */
 const LOT_UNITS = Object.freeze({ nifty: 75, banknifty: 35, crude: 10 });
 
 /**
@@ -27,7 +42,7 @@ const LOT_UNITS = Object.freeze({ nifty: 75, banknifty: 35, crude: 10 });
  * NOTE: the brake can only block the NEXT trade; it cannot close one already
  * open. That is what capStopToDayBudget is for on the Nifty book.
  */
-const DAY_LOSS_STOP_RS = 3500;
+const DAY_LOSS_STOP_RS = 2000;
 const DAY_PROFIT_TARGET_RS = 3500;
 
 /** Default position size per instrument. */
@@ -39,8 +54,8 @@ const DEFAULT_LOTS = Object.freeze({ nifty: 1, banknifty: 1, crude: 5 });
  * except Crude, which has only 89 days and is marked accordingly.
  */
 const EXIT_RULES = Object.freeze({
-  // Nifty — test window: net Rs435,224, losses -Rs29,544, PF 18.29, 93% win,
-  // worst trade -Rs3,346, worst DAY -Rs3,860.
+  // Nifty — test window: net Rs389,348, PF 9.92, worst trade -Rs2,000,
+  // worst DAY -Rs2,360 (Rs2,000 cut-off + Rs2,000 daily brake).
   //   maxRetestBars 2  entry meter: a retest slower than 2 bars is a stale
   //                    setup (1-2 bars average +Rs692/trade, 8+ bars -Rs391).
   //   lockArmPts/AtPts once +8 is reached, exit at +5 — every losing trade
@@ -120,13 +135,14 @@ const EXIT_RULES = Object.freeze({
  * converted to points. This is what both Paper and Live must pass to
  * runSrBreakout so the two agree.
  */
-function exitOptsFor(key) {
+function exitOptsFor(key, lots = 1) {
   const rules = EXIT_RULES[key];
   if (!rules) return {};
   const cut = CUT_LOSS_RS[key] || 0;
   const units = LOT_UNITS[key] || 0;
-  // stopPts is per lot, so the stop distance stays fixed as size scales.
-  return cut > 0 && units > 0 ? { ...rules, stopPts: cut / units } : { ...rules };
+  const perPoint = units * Math.max(1, lots);
+  // TOTAL rupees -> points, so the rupee risk is identical at any lot size.
+  return cut > 0 && perPoint > 0 ? { ...rules, stopPts: cut / perPoint } : { ...rules };
 }
 
 module.exports = {

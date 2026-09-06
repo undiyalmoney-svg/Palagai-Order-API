@@ -412,7 +412,11 @@ async function onTick(session) {
         const { trades } = runSrBreakout(candles, {
           entryPts, trendBars: 20, gapLo: spec.gapLo, gapHi: spec.gapHi,
           targetByScore: spec.targetByScore, maxTradesPerDay: cfg.maxTradesPerDay,
-          dayLossStop, dayProfitTarget, reportFromDate: today, ...spec.session, ...spec.opts,
+          dayLossStop, dayProfitTarget, reportFromDate: today, ...spec.session,
+          // Rebuilt with the session's lot size: the rupee cut-off is a TOTAL,
+          // so its point distance depends on lots. spec.opts is the 1-lot form
+          // kept for the Paper/Live equality self-test.
+          ...exitOptsFor(k, lots),
         });
 
         const bookId = spec.bookId;

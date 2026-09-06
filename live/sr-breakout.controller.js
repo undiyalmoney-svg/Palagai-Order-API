@@ -266,7 +266,7 @@ async function srBreakout(req, res) {
         // SHARED exit/entry rules for this instrument (sr-strategy-config.js).
         // Applied before strat.opts so an explicit strategy can still override
         // for research, but Paper and Live share the same defaults.
-        ...exitOptsFor(key),
+        ...exitOptsFor(key, lots),
         ...strat.opts,                                 // version overrides (BASELINE = {})
       });
       // ₹ = points × unitsPerLot × lots (futures-equivalent; option premium differs).
