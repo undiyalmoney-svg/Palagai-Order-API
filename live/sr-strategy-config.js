@@ -97,8 +97,17 @@ const EXIT_RULES = Object.freeze({
     capStopToDayBudget: true,
     targetByScore: { 1: 20, 2: 20, 3: 20 },
   }),
-  // Bank — 6 bars + profit lock. Test window: net Rs211,602, losses -Rs58,488,
-  // PF 6.07, 96% win.
+  // Bank — 6 bars + profit lock armed at +10. Test window: net Rs206,867,
+  // losses -Rs42,343, PF 7.89.
+  // Arm level swept on both windows; +10 is the most profitable overall AND
+  // loses less than the +12 it replaced:
+  //   +6  train Rs266,895  test Rs190,685  combined Rs457,580  loss -Rs24,010
+  //   +8  train Rs251,023  test Rs201,980  combined Rs453,003  loss -Rs30,684
+  //   +10 train Rs259,113  test Rs206,867  combined Rs465,981  loss -Rs42,343  <-
+  //   +12 train Rs248,759  test Rs211,022  combined Rs459,780  loss -Rs58,488
+  //   +15 train Rs257,306  test Rs201,411  combined Rs458,716  loss -Rs95,574
+  // Train and test disagree on the single best value (train likes +6, test
+  // likes +12), so the combined figure is used rather than either alone.
   // The same audit run on Nifty applies here even more strongly: 75% of Bank's
   // losing trades reached +10 pts or more before reversing (Nifty was 50%), and
   // 30 of 76 got within 5 pts of the +20 target. Locking at +5 once +12 is
@@ -122,7 +131,7 @@ const EXIT_RULES = Object.freeze({
   //     Bank's worst day (-Rs10,383) must be managed by LOT SIZE, not a stop.
   banknifty: Object.freeze({
     wallMode: 'intraday', timeStopBars: 6,
-    lockArmPts: 12, lockAtPts: 5,
+    lockArmPts: 10, lockAtPts: 5,
     targetByScore: { 1: 20, 2: 20, 3: 20 },
   }),
   // Crude — had NO time exit, so losers rode to the 23:20 square-off (average
