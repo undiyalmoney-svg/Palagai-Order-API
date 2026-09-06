@@ -4,7 +4,6 @@
  * that powers Paper fires a fresh signal. Opt-in only (Start Live). Paper,
  * observe, and the collector stay read-only.
  */
-const https = require('https');
 const market = require('./kite-market');
 const store = require('./live.store');
 const { runSrBreakout } = require('./sr-breakout');
@@ -219,62 +218,33 @@ function startTick(session) {
   session.tickTimer = setInterval(run, TICK_MS);
 }
 
-function getJson(p, authorization) {
-  return new Promise((res, rej) => {
-    https.get({ hostname: 'api.kite.trade', path: p, headers: { 'X-Kite-Version': '3', Authorization: authorization } },
-      (r) => { let b = ''; r.on('data', (c) => (b += c)); r.on('end', () => { try { res(JSON.parse(b)); } catch (e) { rej(e); } }); }).on('error', rej);
-  });
-}
-function getText(p, authorization) {
-  return new Promise((res, rej) => {
-    https.get({ hostname: 'api.kite.trade', path: p, headers: { 'X-Kite-Version': '3', Authorization: authorization } },
-      (r) => { let b = ''; r.on('data', (c) => (b += c)); r.on('end', () => res(b)); }).on('error', rej);
-  });
-}
-
-async function optionMap(authorization, root, type) {
-  const csv = await getText('/instruments/NFO', authorization);
-  const lines = csv.trim().split('\n');
-  const map = new Map();
-  const expiries = new Set();
-  for (let i = 1; i < lines.length; i++) {
-    const p = lines[i].split(',');
-    const name = (p[3] || '').replace(/"/g, '');
-    const t = (p[9] || '').replace(/"/g, '');
-    if (name !== root || t !== type) continue;
-    const strike = Number(p[6]);
-    const exp = (p[5] || '').replace(/"/g, '');
-    map.set(strike + '|' + exp, { token: (p[0] || '').replace(/"/g, ''), sym: (p[2] || '').replace(/"/g, '') });
-    expiries.add(exp);
-  }
-  return { map, expiries: [...expiries].sort() };
-}
-
-async function quotes(authorization, keys) {
-  const qs = keys.map((k) => 'i=' + encodeURIComponent(k)).join('&');
-  const j = await getJson('/quote?' + qs, authorization);
-  return j.status === 'success' ? j.data : {};
-}
-
 async function pickOption(authorization, spec, trade) {
   const dir = trade.side === 'BUY' ? 1 : -1;
   const type = dir > 0 ? 'CE' : 'PE';
   const today = trade.date || todayIso();
-  const state = await optionMap(authorization, spec.root, type);
+  const inst = await market.fetchInstruments(authorization);
+  const rows = inst.filter((r) =>
+    String(r.name || '').toUpperCase() === spec.root &&
+    r.instrumentType === type &&
+    r.exchange === 'NFO' &&
+    r.instrumentToken > 0,
+  );
+  const expiries = [...new Set(rows.map((r) => r.expiry).filter(Boolean))].sort();
+  const expiry = expiries.find((e) => e > today) || expiries.find((e) => e >= today) || null;
+  if (!expiry) return null;
   const spot = trade.entryPrice;
   const atm = Math.round(spot / spec.step) * spec.step;
-  const expiry = state.expiries.find((e) => e > today) || state.expiries.find((e) => e >= today) || null;
   const candStrikes = dir > 0 ? [atm - spec.step, atm, atm + spec.step] : [atm + spec.step, atm, atm - spec.step];
-  const candKeys = [];
   const candMeta = [];
   for (const strike of candStrikes) {
-    const found = state.map.get(strike + '|' + expiry);
-    if (found) { candKeys.push('NFO:' + found.sym); candMeta.push({ strike, sym: found.sym, token: found.token }); }
+    const found = rows.find((r) => r.expiry === expiry && r.strike === strike);
+    if (found) candMeta.push(found);
   }
-  if (!candKeys.length) return null;
-  const qmap = await quotes(authorization, candKeys.concat([spec.spotKey]));
+  if (!candMeta.length) return null;
+  const keys = candMeta.map((m) => 'NFO:' + m.tradingSymbol).concat([spec.spotKey]);
+  const qmap = await market.fetchQuotes(authorization, keys);
   const cands = candMeta.map((m) => {
-    const q = qmap['NFO:' + m.sym];
+    const q = qmap['NFO:' + m.tradingSymbol];
     const ltp = q?.last_price ?? null;
     const bid = q?.depth?.buy?.[0]?.price ?? null;
     const ask = q?.depth?.sell?.[0]?.price ?? null;
@@ -289,10 +259,10 @@ async function pickOption(authorization, spec, trade) {
   cands.sort((a, b) => b.rank - a.rank);
   const pick = cands[0];
   return {
-    tradingSymbol: pick.sym,
-    instrumentToken: Number(pick.token) || 0,
+    tradingSymbol: pick.tradingSymbol,
+    instrumentToken: Number(pick.instrumentToken) || 0,
     exchange: 'NFO',
-    lotSize: spec.unitsPerLot,
+    lotSize: Math.max(1, Number(pick.lotSize) || spec.unitsPerLot),
     optionEntryPremium: pick.ask || pick.ltp,
   };
 }
