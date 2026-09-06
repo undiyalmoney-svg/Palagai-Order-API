@@ -71,6 +71,11 @@ function runSrBreakout(bars5, opts) {
   const wallMode = opts.wallMode === 'intraday' ? 'intraday' : 'pivot';
   const intradayLookback = num(opts.intradayLookback, 3);
   const failStop = !!opts.failStop;               // exit if the broken level fails to hold
+  // HARD LOSS CUT-OFF, in points. 0 = off (default), so nothing changes unless a
+  // caller opts in. Checked BEFORE the target on each bar: when one 5-min bar
+  // touches both, we assume the stop filled first (the pessimistic reading — a
+  // real SL-M triggers on the touch, and we cannot see intrabar order).
+  const stopPts = num(opts.stopPts, 0);
   const retest = !!opts.retest;                   // enter on the pullback to the broken level (NIFTY_RETEST_V1)
 
   const bars15 = to15(bars5);
@@ -153,6 +158,12 @@ function runSrBreakout(bars5, opts) {
     for (let bi = 0; bi < after.length; bi++) {
       const bar = after[bi];
       const fav = dir * ((dir > 0 ? bar.high : bar.low) - entry);
+      // HARD STOP: adverse excursion hit the cut-off → out at the stop price.
+      // Deliberately evaluated before the target (see stopPts above).
+      if (stopPts > 0) {
+        const adv = dir * ((dir > 0 ? bar.low : bar.high) - entry);
+        if (adv <= -stopPts) { exit = entry - dir * stopPts; exitTime = hhmm(bar.date); reason = 'STOP'; break; }
+      }
       if (target > 0 && fav >= target) { exit = entry + dir * target; exitTime = hhmm(bar.date); reason = 'TARGET'; break; }
       // FAIL-STOP: the broken level did not hold (price closed back through it) → cut it.
       if (failStop && (dir > 0 ? bar.close < level : bar.close > level)) { exit = bar.close; exitTime = hhmm(bar.date); reason = 'FAIL'; break; }

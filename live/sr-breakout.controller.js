@@ -21,12 +21,28 @@ function userId(req) { return req.user?.id || 'anonymous'; }
 // Mini is an MCX monthly future resolved to its front month at request time.
 const INSTRUMENTS = {
   nifty: {
-    key: 'nifty', name: 'Nifty 50', token: '256265', unitsPerLot: 75,
+    key: 'nifty', name: 'Nifty 50', token: '256265', unitsPerLot: 75, defaultLots: 1,
+    // HARD LOSS CUT-OFF per lot. Wide on purpose: it caps the worst trade at
+    // -Rs5,000 (was -Rs11,936) and still IMPROVES net on both windows measured
+    // together (Rs815,673 vs Rs801,285), with PF 2.53 -> 2.72. Tighter caps cost
+    // real money (Rs4,000 -> Rs788k combined, Rs3,000 -> worse still), so do not
+    // shrink this without re-running the train/test split.
+    cutLossRs: 5000,
     session: { entryStartHm: '09:45', entryEndHm: '14:30', squareOffHm: '15:15' },
     entryPts: 27, gapLo: 100, gapHi: 175, targetByScore: { 1: 20, 2: 25, 3: 30 },
   },
   banknifty: {
-    key: 'banknifty', name: 'Bank Nifty', token: '260105', unitsPerLot: 35,
+    key: 'banknifty', name: 'Bank Nifty', token: '260105', unitsPerLot: 35, defaultLots: 1,
+    // NO cutLossRs ON PURPOSE — measured, not assumed. On the 4-bar exit over the
+    // walk-forward test window a cut-off destroys this book:
+    //   none    net +Rs213,758  PF 3.43  worst -Rs4,538
+    //   Rs4,000 net -Rs202,151  PF 0.76
+    //   Rs3,000 net -Rs459,463  PF 0.45
+    //   Rs2,000 net -Rs697,549  PF 0.25
+    // Bank trades routinely dip intrabar and recover inside the 20-minute hold:
+    // 84% of trades that go past -Rs3,000 still close as WINNERS. A stop cannot
+    // tell those apart from real failures, so it cuts the winners. The 4-bar time
+    // exit already caps the worst trade at -Rs4,538 without that damage.
     session: { entryStartHm: '09:45', entryEndHm: '14:30', squareOffHm: '15:15' },
     entryPts: 60, gapLo: 275, gapHi: 465, targetByScore: { 1: 40, 2: 50, 3: 60 },
   },
@@ -36,7 +52,25 @@ const INSTRUMENTS = {
     // session) turn it from bleeding to green in-sample; the forward paper run is
     // what actually validates it. Bank Nifty + Nifty 50 are the proven books.
     key: 'crude', name: 'Crude Oil Mini', token: null, unitsPerLot: 10, // token resolved at runtime
+    // Crude needs size to clear its own brokerage: the Rs120 cost is per TRADE,
+    // not per lot, so the edge scales with lots while the cost does not.
+    // Measured over 89 days (226 trades, 427 gross pts/lot):
+    //   1 lot -Rs22,850 | 3 -Rs14,310 | 5 -Rs5,770 | 7 +Rs2,770 | 10 +Rs15,580
+    // BREAK-EVEN IS 6.4 LOTS. The default below (5) is still net negative by
+    // about Rs5,770 over that window — set deliberately as a starting size, not
+    // because it is profitable. Raising it also scales the worst trade linearly
+    // (-Rs2,500/lot), so 10 lots means -Rs25,000 on a single trade.
+    defaultLots: 5,
+    // Cut-off is ~neutral here (-Rs23,650 vs -Rs23,890) and caps the worst trade.
+    // Crude is net NEGATIVE either way; this bounds it, it does not fix it.
+    cutLossRs: 2500,
     session: { entryStartHm: '09:30', entryEndHm: '20:00', squareOffHm: '23:20' },
+    // Crude had NO time exit, so a losing trade rode to the 23:20 square-off —
+    // average hold 179 min, worst trade -Rs5,300. 18 bars (90 min) cuts the
+    // average hold to 69 min and the worst trade to -Rs2,740.
+    // IN-SAMPLE ONLY (89 days of history) — cannot be walk-forward validated,
+    // and Crude is net NEGATIVE at every time exit tested (best -Rs23,090).
+    timeStopBars: 18,
     entryPts: 50, gapLo: 78, gapHi: 130, targetByScore: { 1: 20, 2: 25, 3: 30 },
   },
 };
@@ -58,13 +92,35 @@ const STRATEGIES = {
   },
   nifty_retest_v1: {
     label: 'Nifty Retest V1 (candidate)', status: 'eligible', instrument: 'nifty',
+    // EXIT ONLY. Hold stays 6 bars and the target stays 20 pts — the profitable
+    // logic is untouched. The loss cap (cutLossRs 5000 on the instrument spec)
+    // is the whole change. Shortening the hold to 4 bars was tried and REJECTED:
+    // it cost Rs17,539 of net for a smaller tail than the cap already gives.
     opts: { wallMode: 'intraday', retest: true, timeStopBars: 6, targetByScore: { 1: 20, 2: 20, 3: 20 } },
-    oos: { causal: true, pf: 2.08, rsDay: 1264, trades: 1612, net: 801285, window: '2024-01..2026' },
+    // OOS = walk-forward TEST window only. Re-measure whenever opts change.
+    oos: { causal: true, pf: 2.72, rsDay: 1336, trades: 708, net: 374080, window: '2025-07..2026-09 (walk-forward test)' },
   },
   bank_intraday_v1: {
     label: 'Bank Intraday V1 (candidate)', status: 'eligible', instrument: 'banknifty',
-    opts: { wallMode: 'intraday', timeStopBars: 9, failStop: true, targetByScore: { 1: 20, 2: 20, 3: 20 } },
-    oos: { causal: true, pf: 1.73, rsDay: 441, trades: 1278, net: 279330, window: '2024-01..2026' },
+    // EXIT ONLY: hold shortened 9 -> 6 bars (45 -> 30 min). Target stays 20 pts;
+    // entries untouched. Best on the two windows COMBINED, and it halves the
+    // tail: worst trade -Rs22,535 -> -Rs10,843, PF 2.23 -> 3.01. Stable choice —
+    // Rs236k train / Rs210k test, where 9 bars decays Rs243k -> Rs162k.
+    //
+    // failStop WAS enabled here in a2e8d34 ("exit when the broken 15m wall
+    // fails, not after 45 min TIME") and is deliberately removed again. It
+    // reaches the SAME worst trade as the 6-bar hold but pays enormously for
+    // it. Measured on the walk-forward TEST window, identical entries:
+    //   9 bars + failStop   net -Rs239,478  PF 0.67  win 63%  worst -Rs10,843
+    //   6 bars + failStop   net -Rs238,031  PF 0.67  win 62%  worst -Rs10,843
+    //   6 bars, no failStop net +Rs209,770  PF 3.01  win 89%  worst -Rs10,843
+    // The wall-fail test fires on trades that recover: 84% of Bank trades that
+    // dip past -Rs3,000 still close as winners, so cutting there sells the
+    // winners. The time exit gets the same tail without that cost.
+    // Do not re-enable it, and do not add a per-trade rupee stop, without
+    // re-running the train/test split.
+    opts: { wallMode: 'intraday', timeStopBars: 6, targetByScore: { 1: 20, 2: 20, 3: 20 } },
+    oos: { causal: true, pf: 3.01, rsDay: 771, trades: 710, net: 209770, window: '2025-07..2026-09 (walk-forward test)' },
   },
 };
 // Auto-routing: each instrument runs its OWN validated eligible strategy (no
@@ -150,7 +206,12 @@ async function srBreakout(req, res) {
       const warmupFrom = shiftDays(fromDate, -12);
       const candles = await market.fetchHistorical5m(authorization, token, warmupFrom, toDate);
       const entryPts = numOr(body.entryPts, spec.entryPts);
-      const lots = Math.max(1, numOr(body.lots, 1));
+      // Lots are PER INSTRUMENT. Precedence: explicit per-instrument value from
+      // the request, then a single shared `lots`, then the instrument's own
+      // default. Books have very different tick values (Rs75 / Rs35 / Rs10 per
+      // point), so one shared size is rarely right for all three.
+      const lots = Math.max(1, numOr(body.lotsByInstrument && body.lotsByInstrument[key],
+        numOr(body.lots, spec.defaultLots || 1)));
       const unitsPerLot = spec.unitsPerLot;
       const perPoint = unitsPerLot * lots;                // ₹ per point
       // Daily risk stops arrive in ₹ from the UI; convert to points for the engine.
@@ -166,6 +227,10 @@ async function srBreakout(req, res) {
       const { trades, summary } = runSrBreakout(candles, {
         entryPts, trendBars: 20, gapLo: spec.gapLo, gapHi: spec.gapHi, targetByScore: spec.targetByScore,
         maxTradesPerDay, dayLossStop, dayProfitTarget, reportFromDate: fromDate, ...spec.session,
+        ...(spec.timeStopBars ? { timeStopBars: spec.timeStopBars } : {}),  // per-instrument default
+        // Hard loss cut-off. cutLossRs is PER LOT, so the stop distance in points
+        // stays fixed as lots scale (rupee risk scales with size, as it should).
+        ...(spec.cutLossRs ? { stopPts: spec.cutLossRs / unitsPerLot } : {}),
         ...strat.opts,                                 // version overrides (BASELINE = {})
       });
       // ₹ = points × unitsPerLot × lots (futures-equivalent; option premium differs).
