@@ -23,14 +23,18 @@
  * -Rs5,374. The two must scale the same way or the caps are meaningless above
  * one lot.
  */
-const CUT_LOSS_RS = Object.freeze({ nifty: 2000, banknifty: 0, crude: 2500 });
-// Nifty's cut-off is the hard per-trade ceiling: no single trade may lose more
-// than this, at any lot size. Verified 1/2/5/10 lots -> worst trade -Rs2,000,
-// -Rs1,999, -Rs1,999, -Rs2,002. It costs profit and that is accepted:
-//   TEST window  Rs5,000 cut -> Rs435,224 net, PF 18.29, worst day -Rs3,860
-//                Rs2,000 cut -> Rs389,348 net, PF  9.92, worst day -Rs2,360
-//   5 YEARS      Rs5,000 cut -> Rs17,48,369    Rs2,000 cut -> Rs15,32,555
-// i.e. about 11-12% of net buys a hard Rs2,000 ceiling on every trade.
+const CUT_LOSS_RS = Object.freeze({ nifty: 5000, banknifty: 0, crude: 2500 });
+// Nifty's cut-off is a TOTAL rupee figure (see above), so the rupee risk is the
+// same at any lot size and only the point distance moves.
+// A Rs2,000 ceiling was tried and REVERTED. It does cap the worst single trade
+// (verified -Rs2,000 / -Rs1,999 / -Rs1,999 / -Rs2,002 at 1/2/5/10 lots), but it
+// is worse on every other measure INCLUDING total losses, because tightening
+// the stop converts recoverable trades into realised losses:
+//   TEST window   Rs5,000 -> net Rs435,224  losses -Rs29,544  PF 18.29  14 red days
+//                 Rs2,000 -> net Rs389,348  losses -Rs51,990  PF  9.92  26 red days
+//   5 YEARS       Rs5,000 -> Rs17,48,369    Rs2,000 -> Rs15,32,555
+// A tighter ceiling is not the same thing as losing less money. Only reinstate
+// Rs2,000 if a hard per-trade ceiling is required for reasons outside P&L.
 
 /** Units per lot — with `lots`, turns a rupee figure into points. */
 const LOT_UNITS = Object.freeze({ nifty: 75, banknifty: 35, crude: 10 });
@@ -42,7 +46,7 @@ const LOT_UNITS = Object.freeze({ nifty: 75, banknifty: 35, crude: 10 });
  * NOTE: the brake can only block the NEXT trade; it cannot close one already
  * open. That is what capStopToDayBudget is for on the Nifty book.
  */
-const DAY_LOSS_STOP_RS = 2000;
+const DAY_LOSS_STOP_RS = 3500;
 const DAY_PROFIT_TARGET_RS = 3500;
 
 /** Default position size per instrument. */
