@@ -27,7 +27,7 @@ const SPEC = {
     exchange: 'NFO',
     session: { entryStartHm: '09:45', entryEndHm: '14:30', squareOffHm: '15:15' },
     entryPts: 60, gapLo: 275, gapHi: 465, targetByScore: { 1: 40, 2: 50, 3: 60 },
-    opts: { wallMode: 'intraday', timeStopBars: 9, targetByScore: { 1: 20, 2: 20, 3: 20 } },
+    opts: { wallMode: 'intraday', timeStopBars: 9, failStop: true, targetByScore: { 1: 20, 2: 20, 3: 20 } },
   },
   crude: {
     key: 'crude', name: 'Crude Oil Mini', token: null, unitsPerLot: 10,

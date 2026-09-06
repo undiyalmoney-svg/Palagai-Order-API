@@ -63,7 +63,7 @@ const STRATEGIES = {
   },
   bank_intraday_v1: {
     label: 'Bank Intraday V1 (candidate)', status: 'eligible', instrument: 'banknifty',
-    opts: { wallMode: 'intraday', timeStopBars: 9, targetByScore: { 1: 20, 2: 20, 3: 20 } },
+    opts: { wallMode: 'intraday', timeStopBars: 9, failStop: true, targetByScore: { 1: 20, 2: 20, 3: 20 } },
     oos: { causal: true, pf: 1.73, rsDay: 441, trades: 1278, net: 279330, window: '2024-01..2026' },
   },
 };

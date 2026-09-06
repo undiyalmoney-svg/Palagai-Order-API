@@ -38,8 +38,9 @@ assert.strictEqual(decideLiveAction({
 }), 'exit');
 
 assert.strictEqual(decideLiveAction({
-  trade, nowHm: '15:15', alreadyOpen: true, squareOffHm: '15:15',
-}), 'exit', 'square-off');
+  trade: { ...trade, exitReason: 'FAIL', exitTime: '10:25' },
+  nowHm: '10:26', alreadyOpen: true, squareOffHm: '15:15',
+}), 'exit', 'wall fail must flatten');
 
 assert.strictEqual(decideLiveAction({
   trade, nowHm: '15:16', alreadyOpen: false, squareOffHm: '15:15',
