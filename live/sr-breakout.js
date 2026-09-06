@@ -12,8 +12,9 @@
  *       close>resistance & up-trend -> BUY (CE); close<support & down-trend -> SELL (PE).
  *   - CONFIDENCE 1-3: 1 (with-trend) +1 big body (>=1.5x entryPts) +1 mid-gap
  *       (S/R gap within [gapLo,gapHi]). Higher score reaches bigger targets.
- *   - TARGET by confidence (targetByScore). Exit at +target or session square-off.
- *       No price stop — on options the premium is the loss cap.
+ *   - TARGET by confidence (targetByScore). HARD STOP at maxLossPts against
+ *       the entry (index points) so TIME cannot dump 100+ Bank points.
+ *       Else session square-off. failStop optional.
  *   - DAILY RISK: stop the day after maxTradesPerDay, or once day P&L <= -dayLossStop
  *       or >= dayProfitTarget (all in points; caller converts to rupees).
  *
@@ -63,6 +64,9 @@ function runSrBreakout(bars5, opts) {
   // Time exit: if a trade hasn't hit target within N 5-min bars, exit at market.
   // Validated to beat hold-to-close (cuts the big losers; winners pay fast). 0=off.
   const timeStopBars = num(opts.timeStopBars, 0);
+  // Hard adverse stop in INDEX points. Cuts the Bank −₹2k..₹4k TIME dumps
+  // (no index SL today). 0 = off. Checked per 5m bar after TARGET, before TIME.
+  const maxLossPts = num(opts.maxLossPts, 0);
   // Bars before this date only warm up S/R + trend; they produce no reported
   // trades. Lets a single-day / live-today run see signals from the open.
   const reportFromDate = opts.reportFromDate || '';
@@ -154,6 +158,13 @@ function runSrBreakout(bars5, opts) {
       const bar = after[bi];
       const fav = dir * ((dir > 0 ? bar.high : bar.low) - entry);
       if (target > 0 && fav >= target) { exit = entry + dir * target; exitTime = hhmm(bar.date); reason = 'TARGET'; break; }
+      const adv = dir * (entry - (dir > 0 ? bar.low : bar.high));
+      if (maxLossPts > 0 && adv >= maxLossPts) {
+        exit = entry - dir * maxLossPts;
+        exitTime = hhmm(bar.date);
+        reason = 'STOP';
+        break;
+      }
       // FAIL-STOP: the broken level did not hold (price closed back through it) → cut it.
       if (failStop && (dir > 0 ? bar.close < level : bar.close > level)) { exit = bar.close; exitTime = hhmm(bar.date); reason = 'FAIL'; break; }
       // TIME EXIT: not paying by the time limit → get out at market (this bar's close).
@@ -165,7 +176,8 @@ function runSrBreakout(bars5, opts) {
       date: b.d, side: dir > 0 ? 'BUY' : 'SELL', option: dir > 0 ? 'CE' : 'PE',
       confidence: score, entryTime, entryPrice: round2(entry), level: round2(level),
       breakoutTime, breakoutPrice: round2(breakoutPrice), retestTime,
-      bodyPts: round2(body), target, exitTime, exitPrice: round2(exit), exitReason: reason, points: round2(pts),
+      bodyPts: round2(body), target, maxLossPts: maxLossPts || 0,
+      exitTime, exitPrice: round2(exit), exitReason: reason, points: round2(pts),
     });
     // daily risk stop (checked after the trade completes)
     if (dayLossStop > 0 && st.pnl <= -dayLossStop) st.stopped = true;
