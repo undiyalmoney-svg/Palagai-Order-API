@@ -7,6 +7,8 @@
 const market = require('./kite-market');
 const store = require('./live.store');
 const { runSrBreakout } = require('./sr-breakout');
+// Exit/entry rules come from the SHARED config so Live and Paper cannot drift.
+const { exitOptsFor, DEFAULT_LOTS } = require('./sr-strategy-config');
 const { LiveBroker } = require('./live-broker');
 const { NIFTY_50_INSTRUMENT, BANK_NIFTY_INSTRUMENT, CRUDE_OIL_MINI_INSTRUMENT } = require('./strategy-core.cjs');
 
@@ -19,7 +21,7 @@ const SPEC = {
     bookId: NIFTY_50_INSTRUMENT.id, root: 'NIFTY', step: 50, spotKey: 'NSE:NIFTY 50',
     session: { entryStartHm: '09:45', entryEndHm: '14:30', squareOffHm: '15:15' },
     entryPts: 27, gapLo: 100, gapHi: 175, targetByScore: { 1: 20, 2: 25, 3: 30 },
-    opts: { wallMode: 'intraday', retest: true, timeStopBars: 6, targetByScore: { 1: 20, 2: 20, 3: 20 } },
+    opts: exitOptsFor('nifty'),
   },
   banknifty: {
     key: 'banknifty', name: 'Bank Nifty', token: '260105', unitsPerLot: 35,
@@ -27,7 +29,7 @@ const SPEC = {
     exchange: 'NFO',
     session: { entryStartHm: '09:45', entryEndHm: '14:30', squareOffHm: '15:15' },
     entryPts: 60, gapLo: 275, gapHi: 465, targetByScore: { 1: 40, 2: 50, 3: 60 },
-    opts: { wallMode: 'intraday', timeStopBars: 9, failStop: true, targetByScore: { 1: 20, 2: 20, 3: 20 } },
+    opts: exitOptsFor('banknifty'),
   },
   crude: {
     key: 'crude', name: 'Crude Oil Mini', token: null, unitsPerLot: 10,
@@ -35,7 +37,7 @@ const SPEC = {
     exchange: 'MCX',
     session: { entryStartHm: '09:30', entryEndHm: '20:00', squareOffHm: '23:20' },
     entryPts: 50, gapLo: 78, gapHi: 130, targetByScore: { 1: 20, 2: 25, 3: 30 },
-    opts: {},
+    opts: exitOptsFor('crude'),
   },
 };
 

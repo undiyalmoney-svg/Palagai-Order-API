@@ -76,7 +76,27 @@ function runSrBreakout(bars5, opts) {
   // touches both, we assume the stop filled first (the pessimistic reading — a
   // real SL-M triggers on the touch, and we cannot see intrabar order).
   const stopPts = num(opts.stopPts, 0);
+  // PROFIT LOCK. Once the trade's best move reaches `lockArmPts`, the exit
+  // moves up to `lockAtPts` — so a trade that went green cannot hand it all
+  // back. Both 0 = off. This is NOT a loss stop: it never touches a trade that
+  // has not first earned the arm level, which is why it survives where every
+  // fixed stop failed. (Every losing Nifty trade in the last 5 months went
+  // green first; half reached +10 or more before reversing.)
+  const lockArmPts = num(opts.lockArmPts, 0);
+  const lockAtPts = num(opts.lockAtPts, 0);
+  // GIVE-UP EXIT. If by bar `giveUpBar` the trade has not made at least
+  // `giveUpMinPts` of progress, leave at that bar's close — it is not paying.
+  // Skipped once the profit lock has armed. 0 = off. Tests PROGRESS, not loss.
+  const giveUpBar = num(opts.giveUpBar, 0);
+  const giveUpMinPts = num(opts.giveUpMinPts, 0);
   const retest = !!opts.retest;                   // enter on the pullback to the broken level (NIFTY_RETEST_V1)
+  // ENTRY METER: reject a retest that takes too long to fill. A quick pullback
+  // means the level is still being respected; a slow one means the move has
+  // already stalled. Measured over 2024-01..2026-08: retests filling within
+  // 2 bars average +Rs692/trade, while 4-8 bars average -Rs254 and 8+ average
+  // -Rs391 — i.e. the slow ones are the losing half of the book.
+  // 0 = off (default), so existing callers are unaffected.
+  const maxRetestBars = num(opts.maxRetestBars, 0);
 
   const bars15 = to15(bars5);
   const day5 = new Map();
@@ -151,20 +171,30 @@ function runSrBreakout(bars5, opts) {
       // the retest never comes, no trade is taken.
       const hi = after.findIndex(x => (dir > 0 ? x.low <= level : x.high >= level));
       if (hi < 0 || hi + 1 >= after.length) continue;      // retest never confirmed → skip
+      // Entry meter: the pullback took too long — the setup has gone stale.
+      // Causal: at fill time we know how many bars have elapsed since the break.
+      if (maxRetestBars > 0 && hi + 1 > maxRetestBars) continue;
       entry = level; entryTime = hhmm(after[hi].date); retestTime = entryTime;
       after = after.slice(hi + 1);
     }
     let exit = after[after.length - 1].close, exitTime = hhmm(after[after.length - 1].date), reason = 'CLOSE';
+    let locked = false, bestFav = -Infinity;   // profit-lock / give-up state
     for (let bi = 0; bi < after.length; bi++) {
       const bar = after[bi];
       const fav = dir * ((dir > 0 ? bar.high : bar.low) - entry);
+      const adv = dir * ((dir > 0 ? bar.low : bar.high) - entry);
+      if (fav > bestFav) bestFav = fav;
       // HARD STOP: adverse excursion hit the cut-off → out at the stop price.
       // Deliberately evaluated before the target (see stopPts above).
-      if (stopPts > 0) {
-        const adv = dir * ((dir > 0 ? bar.low : bar.high) - entry);
-        if (adv <= -stopPts) { exit = entry - dir * stopPts; exitTime = hhmm(bar.date); reason = 'STOP'; break; }
-      }
+      if (stopPts > 0 && adv <= -stopPts) { exit = entry - dir * stopPts; exitTime = hhmm(bar.date); reason = 'STOP'; break; }
+      // PROFIT LOCK: armed earlier, price has fallen back to the lock level.
+      if (locked && adv <= lockAtPts) { exit = entry + dir * lockAtPts; exitTime = hhmm(bar.date); reason = 'LOCK'; break; }
       if (target > 0 && fav >= target) { exit = entry + dir * target; exitTime = hhmm(bar.date); reason = 'TARGET'; break; }
+      if (lockArmPts > 0 && fav >= lockArmPts) locked = true;
+      // GIVE-UP: no meaningful progress by the checkpoint bar → stop waiting.
+      if (giveUpBar > 0 && bi === giveUpBar - 1 && !locked && bestFav < giveUpMinPts) {
+        exit = bar.close; exitTime = hhmm(bar.date); reason = 'GIVEUP'; break;
+      }
       // FAIL-STOP: the broken level did not hold (price closed back through it) → cut it.
       if (failStop && (dir > 0 ? bar.close < level : bar.close > level)) { exit = bar.close; exitTime = hhmm(bar.date); reason = 'FAIL'; break; }
       // TIME EXIT: not paying by the time limit → get out at market (this bar's close).

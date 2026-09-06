@@ -7,6 +7,8 @@
  */
 const https = require('https');
 const market = require('./kite-market');
+// Exit/entry rules come from the SHARED config so Paper and Live cannot drift.
+const { exitOptsFor, CUT_LOSS_RS, DEFAULT_LOTS } = require('./sr-strategy-config');
 const store = require('./live.store');
 const { runSrBreakout } = require('./sr-breakout');
 const { observe, history: obsHistory, confirmLiveEntry, confirmLiveExit } = require('./sr-observe');
@@ -21,18 +23,17 @@ function userId(req) { return req.user?.id || 'anonymous'; }
 // Mini is an MCX monthly future resolved to its front month at request time.
 const INSTRUMENTS = {
   nifty: {
-    key: 'nifty', name: 'Nifty 50', token: '256265', unitsPerLot: 75, defaultLots: 1,
+    key: 'nifty', name: 'Nifty 50', token: '256265', unitsPerLot: 75, 
     // HARD LOSS CUT-OFF per lot. Wide on purpose: it caps the worst trade at
     // -Rs5,000 (was -Rs11,936) and still IMPROVES net on both windows measured
     // together (Rs815,673 vs Rs801,285), with PF 2.53 -> 2.72. Tighter caps cost
     // real money (Rs4,000 -> Rs788k combined, Rs3,000 -> worse still), so do not
     // shrink this without re-running the train/test split.
-    cutLossRs: 5000,
     session: { entryStartHm: '09:45', entryEndHm: '14:30', squareOffHm: '15:15' },
     entryPts: 27, gapLo: 100, gapHi: 175, targetByScore: { 1: 20, 2: 25, 3: 30 },
   },
   banknifty: {
-    key: 'banknifty', name: 'Bank Nifty', token: '260105', unitsPerLot: 35, defaultLots: 1,
+    key: 'banknifty', name: 'Bank Nifty', token: '260105', unitsPerLot: 35, 
     // NO cutLossRs ON PURPOSE — measured, not assumed. On the 4-bar exit over the
     // walk-forward test window a cut-off destroys this book:
     //   none    net +Rs213,758  PF 3.43  worst -Rs4,538
@@ -60,10 +61,8 @@ const INSTRUMENTS = {
     // about Rs5,770 over that window — set deliberately as a starting size, not
     // because it is profitable. Raising it also scales the worst trade linearly
     // (-Rs2,500/lot), so 10 lots means -Rs25,000 on a single trade.
-    defaultLots: 5,
     // Cut-off is ~neutral here (-Rs23,650 vs -Rs23,890) and caps the worst trade.
     // Crude is net NEGATIVE either way; this bounds it, it does not fix it.
-    cutLossRs: 2500,
     session: { entryStartHm: '09:30', entryEndHm: '20:00', squareOffHm: '23:20' },
     // Crude had NO time exit, so a losing trade rode to the 23:20 square-off —
     // average hold 179 min, worst trade -Rs5,300. 18 bars (90 min) cuts the
@@ -96,9 +95,43 @@ const STRATEGIES = {
     // logic is untouched. The loss cap (cutLossRs 5000 on the instrument spec)
     // is the whole change. Shortening the hold to 4 bars was tried and REJECTED:
     // it cost Rs17,539 of net for a smaller tail than the cap already gives.
-    opts: { wallMode: 'intraday', retest: true, timeStopBars: 6, targetByScore: { 1: 20, 2: 20, 3: 20 } },
+    // TWO PROFIT-SIDE EXIT RULES (added after auditing 5 months of Nifty losses).
+    // The audit found the real cause: EVERY losing trade went green first — none
+    // went straight against the entry — and half reached +10 pts or more before
+    // reversing. Two of the six biggest losses hit +16.9 and +17.1 (target is
+    // +20) and still finished at the -Rs5,000 cap. The book had no way to
+    // protect an open profit, so a trade at +17 and fading was treated exactly
+    // like one at -17. That is also why every fixed loss stop failed here: a
+    // stop asks "is this losing?", which is the wrong question when they all
+    // start out winning.
+    //   lockArmPts 12 / lockAtPts 5 — once best move reaches +12, exit at +5.
+    //   giveUpBar 2 / giveUpMinPts 8 — if 2 bars in the trade has not made +8
+    //   of progress, leave; it is not paying. Skipped once the lock has armed.
+    // Walk-forward (train 2024-01..2025-07, test 2025-07..2026-09 never used to
+    // choose) on the TEST window:
+    //   before  net Rs374,084  total losses -Rs266,679  PF 2.72  win 76%
+    //   after   net Rs363,008  total losses -Rs157,068  PF 3.85  win 83%
+    // Losses down 41% for 3% less net. This trades a little profit for a much
+    // smaller loss book — it is not a profit optimisation, and the numbers
+    // above should be re-measured if any of the four values change.
+    // ENTRY METER (maxRetestBars 2): refuse a retest that takes more than 2
+    // bars (10 min) to fill. Measured over 2024-01..2026-08, by fill delay:
+    //   1-2 bars  1269 trades  89% win  +Rs692/trade
+    //   2-4 bars    99 trades  71% win  +Rs263/trade
+    //   4-8 bars   114 trades  64% win  -Rs254/trade
+    //   8+ bars    130 trades  62% win  -Rs391/trade
+    // A quick pullback means the level is still being respected; a slow one
+    // means the move already stalled. Causal — at fill time we know how long
+    // it took. Refusing also frees the day's trade slot for a better setup,
+    // which is why the gain exceeds simply deleting those trades.
+    // Walk-forward, train-optimal at 2, scored on the untouched TEST window:
+    //   before  708 trades  83% win  net Rs363,008  losses -Rs157,068  PF 3.85
+    //   after   629 trades  88% win  net Rs423,416  losses  -Rs78,451  PF 7.36
+    // +17% net AND half the losses. The effect is smooth across 1-6 bars on
+    // both windows (not a fitted spike), so the exact value is not critical.
+    opts: exitOptsFor('nifty'),        // SHARED — see sr-strategy-config.js
     // OOS = walk-forward TEST window only. Re-measure whenever opts change.
-    oos: { causal: true, pf: 2.72, rsDay: 1336, trades: 708, net: 374080, window: '2025-07..2026-09 (walk-forward test)' },
+    oos: { causal: true, pf: 7.36, rsDay: 1580, trades: 629, net: 423416, window: '2025-07..2026-09 (walk-forward test)' },
   },
   bank_intraday_v1: {
     label: 'Bank Intraday V1 (candidate)', status: 'eligible', instrument: 'banknifty',
@@ -119,7 +152,7 @@ const STRATEGIES = {
     // winners. The time exit gets the same tail without that cost.
     // Do not re-enable it, and do not add a per-trade rupee stop, without
     // re-running the train/test split.
-    opts: { wallMode: 'intraday', timeStopBars: 6, targetByScore: { 1: 20, 2: 20, 3: 20 } },
+    opts: exitOptsFor('banknifty'),    // SHARED — see sr-strategy-config.js
     oos: { causal: true, pf: 3.01, rsDay: 771, trades: 710, net: 209770, window: '2025-07..2026-09 (walk-forward test)' },
   },
 };
@@ -211,7 +244,7 @@ async function srBreakout(req, res) {
       // default. Books have very different tick values (Rs75 / Rs35 / Rs10 per
       // point), so one shared size is rarely right for all three.
       const lots = Math.max(1, numOr(body.lotsByInstrument && body.lotsByInstrument[key],
-        numOr(body.lots, spec.defaultLots || 1)));
+        numOr(body.lots, DEFAULT_LOTS[key] || 1)));
       const unitsPerLot = spec.unitsPerLot;
       const perPoint = unitsPerLot * lots;                // ₹ per point
       // Daily risk stops arrive in ₹ from the UI; convert to points for the engine.
@@ -227,10 +260,10 @@ async function srBreakout(req, res) {
       const { trades, summary } = runSrBreakout(candles, {
         entryPts, trendBars: 20, gapLo: spec.gapLo, gapHi: spec.gapHi, targetByScore: spec.targetByScore,
         maxTradesPerDay, dayLossStop, dayProfitTarget, reportFromDate: fromDate, ...spec.session,
-        ...(spec.timeStopBars ? { timeStopBars: spec.timeStopBars } : {}),  // per-instrument default
-        // Hard loss cut-off. cutLossRs is PER LOT, so the stop distance in points
-        // stays fixed as lots scale (rupee risk scales with size, as it should).
-        ...(spec.cutLossRs ? { stopPts: spec.cutLossRs / unitsPerLot } : {}),
+        // SHARED exit/entry rules for this instrument (sr-strategy-config.js).
+        // Applied before strat.opts so an explicit strategy can still override
+        // for research, but Paper and Live share the same defaults.
+        ...exitOptsFor(key),
         ...strat.opts,                                 // version overrides (BASELINE = {})
       });
       // ₹ = points × unitsPerLot × lots (futures-equivalent; option premium differs).
