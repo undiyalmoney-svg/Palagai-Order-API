@@ -1,6 +1,6 @@
 'use strict';
 const assert = require('assert');
-const { decideLiveAction, signalId, hmToMin } = require('./sr-live');
+const { decideLiveAction, signalId, hmToMin, SPEC } = require('./sr-live');
 
 const trade = {
   date: '2026-09-05', side: 'BUY', option: 'CE',
@@ -44,5 +44,16 @@ assert.strictEqual(decideLiveAction({
 assert.strictEqual(decideLiveAction({
   trade, nowHm: '15:16', alreadyOpen: false, squareOffHm: '15:15',
 }), 'skip');
+
+assert.ok(SPEC.crude, 'crude book registered');
+assert.strictEqual(SPEC.crude.exchange, 'MCX');
+assert.strictEqual(decideLiveAction({
+  trade: { ...trade, entryTime: '19:50', exitTime: '20:30', exitReason: 'CLOSE' },
+  nowHm: '19:55', alreadyOpen: false, squareOffHm: SPEC.crude.session.squareOffHm,
+}), 'enter', 'crude evening window still live');
+assert.strictEqual(decideLiveAction({
+  trade: { ...trade, entryTime: '19:50', exitTime: '20:30', exitReason: 'CLOSE' },
+  nowHm: '23:20', alreadyOpen: true, squareOffHm: SPEC.crude.session.squareOffHm,
+}), 'exit', 'crude square-off');
 
 console.log('sr-live.selftest: ok');

@@ -9,6 +9,7 @@ const {
   optionPeakTrailSettingsFromExtras,
   NIFTY_50_INSTRUMENT,
   BANK_NIFTY_INSTRUMENT,
+  CRUDE_OIL_MINI_INSTRUMENT,
 } = require('./strategy-core.cjs');
 const { LIVE_GREEN_DNA, liveGreenTrapExtras } = require('./dna-live-green');
 const { evaluateChargeEntryGate } = require('./charge-entry-gate');
@@ -63,6 +64,7 @@ function instrumentIdForSymbol(sym) {
   // BANKNIFTY must be tested first — plain startsWith('NIFTY') would miss it,
   // and mapping a Bank leg to the Nifty book breaks reconcile/exit.
   if (s.startsWith('BANKNIFTY')) return BANK_NIFTY_INSTRUMENT.id;
+  if (s.startsWith('CRUDEOIL')) return CRUDE_OIL_MINI_INSTRUMENT.id;
   if (s.startsWith('FINNIFTY') || s.startsWith('MIDCPNIFTY') || s.startsWith('NIFTYNXT')) {
     return null;
   }
@@ -413,7 +415,8 @@ class LiveBroker {
     // Kite MCX lot_size is 1 (1 qty = 1 lot). Legacy crudeMiniLotSize forced 10 and
     // bought 10 lots per Autobot lot — clamp CRUDEOILM to trading qty 1.
     let lotSize = Math.max(1, Number(option.lotSize) || 1);
-    if (exchange === 'MCX' && /CRUDEOILM/i.test(String(sym)) && lotSize > 1) {
+    const isCrudeOpt = /(CE|PE)$/i.test(String(sym));
+    if (exchange === 'MCX' && /CRUDEOILM/i.test(String(sym)) && lotSize > 1 && !isCrudeOpt) {
       lotSize = 1;
     }
     const lotsMult = this.lotsFor(instrumentId);

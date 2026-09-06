@@ -8,7 +8,7 @@ const market = require('./kite-market');
 const store = require('./live.store');
 const { runSrBreakout } = require('./sr-breakout');
 const { LiveBroker } = require('./live-broker');
-const { NIFTY_50_INSTRUMENT, BANK_NIFTY_INSTRUMENT } = require('./strategy-core.cjs');
+const { NIFTY_50_INSTRUMENT, BANK_NIFTY_INSTRUMENT, CRUDE_OIL_MINI_INSTRUMENT } = require('./strategy-core.cjs');
 
 const TICK_MS = Number(process.env.SR_LIVE_INTERVAL_MS || 60_000);
 const FRESH_MINUTES = 20;
@@ -24,9 +24,18 @@ const SPEC = {
   banknifty: {
     key: 'banknifty', name: 'Bank Nifty', token: '260105', unitsPerLot: 35,
     bookId: BANK_NIFTY_INSTRUMENT.id, root: 'BANKNIFTY', step: 100, spotKey: 'NSE:NIFTY BANK',
+    exchange: 'NFO',
     session: { entryStartHm: '09:45', entryEndHm: '14:30', squareOffHm: '15:15' },
     entryPts: 60, gapLo: 275, gapHi: 465, targetByScore: { 1: 40, 2: 50, 3: 60 },
     opts: { wallMode: 'intraday', timeStopBars: 9, targetByScore: { 1: 20, 2: 20, 3: 20 } },
+  },
+  crude: {
+    key: 'crude', name: 'Crude Oil Mini', token: null, unitsPerLot: 10,
+    bookId: CRUDE_OIL_MINI_INSTRUMENT.id, root: 'CRUDEOILM', step: 50, spotKey: null,
+    exchange: 'MCX',
+    session: { entryStartHm: '09:30', entryEndHm: '20:00', squareOffHm: '23:20' },
+    entryPts: 50, gapLo: 78, gapHi: 130, targetByScore: { 1: 20, 2: 25, 3: 30 },
+    opts: {},
   },
 };
 
@@ -152,9 +161,9 @@ async function start(userId, body = {}) {
   }
   const keys = Array.isArray(body.instruments) && body.instruments.length
     ? body.instruments.filter((k) => SPEC[k])
-    : ['nifty', 'banknifty'];
+    : ['nifty', 'banknifty', 'crude'];
   if (!keys.length) {
-    const err = new Error('Select Nifty and/or Bank Nifty. Crude Live is not wired (index options only).');
+    const err = new Error('Select Nifty, Bank Nifty, and/or Crude Oil Mini.');
     err.status = 400;
     throw err;
   }
@@ -218,10 +227,96 @@ function startTick(session) {
   session.tickTimer = setInterval(run, TICK_MS);
 }
 
-async function pickOption(authorization, spec, trade) {
+function parseMcxCsv(csv) {
+  const lines = String(csv || '').trim().split('\n');
+  const rows = [];
+  for (let i = 1; i < lines.length; i++) {
+    const p = lines[i].split(',');
+    const token = String(p[0] || '').replace(/"/g, '');
+    const sym = String(p[2] || '').replace(/"/g, '');
+    const name = String(p[3] || '').replace(/"/g, '');
+    const expiry = String(p[5] || '').replace(/"/g, '');
+    const strike = Number(p[6]);
+    const lotSize = Number(p[8]) || 1;
+    const type = String(p[9] || '').replace(/"/g, '');
+    if (!/^CRUDEOILM/.test(sym)) continue;
+    rows.push({ token, sym, name, expiry, strike, lotSize, type });
+  }
+  return rows;
+}
+
+async function resolveCrudeFuture(authorization, session, today) {
+  const cached = session.crudeFuture;
+  if (cached && cached.date === today && cached.token) return cached;
+  const csv = await market.fetchInstrumentsCsv(authorization, 'MCX');
+  const futs = parseMcxCsv(csv).filter((r) => r.type === 'FUT' && r.expiry > today);
+  futs.sort((a, b) => String(a.expiry).localeCompare(String(b.expiry)));
+  if (!futs.length) throw new Error('No live CRUDEOILM future found');
+  const fut = { date: today, token: futs[0].token, symbol: futs[0].sym, expiry: futs[0].expiry, csv };
+  session.crudeFuture = fut;
+  return fut;
+}
+
+function crudeStrikeStep(optRows, atm) {
+  const strikes = [...new Set(optRows.map((r) => r.strike).filter((s) => s > 0))].sort((a, b) => a - b);
+  let best = 50;
+  let bestDist = Infinity;
+  for (let i = 1; i < strikes.length; i++) {
+    const d = strikes[i] - strikes[i - 1];
+    if (d <= 0) continue;
+    const mid = (strikes[i] + strikes[i - 1]) / 2;
+    const dist = Math.abs(mid - atm);
+    if (dist < bestDist) { bestDist = dist; best = d; }
+  }
+  return best || 50;
+}
+
+async function pickOption(authorization, spec, trade, session) {
   const dir = trade.side === 'BUY' ? 1 : -1;
   const type = dir > 0 ? 'CE' : 'PE';
   const today = trade.date || todayIso();
+  const spot = trade.entryPrice;
+
+  if (spec.exchange === 'MCX') {
+    const fut = await resolveCrudeFuture(authorization, session, today);
+    const optRows = parseMcxCsv(fut.csv || await market.fetchInstrumentsCsv(authorization, 'MCX'))
+      .filter((r) => r.type === type && r.expiry === fut.expiry && Number(r.token) > 0);
+    const step = crudeStrikeStep(optRows, spot) || spec.step;
+    const atm = Math.round(spot / step) * step;
+    const candStrikes = dir > 0 ? [atm - step, atm, atm + step] : [atm + step, atm, atm - step];
+    const candMeta = [];
+    for (const strike of candStrikes) {
+      const found = optRows.find((r) => r.strike === strike);
+      if (found) candMeta.push(found);
+    }
+    if (!candMeta.length) return null;
+    const keys = candMeta.map((m) => 'MCX:' + m.sym);
+    if (fut.symbol) keys.push('MCX:' + fut.symbol);
+    const qmap = await market.fetchQuotes(authorization, keys);
+    const cands = candMeta.map((m) => {
+      const q = qmap['MCX:' + m.sym];
+      const ltp = q?.last_price ?? null;
+      const bid = q?.depth?.buy?.[0]?.price ?? null;
+      const ask = q?.depth?.sell?.[0]?.price ?? null;
+      const spread = bid != null && ask != null ? ask - bid : 0;
+      const spreadPct = ltp ? spread / ltp : 1;
+      return {
+        ...m, ltp, ask,
+        rank: (q?.oi || 0) / 1e6 - spreadPct * 20 - Math.abs(m.strike - atm) / step * 0.5,
+      };
+    }).filter((c) => c.ltp);
+    if (!cands.length) return null;
+    cands.sort((a, b) => b.rank - a.rank);
+    const pick = cands[0];
+    return {
+      tradingSymbol: pick.sym,
+      instrumentToken: Number(pick.token) || 0,
+      exchange: 'MCX',
+      lotSize: Math.max(1, Number(pick.lotSize) || 1),
+      optionEntryPremium: pick.ask || pick.ltp,
+    };
+  }
+
   const inst = await market.fetchInstruments(authorization);
   const rows = inst.filter((r) =>
     String(r.name || '').toUpperCase() === spec.root &&
@@ -232,7 +327,6 @@ async function pickOption(authorization, spec, trade) {
   const expiries = [...new Set(rows.map((r) => r.expiry).filter(Boolean))].sort();
   const expiry = expiries.find((e) => e > today) || expiries.find((e) => e >= today) || null;
   if (!expiry) return null;
-  const spot = trade.entryPrice;
   const atm = Math.round(spot / spec.step) * spec.step;
   const candStrikes = dir > 0 ? [atm - spec.step, atm, atm + spec.step] : [atm + spec.step, atm, atm - spec.step];
   const candMeta = [];
@@ -286,7 +380,13 @@ async function onTick(session) {
       if (!spec) continue;
       try {
         const warmupFrom = shiftDays(today, -12);
-        const candles = await market.fetchHistorical5m(authorization, spec.token, warmupFrom, today);
+        let token = spec.token;
+        if (key === 'crude') {
+          const fut = await resolveCrudeFuture(authorization, session, today);
+          token = fut.token;
+        }
+        if (!token) throw new Error('missing instrument token');
+        const candles = await market.fetchHistorical5m(authorization, token, warmupFrom, today);
         const entryPts = cfg.entryPts != null ? cfg.entryPts : spec.entryPts;
         const perPoint = spec.unitsPerLot * lots;
         const dayLossStop = cfg.dayLossStopRs > 0 ? cfg.dayLossStopRs / perPoint : 0;
@@ -308,7 +408,7 @@ async function onTick(session) {
             ? {
               tradingSymbol: current.tradingSymbol,
               instrumentToken: current.instrumentToken,
-              exchange: current.exchange || 'NFO',
+              exchange: current.exchange || spec.exchange || 'NFO',
               lotSize: spec.unitsPerLot,
             }
             : null;
@@ -349,7 +449,7 @@ async function onTick(session) {
             });
             if (act !== 'enter') continue;
             pushEvent(session, 'SIGNAL', `${t.entryTime} ${spec.name} ${t.option} — placing live BUY`);
-            const option = await pickOption(authorization, spec, t);
+            const option = await pickOption(authorization, spec, t, session);
             if (!option || !(option.instrumentToken > 0)) {
               pushEvent(session, 'SKIP', `${spec.name}: no option contract to buy`);
               session.entered.add(id);

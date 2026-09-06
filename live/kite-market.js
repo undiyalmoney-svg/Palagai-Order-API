@@ -207,8 +207,27 @@ async function fetchQuotes(authorization, keys) {
   return res.data?.data || {};
 }
 
+/** Raw instruments dump for one exchange (e.g. MCX). IPv4 + retry. */
+async function fetchInstrumentsCsv(authorization, exchange) {
+  const path = exchange ? `/instruments/${exchange}` : '/instruments';
+  const res = await getWithRetry(
+    path,
+    {
+      headers: headers(authorization),
+      responseType: 'text',
+      transformResponse: [(d) => d],
+    },
+    'instruments-' + (exchange || 'all'),
+  );
+  if (res.status >= 400) {
+    throw new Error(`instruments ${exchange || ''} HTTP ${res.status}`);
+  }
+  return String(res.data || '');
+}
+
 module.exports = {
   fetchInstruments,
+  fetchInstrumentsCsv,
   fetchHistorical5m,
   fetchHistoricalCandles,
   fetchQuotes,
