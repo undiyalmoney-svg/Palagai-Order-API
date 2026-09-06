@@ -29,7 +29,7 @@ const DEFAULT_LOTS = Object.freeze({ nifty: 1, banknifty: 1, crude: 5 });
  * except Crude, which has only 89 days and is marked accordingly.
  */
 const EXIT_RULES = Object.freeze({
-  // Nifty — test window: net Rs423,416, losses -Rs78,451, PF 7.36, 88% win.
+  // Nifty — test window: net Rs428,791, losses -Rs73,450, PF 7.87, 88% win.
   //   maxRetestBars 2  entry meter: a retest slower than 2 bars is a stale
   //                    setup (1-2 bars average +Rs692/trade, 8+ bars -Rs391).
   //   lockArmPts/AtPts once +12 is reached, exit at +5 — every losing trade

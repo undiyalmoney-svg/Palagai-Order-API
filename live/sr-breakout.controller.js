@@ -126,12 +126,12 @@ const STRATEGIES = {
     // which is why the gain exceeds simply deleting those trades.
     // Walk-forward, train-optimal at 2, scored on the untouched TEST window:
     //   before  708 trades  83% win  net Rs363,008  losses -Rs157,068  PF 3.85
-    //   after   629 trades  88% win  net Rs423,416  losses  -Rs78,451  PF 7.36
+    //   after   629 trades  88% win  net Rs428,791  losses  -Rs73,450  PF 7.87
     // +17% net AND half the losses. The effect is smooth across 1-6 bars on
     // both windows (not a fitted spike), so the exact value is not critical.
     opts: exitOptsFor('nifty'),        // SHARED — see sr-strategy-config.js
     // OOS = walk-forward TEST window only. Re-measure whenever opts change.
-    oos: { causal: true, pf: 7.36, rsDay: 1580, trades: 629, net: 423416, window: '2025-07..2026-09 (walk-forward test)' },
+    oos: { causal: true, pf: 7.87, rsDay: 1600, trades: 629, net: 428791, window: '2025-07..2026-09 (walk-forward test)' },
   },
   bank_intraday_v1: {
     label: 'Bank Intraday V1 (candidate)', status: 'eligible', instrument: 'banknifty',

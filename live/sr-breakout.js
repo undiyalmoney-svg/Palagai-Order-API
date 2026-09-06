@@ -184,11 +184,14 @@ function runSrBreakout(bars5, opts) {
       const fav = dir * ((dir > 0 ? bar.high : bar.low) - entry);
       const adv = dir * ((dir > 0 ? bar.low : bar.high) - entry);
       if (fav > bestFav) bestFav = fav;
+      // PROFIT LOCK first. Once armed, the lock level sits ABOVE entry, so it
+      // always dominates the hard stop below — operationally the stop has been
+      // moved up to the lock. Checking the stop first would let an armed trade
+      // take the full loss on a wide bar, which is the bug this ordering fixes.
+      if (locked && adv <= lockAtPts) { exit = entry + dir * lockAtPts; exitTime = hhmm(bar.date); reason = 'LOCK'; break; }
       // HARD STOP: adverse excursion hit the cut-off → out at the stop price.
       // Deliberately evaluated before the target (see stopPts above).
       if (stopPts > 0 && adv <= -stopPts) { exit = entry - dir * stopPts; exitTime = hhmm(bar.date); reason = 'STOP'; break; }
-      // PROFIT LOCK: armed earlier, price has fallen back to the lock level.
-      if (locked && adv <= lockAtPts) { exit = entry + dir * lockAtPts; exitTime = hhmm(bar.date); reason = 'LOCK'; break; }
       if (target > 0 && fav >= target) { exit = entry + dir * target; exitTime = hhmm(bar.date); reason = 'TARGET'; break; }
       if (lockArmPts > 0 && fav >= lockArmPts) locked = true;
       // GIVE-UP: no meaningful progress by the checkpoint bar → stop waiting.
