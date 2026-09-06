@@ -6,7 +6,15 @@ const { exitOptsFor } = require('./sr-strategy-config');
 assert.deepStrictEqual(SPEC.nifty.opts, exitOptsFor('nifty'), 'Live Nifty opts must match Paper shared config');
 assert.deepStrictEqual(SPEC.banknifty.opts, exitOptsFor('banknifty'));
 assert.deepStrictEqual(SPEC.crude.opts, exitOptsFor('crude'));
-assert.ok(SPEC.nifty.opts.lockArmPts === 12 && SPEC.nifty.opts.maxRetestBars === 2);
+// Assert the RULES are wired, not their tuned values — the three deepStrictEqual
+// checks above already guarantee Live matches Paper, so pinning a literal here
+// only breaks the test whenever a level is retuned (it did, when the lock arm
+// moved 12 -> 8). Check shape and coherence instead.
+const n = SPEC.nifty.opts;
+assert.ok(n.maxRetestBars > 0, 'Nifty must have the entry meter');
+assert.ok(n.lockArmPts > 0 && n.lockAtPts > 0, 'Nifty must have the profit lock');
+assert.ok(n.lockArmPts > n.lockAtPts, 'lock must arm above the level it exits at');
+assert.ok(n.giveUpBar > 0 && n.giveUpMinPts > 0, 'Nifty must have the give-up rule');
 assert.ok(SPEC.nifty.opts.stopPts > 0, 'Nifty Paper/Live share the Rs5000/lot cut-off in points');
 
 const trade = {
