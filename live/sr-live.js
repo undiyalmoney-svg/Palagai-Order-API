@@ -19,7 +19,7 @@ const SPEC = {
     bookId: NIFTY_50_INSTRUMENT.id, root: 'NIFTY', step: 50, spotKey: 'NSE:NIFTY 50',
     session: { entryStartHm: '09:45', entryEndHm: '14:30', squareOffHm: '15:15' },
     entryPts: 27, gapLo: 100, gapHi: 175, targetByScore: { 1: 20, 2: 25, 3: 30 },
-    opts: { wallMode: 'intraday', retest: true, timeStopBars: 6, maxLossPts: 27, targetByScore: { 1: 20, 2: 20, 3: 20 } },
+    opts: { wallMode: 'intraday', retest: true, timeStopBars: 6, targetByScore: { 1: 20, 2: 20, 3: 20 } },
   },
   banknifty: {
     key: 'banknifty', name: 'Bank Nifty', token: '260105', unitsPerLot: 35,
@@ -27,7 +27,7 @@ const SPEC = {
     exchange: 'NFO',
     session: { entryStartHm: '09:45', entryEndHm: '14:30', squareOffHm: '15:15' },
     entryPts: 60, gapLo: 275, gapHi: 465, targetByScore: { 1: 40, 2: 50, 3: 60 },
-    opts: { wallMode: 'intraday', timeStopBars: 9, maxLossPts: 40, targetByScore: { 1: 20, 2: 20, 3: 20 } },
+    opts: { wallMode: 'intraday', timeStopBars: 9, targetByScore: { 1: 20, 2: 20, 3: 20 } },
   },
   crude: {
     key: 'crude', name: 'Crude Oil Mini', token: null, unitsPerLot: 10,
@@ -35,7 +35,7 @@ const SPEC = {
     exchange: 'MCX',
     session: { entryStartHm: '09:30', entryEndHm: '20:00', squareOffHm: '23:20' },
     entryPts: 50, gapLo: 78, gapHi: 130, targetByScore: { 1: 20, 2: 25, 3: 30 },
-    opts: { maxLossPts: 50 },
+    opts: {},
   },
 };
 
@@ -62,12 +62,6 @@ function hmToMin(hm) {
 function signalId(key, trade) {
   return `${key}|${trade.date}|${trade.entryTime}`;
 }
-function riskPts(trade) {
-  const cap = Number(trade?.maxLossPts);
-  if (Number.isFinite(cap) && cap > 0) return cap;
-  return Number(trade?.target) || 20;
-}
-
 
 /**
  * Decide what Live should do for one engine trade.
@@ -80,7 +74,7 @@ function decideLiveAction({ trade, nowHm: hm, alreadyOpen, squareOffHm, freshMin
   const entry = hmToMin(trade.entryTime);
   const exit = hmToMin(trade.exitTime);
   const so = hmToMin(squareOffHm);
-  const hardExit = ['TARGET', 'TIME', 'FAIL', 'STOP'].includes(trade.exitReason);
+  const hardExit = ['TARGET', 'TIME', 'FAIL'].includes(trade.exitReason);
   const pastExit = hardExit && exit <= now;
   const sessionOver = now >= so;
   if (alreadyOpen) {
@@ -426,7 +420,7 @@ async function onTick(session) {
               open = {
                 option: opt,
                 indexEntry: openTrade.entryPrice,
-                indexStop: openTrade.side === 'BUY' ? openTrade.entryPrice - riskPts(openTrade) : openTrade.entryPrice + riskPts(openTrade),
+                indexStop: openTrade.side === 'BUY' ? openTrade.entryPrice - openTrade.target : openTrade.entryPrice + openTrade.target,
                 indexTarget: openTrade.side === 'BUY' ? openTrade.entryPrice + openTrade.target : openTrade.entryPrice - openTrade.target,
                 entryTime: openTrade.entryTime,
                 skipChargeGate: true,
@@ -467,7 +461,7 @@ async function onTick(session) {
               option,
               optionEntryPremium: option.optionEntryPremium,
               indexEntry: t.entryPrice,
-              indexStop: t.side === 'BUY' ? t.entryPrice - riskPts(t) : t.entryPrice + riskPts(t),
+              indexStop: t.side === 'BUY' ? t.entryPrice - (t.target || 20) : t.entryPrice + (t.target || 20),
               indexTarget: t.side === 'BUY' ? t.entryPrice + (t.target || 20) : t.entryPrice - (t.target || 20),
               entryTime: t.entryTime,
               skipChargeGate: true,

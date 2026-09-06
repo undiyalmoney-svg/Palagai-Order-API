@@ -53,17 +53,17 @@ const INSTRUMENTS = {
 const GATE = { minOosPf: 1.3, minOosTrades: 200 };
 const STRATEGIES = {
   baseline: {
-    label: 'Baseline (production)', status: 'production', instrument: 'nifty+bank', opts: { maxLossPts: 50 },
+    label: 'Baseline (production)', status: 'production', instrument: 'nifty+bank', opts: {},
     oos: { note: 'incumbent control; OOS PF ~1.1 (marginal) — kept as default, not gated' },
   },
   nifty_retest_v1: {
     label: 'Nifty Retest V1 (candidate)', status: 'eligible', instrument: 'nifty',
-    opts: { wallMode: 'intraday', retest: true, timeStopBars: 6, maxLossPts: 27, targetByScore: { 1: 20, 2: 20, 3: 20 } },
+    opts: { wallMode: 'intraday', retest: true, timeStopBars: 6, targetByScore: { 1: 20, 2: 20, 3: 20 } },
     oos: { causal: true, pf: 2.08, rsDay: 1264, trades: 1612, net: 801285, window: '2024-01..2026' },
   },
   bank_intraday_v1: {
     label: 'Bank Intraday V1 (candidate)', status: 'eligible', instrument: 'banknifty',
-    opts: { wallMode: 'intraday', timeStopBars: 9, maxLossPts: 40, targetByScore: { 1: 20, 2: 20, 3: 20 } },
+    opts: { wallMode: 'intraday', timeStopBars: 9, targetByScore: { 1: 20, 2: 20, 3: 20 } },
     oos: { causal: true, pf: 1.73, rsDay: 441, trades: 1278, net: 279330, window: '2024-01..2026' },
   },
 };
@@ -174,7 +174,7 @@ async function srBreakout(req, res) {
       results.push({
         key, name: spec.name, contract, token, candles: candles.length,
         strategy: strat.label, strategyStatus: strat.status,   // auto-routed per instrument
-        params: { entryPts, gapLo: spec.gapLo, gapHi: spec.gapHi, targetByScore: spec.targetByScore, lots, unitsPerLot, maxTradesPerDay, maxLossPts: numOr(strat.opts.maxLossPts, 0), dayLossStopRs: numOr(body.dayLossStopRs, 0), dayProfitTargetRs: numOr(body.dayProfitTargetRs, 0) },
+        params: { entryPts, gapLo: spec.gapLo, gapHi: spec.gapHi, targetByScore: spec.targetByScore, lots, unitsPerLot, maxTradesPerDay, dayLossStopRs: numOr(body.dayLossStopRs, 0), dayProfitTargetRs: numOr(body.dayProfitTargetRs, 0) },
         summary: {
           ...summary,
           totalProfitRupees: rupees(summary.profitPoints),
