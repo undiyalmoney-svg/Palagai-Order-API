@@ -167,10 +167,28 @@ function numOr(v, d) {
   return Number.isFinite(n) && v !== '' && v != null ? n : d;
 }
 
+/** Update max-trades / day rupee brakes on a running session. Does not flatten. */
+function applyDeskLimits(config, body = {}) {
+  const next = { ...(config || {}) };
+  next.maxTradesPerDay = Math.max(1, numOr(body.maxTradesPerDay, next.maxTradesPerDay || 3));
+  if (body.dayLossStopRs != null && body.dayLossStopRs !== '') {
+    next.dayLossStopRs = numOr(body.dayLossStopRs, 0);
+  }
+  if (body.dayProfitTargetRs != null && body.dayProfitTargetRs !== '') {
+    next.dayProfitTargetRs = numOr(body.dayProfitTargetRs, 0);
+  }
+  return next;
+}
+
 async function start(userId, body = {}) {
   const session = getSession(userId);
   if (session.status === 'running') {
-    session.message = 'Already running. Stop first to change lots/instruments.';
+    session.config = applyDeskLimits(session.config, body);
+    session.message =
+      `S/R Live on · max ${session.config.maxTradesPerDay}/day · ` +
+      `day SL ₹${session.config.dayLossStopRs} · day PT ₹${session.config.dayProfitTargetRs} ` +
+      `(open legs kept)`;
+    pushEvent(session, 'CONFIG', session.message);
     return statusPayload(session);
   }
   const auto = store.statusFor(userId);
@@ -517,5 +535,5 @@ function status(userId) {
 }
 
 module.exports = {
-  start, stop, status, decideLiveAction, signalId, hmToMin, SPEC, FRESH_MINUTES, _sessions: sessions,
+  start, stop, status, decideLiveAction, applyDeskLimits, signalId, hmToMin, SPEC, FRESH_MINUTES, _sessions: sessions,
 };

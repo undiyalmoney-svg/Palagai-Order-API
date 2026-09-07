@@ -1,6 +1,6 @@
 'use strict';
 const assert = require('assert');
-const { decideLiveAction, signalId, hmToMin, SPEC } = require('./sr-live');
+const { decideLiveAction, signalId, hmToMin, SPEC, applyDeskLimits } = require('./sr-live');
 const { exitOptsFor } = require('./sr-strategy-config');
 
 assert.deepStrictEqual(SPEC.nifty.opts, exitOptsFor('nifty'), 'Live Nifty opts must match Paper shared config');
@@ -96,5 +96,13 @@ assert.strictEqual(decideLiveAction({
 const liveSrc = require('fs').readFileSync(require('path').join(__dirname, 'sr-live.js'), 'utf8');
 assert.doesNotMatch(liveSrc, /\.\.\.exitOptsFor\(\s*k\s*,/, 'Live tick must call exitOptsFor(key, lots), not k');
 assert.match(liveSrc, /\.\.\.exitOptsFor\(\s*key\s*,\s*lots\)/, 'Live tick must pass the loop key into exitOptsFor');
+
+const limits = applyDeskLimits(
+  { maxTradesPerDay: 3, dayLossStopRs: 3500, dayProfitTargetRs: 3500 },
+  { maxTradesPerDay: 8, dayLossStopRs: 0, dayProfitTargetRs: 0 },
+);
+assert.strictEqual(limits.maxTradesPerDay, 8);
+assert.strictEqual(limits.dayLossStopRs, 0);
+assert.strictEqual(limits.dayProfitTargetRs, 0);
 
 console.log('sr-live.selftest: ok');
