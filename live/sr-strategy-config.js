@@ -129,16 +129,35 @@ const EXIT_RULES = Object.freeze({
   //     stop so the day cap could bind turns +Rs211,022 into -Rs211,330
   //     (PF 6.06 -> 0.64) and produces 84 days past -Rs3,500 instead of 3.
   //     Bank's worst day (-Rs10,383) must be managed by LOT SIZE, not a stop.
+  //   maxBodyPts 150 — an entry meter DOES exist for Bank after all, on the
+  //     upper side: a breakout with a body over ~150 pts is a move already
+  //     spent, and you are buying the extension. It is what bounds Bank's tail,
+  //     the book's one real weakness (no stop is survivable here).
+  //     TEST window: worst trade -Rs10,843 -> -Rs5,899, losses -Rs42,343 ->
+  //     -Rs30,824, PF 7.89 -> 10.17, for Rs4,506 of net. That -Rs5,899 trade is
+  //     the one that turned 2026-01-30 red.
   banknifty: Object.freeze({
-    wallMode: 'intraday', timeStopBars: 6,
+    wallMode: 'intraday', timeStopBars: 6, maxBodyPts: 150,
     lockArmPts: 10, lockAtPts: 5,
     targetByScore: { 1: 20, 2: 20, 3: 20 },
   }),
   // Crude — had NO time exit, so losers rode to the 23:20 square-off (average
   // hold 179 min). 18 bars cuts that to ~69 min. IN-SAMPLE ONLY (89 days) and
   // still net negative: the edge is ~Rs4,270 against ~Rs27,120 of brokerage.
+  // Crude — body band 20-40 + profit lock. IN-SAMPLE ONLY (89 days).
+  // Crude's problem was never the exit: gross edge was ~Rs4,270 against
+  // Rs27,120 of brokerage, so it needed FEWER, BETTER trades, not tighter
+  // stops. Gross per trade by body size (cost is Rs120):
+  //     0-20 Rs2  |  20-40 Rs79  |  40-70 -Rs60  |  70+ Rs30
+  // Filtering to 20-40 raises gross per trade Rs20 -> Rs54 and gross per lot
+  // Rs4,440 -> Rs9,120 on FEWER trades, which drops break-even from ~7 lots to
+  // under 2. Checked on each half separately: Rs50/trade and Rs56/trade, where
+  // UNFILTERED the first half loses Rs19/trade. That consistency is the point.
+  // Still not profitable at 1 lot (Rs54 < Rs120 cost) — it needs 3+ lots.
   crude: Object.freeze({
     wallMode: 'intraday', timeStopBars: 18,
+    minBodyPts: 20, maxBodyPts: 40,
+    lockArmPts: 8, lockAtPts: 5,
     targetByScore: { 1: 20, 2: 25, 3: 30 },
   }),
 });

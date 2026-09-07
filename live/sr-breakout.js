@@ -111,6 +111,13 @@ function runSrBreakout(bars5, opts) {
   // -Rs391 — i.e. the slow ones are the losing half of the book.
   // 0 = off (default), so existing callers are unaffected.
   const maxRetestBars = num(opts.maxRetestBars, 0);
+  // ENTRY METER for books with no retest (Bank, Crude): accept the breakout
+  // only when its 15-min body is inside a band. Too small is noise, too large
+  // means the move is already spent and you are buying the extension.
+  // Both 0 = off (default). Measured on Crude, gross per trade:
+  //   body 0-20  Rs2 | 20-40 Rs79 | 40-70 -Rs60 | 70+ Rs30   (cost is Rs120)
+  const minBodyPts = num(opts.minBodyPts, 0);
+  const maxBodyPts = num(opts.maxBodyPts, 0);
 
   const bars15 = to15(bars5);
   const day5 = new Map();
@@ -167,6 +174,10 @@ function runSrBreakout(bars5, opts) {
       else if (-body >= entryPts && b.c < wallLo && trend < 0) { dir = -1; level = wallLo; }
     }
     if (!dir) continue;
+    // Entry meter: body band. Causal — the body is known at the breakout close.
+    const absBody = Math.abs(body);
+    if (minBodyPts > 0 && absBody < minBodyPts) continue;
+    if (maxBodyPts > 0 && absBody > maxBodyPts) continue;
 
     // confidence score
     const gap = (lastRes != null && lastSup != null) ? lastRes - lastSup : 0;
