@@ -65,8 +65,11 @@ function signalId(key, trade) {
   return `${key}|${trade.date}|${trade.entryTime}`;
 }
 
-/** Engine finished this trade — Live must flatten, not hold until TIME/FAIL only. */
-const ENGINE_FLAT = new Set(['TARGET', 'TIME', 'FAIL', 'STOP', 'LOCK', 'GIVEUP', 'CLOSE']);
+/** Engine actually finished this trade. CLOSE is not in this set: on a live
+ *  day the engine parks CLOSE on the last fetched 5-min bar (always <= now),
+ *  which means "still open in the replay", not "session square-off done".
+ *  Treating CLOSE as flat skipped every Monday buy even with Live on. */
+const ENGINE_DONE = new Set(['TARGET', 'TIME', 'FAIL', 'STOP', 'LOCK', 'GIVEUP']);
 
 function stopDistancePts(trade, spec) {
   const fromOpts = Number(spec?.opts?.stopPts);
@@ -92,14 +95,13 @@ function decideLiveAction({ trade, nowHm: hm, alreadyOpen, squareOffHm, freshMin
   const entry = hmToMin(trade.entryTime);
   const exit = hmToMin(trade.exitTime);
   const so = hmToMin(squareOffHm);
-  const hardExit = ENGINE_FLAT.has(trade.exitReason);
-  const pastExit = hardExit && exit <= now;
+  const finished = ENGINE_DONE.has(trade.exitReason) && exit <= now;
   const sessionOver = now >= so;
   if (alreadyOpen) {
-    if (sessionOver || pastExit) return 'exit';
+    if (sessionOver || finished) return 'exit';
     return 'hold';
   }
-  if (sessionOver || pastExit) return 'skip';
+  if (sessionOver || finished) return 'skip';
   if (now < entry) return 'wait';
   if (now - entry > freshMinutes) return 'skip';
   return 'enter';

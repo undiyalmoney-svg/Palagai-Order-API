@@ -42,6 +42,17 @@ assert.strictEqual(decideLiveAction({
   nowHm: '10:20', alreadyOpen: false, squareOffHm: '15:15',
 }), 'skip', 'already completed in engine — too late');
 
+// Live today: only candles up to "now" exist, so an unfinished trade is CLOSE
+// at the last bar. That must still ENTER (this is what blocked 7 Sep buys).
+assert.strictEqual(decideLiveAction({
+  trade: { ...trade, entryTime: '10:50', exitTime: '10:55', exitReason: 'CLOSE' },
+  nowHm: '10:56', alreadyOpen: false, squareOffHm: '15:15',
+}), 'enter', 'intraday CLOSE on last candle is still open — Live must BUY');
+assert.strictEqual(decideLiveAction({
+  trade: { ...trade, entryTime: '10:50', exitTime: '10:55', exitReason: 'GIVEUP' },
+  nowHm: '10:56', alreadyOpen: false, squareOffHm: '15:15',
+}), 'skip', 'GIVEUP already printed — do not chase');
+
 assert.strictEqual(decideLiveAction({
   trade: { ...trade, exitReason: 'TARGET', exitTime: '10:40' },
   nowHm: '10:20', alreadyOpen: true, squareOffHm: '15:15',
