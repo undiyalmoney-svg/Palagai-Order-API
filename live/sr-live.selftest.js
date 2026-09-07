@@ -105,4 +105,12 @@ assert.strictEqual(limits.maxTradesPerDay, 8);
 assert.strictEqual(limits.dayLossStopRs, 0);
 assert.strictEqual(limits.dayProfitTargetRs, 0);
 
+const trailCore = require('./strategy-core.cjs');
+assert.strictEqual(
+  typeof trailCore.optionPeakTrailSettingsFromExtras,
+  'function',
+  'LiveBroker imports this from the bundle — it must be exported',
+);
+assert.strictEqual(typeof trailCore.evaluateOptionPeakTrail, 'function');
+
 console.log('sr-live.selftest: ok');

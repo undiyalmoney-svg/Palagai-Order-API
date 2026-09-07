@@ -45,7 +45,9 @@ __export(bundle_entry_exports, {
   resolveAtmWeeklyOption: () => resolveAtmWeeklyOption,
   resolveCrudeOilMiniFuturesToken: () => resolveCrudeOilMiniFuturesToken,
   resolveCrudeProfileDayLossPts: () => resolveCrudeProfileDayLossPts,
-  resolveCrudeStrategyProfile: () => resolveCrudeStrategyProfile
+  resolveCrudeStrategyProfile: () => resolveCrudeStrategyProfile,
+  evaluateOptionPeakTrail: () => evaluateOptionPeakTrail,
+  optionPeakTrailSettingsFromExtras: () => optionPeakTrailSettingsFromExtras
 });
 module.exports = __toCommonJS(bundle_entry_exports);
 
@@ -5202,5 +5204,7 @@ function createGenieStrategy() {
   resolveAtmWeeklyOption,
   resolveCrudeOilMiniFuturesToken,
   resolveCrudeProfileDayLossPts,
-  resolveCrudeStrategyProfile
+  resolveCrudeStrategyProfile,
+  evaluateOptionPeakTrail,
+  optionPeakTrailSettingsFromExtras
 });
