@@ -116,11 +116,13 @@ const EXIT_RULES = Object.freeze({
   //   giveUpBar/MinPts — costs Rs47k of net (b2<8: Rs162,875 vs Rs211,602).
   //     Bank enters on the raw breakout, not a retest, so there is more early
   //     noise and it needs longer to get going than Nifty does.
-  //   maxRetestBars   — not applicable, Bank has no retest entry.
-  //   entry filters   — none found. Body size, extension past the wall and
-  //     confidence score all score 92-98% win and Rs249-354/trade across every
-  //     bucket, so there is nothing to filter on. Bank's entries are uniformly
-  //     good; its losses were purely an exit problem.
+  //   [SUPERSEDED] "maxRetestBars not applicable, Bank has no retest entry" —
+  //     the retest was simply never TRIED on Bank. It is now enabled and is the
+  //     single biggest improvement this book has had (see below).
+  //   entry filters   — no LOWER bound helps; body size, extension and
+  //     confidence score all return 92-98% win across every bucket. An upper
+  //     body cap did help while Bank entered on the raw breakout, but the
+  //     retest supersedes it (see below).
   //   failStop / rupee cut-off — both harmful: 9 bars + failStop is
   //     -Rs239,478 (PF 0.67), and a Rs4,000 cut turns +Rs213,758 into
   //     -Rs202,151, because 84% of trades that dip past -Rs3,000 still win.
@@ -129,15 +131,24 @@ const EXIT_RULES = Object.freeze({
   //     stop so the day cap could bind turns +Rs211,022 into -Rs211,330
   //     (PF 6.06 -> 0.64) and produces 84 days past -Rs3,500 instead of 3.
   //     Bank's worst day (-Rs10,383) must be managed by LOT SIZE, not a stop.
-  //   maxBodyPts 150 — an entry meter DOES exist for Bank after all, on the
-  //     upper side: a breakout with a body over ~150 pts is a move already
-  //     spent, and you are buying the extension. It is what bounds Bank's tail,
-  //     the book's one real weakness (no stop is survivable here).
-  //     TEST window: worst trade -Rs10,843 -> -Rs5,899, losses -Rs42,343 ->
-  //     -Rs30,824, PF 7.89 -> 10.17, for Rs4,506 of net. That -Rs5,899 trade is
-  //     the one that turned 2026-01-30 red.
+  //   RETEST ENTRY (retest + maxRetestBars 2). Never tried on Bank until now,
+  //     and it changes the book the way it changed Nifty: do not enter on the
+  //     breakout close, wait for price to pull back to the broken level.
+  //     Untouched TEST window, versus the old raw-breakout entry:
+  //       raw breakout   net Rs202,361  losses -Rs30,824  PF 10.2  worst -Rs5,899
+  //       retest + mrb2  net Rs301,110  losses  -Rs8,580  PF 44.7  worst -Rs3,563
+  //     +Rs98,749 net, 72% less loss, worst trade cut 40%, 99% win, Rs1,145/day.
+  //     Better on BOTH windows (train Rs227,609 -> Rs411,572), so not a test-set
+  //     artefact. maxRetestBars 1/2/3 is a plateau (test Rs275k/Rs283k/Rs286k)
+  //     that falls off a cliff at 4+ (Rs262k, losses -Rs36,844).
+  //   maxBodyPts REMOVED. It was bounding the tail while Bank entered on the raw
+  //     breakout, but the retest makes it redundant AND costly: with retest, no
+  //     cap beats cap-150 on both windows (train Rs411,572 vs Rs354,753, test
+  //     Rs301,110 vs Rs283,075) at identical -Rs8,580 losses. Requiring a
+  //     pullback already excludes the spent, over-extended moves.
   banknifty: Object.freeze({
-    wallMode: 'intraday', timeStopBars: 6, maxBodyPts: 150,
+    wallMode: 'intraday', timeStopBars: 6,
+    retest: true, maxRetestBars: 2,
     lockArmPts: 10, lockAtPts: 5,
     targetByScore: { 1: 20, 2: 20, 3: 20 },
   }),
