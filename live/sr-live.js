@@ -416,7 +416,7 @@ async function onTick(session) {
           // Rebuilt with the session's lot size: the rupee cut-off is a TOTAL,
           // so its point distance depends on lots. spec.opts is the 1-lot form
           // kept for the Paper/Live equality self-test.
-          ...exitOptsFor(k, lots),
+          ...exitOptsFor(key, lots),
         });
 
         const bookId = spec.bookId;

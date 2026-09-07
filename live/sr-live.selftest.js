@@ -80,4 +80,10 @@ assert.strictEqual(decideLiveAction({
   nowHm: '23:20', alreadyOpen: true, squareOffHm: SPEC.crude.session.squareOffHm,
 }), 'exit', 'crude square-off');
 
+// onTick's loop variable is `key`. A typo exitOptsFor(k, lots) throws
+// "k is not defined" on every Nifty/Bank/Crude tick and blocks Live.
+const liveSrc = require('fs').readFileSync(require('path').join(__dirname, 'sr-live.js'), 'utf8');
+assert.doesNotMatch(liveSrc, /\.\.\.exitOptsFor\(\s*k\s*,/, 'Live tick must call exitOptsFor(key, lots), not k');
+assert.match(liveSrc, /\.\.\.exitOptsFor\(\s*key\s*,\s*lots\)/, 'Live tick must pass the loop key into exitOptsFor');
+
 console.log('sr-live.selftest: ok');
