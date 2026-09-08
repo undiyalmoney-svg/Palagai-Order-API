@@ -8,7 +8,7 @@
 const market = require('./kite-market');
 const { computeProtectiveSlTrigger } = require('./strategy-core.cjs');
 const { estimateRoundTripCharges } = require('./charge-entry-gate');
-const { LIVE_GREEN_DNA } = require('./dna-live-green');
+const { OPTION_SL_MAX_RS } = require('./sr-strategy-config');
 
 const TICK = 0.05;
 
@@ -121,8 +121,7 @@ function markOneOpenLeg(trades) {
 }
 
 function liveFriction() {
-  const n = Number(LIVE_GREEN_DNA.liveOps.fillFrictionPremium);
-  return Number.isFinite(n) && n >= 0 ? n : 0.5;
+  return 0.5;
 }
 
 async function optionPnlForTrade({ authorization, spec, trade, lots, session, pickOption }) {
@@ -155,7 +154,7 @@ async function optionPnlForTrade({ authorization, spec, trade, lots, session, pi
     exchange: spec.exchange || pick.exchange,
     tradingSymbol: pick.tradingSymbol,
     ltp: entryPrem,
-    maxLossRs: (LIVE_GREEN_DNA.liveOps.maxOptionLossRs || 0) * Math.max(1, Number(lots) || 1),
+      maxLossRs: (OPTION_SL_MAX_RS[spec.key] || 0) * Math.max(1, Number(lots) || 1),
     lotUnits: qty,
   });
   for (const bar of barsInHold(candles, trade.entryTime, trade.exitTime)) {

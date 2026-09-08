@@ -1,7 +1,7 @@
 'use strict';
 const assert = require('assert');
 const { decideLiveAction, signalId, hmToMin, SPEC, applyDeskLimits, engineTradeStillOpen, engineBookHasOpenTrade, mustExitHeldForNewLeg, matchHeldEngineTrade, pickOption } = require('./sr-live');
-const { exitOptsFor, LOT_UNITS } = require('./sr-strategy-config');
+const { exitOptsFor, LOT_UNITS, OPTION_SL_MAX_RS } = require('./sr-strategy-config');
 
 assert.deepStrictEqual(SPEC.nifty.opts, exitOptsFor('nifty'), 'Live Nifty opts must match Paper shared config');
 assert.deepStrictEqual(SPEC.banknifty.opts, exitOptsFor('banknifty'));
@@ -12,9 +12,12 @@ assert.deepStrictEqual(SPEC.crude.opts, exitOptsFor('crude'));
 // moved 12 -> 8). Check shape and coherence instead.
 const n = SPEC.nifty.opts;
 assert.ok(n.maxRetestBars > 0, 'Nifty must have the entry meter');
-assert.ok(n.lockArmPts > 0 && n.lockAtPts > 0, 'Nifty must have the profit lock');
+assert.ok(n.lockAtPts >= 12, 'Nifty lock must clear option charges, not +5 index pts');
 assert.ok(n.lockArmPts > n.lockAtPts, 'lock must arm above the level it exits at');
-assert.ok(n.giveUpBar > 0 && n.giveUpMinPts > 0, 'Nifty must have the give-up rule');
+assert.ok(n.minScore >= 2, 'Nifty skips score-1 noise that does not pay CE/PE');
+assert.strictEqual(OPTION_SL_MAX_RS.nifty, 5000);
+assert.strictEqual(OPTION_SL_MAX_RS.banknifty, 0, 'Bank keeps no rupee option cap');
+assert.ok(SPEC.banknifty.opts.lockAtPts >= 12, 'Bank lock-at-5 cannot pay the option');
 assert.ok(SPEC.nifty.opts.stopPts > 0, 'Nifty Paper/Live share the Rs5000/lot cut-off in points');
 assert.strictEqual(LOT_UNITS.nifty, 65, 'Nifty lot is 65 from Jan 2026');
 assert.strictEqual(LOT_UNITS.banknifty, 30, 'Bank lot is 30 from Jan 2026');
@@ -149,6 +152,9 @@ assert.strictEqual(typeof trailCore.evaluateOptionPeakTrail, 'function');
 
 const { LiveBroker } = require('./live-broker');
 const broker = new LiveBroker({ pushEvent: () => {}, realOrders: false });
+broker.setOptionMaxLossRs('nifty-50', 5000);
+assert.strictEqual(broker.optionMaxLossRs('nifty-50'), 5000, 'S/R must not inherit Auto Bot ₹300/lot');
+assert.ok(broker.optionMaxLossRs('other') > 0 && broker.optionMaxLossRs('other') <= 300, 'unset books keep Auto Bot DNA');
 broker.recordClosedOptionPnl({ entryPremium: 553, quantity: 30 }, 553);
 assert.strictEqual(broker.moneySnapshot().closedRs, 0, 'flat premium round-trip is ~₹0 option P&L, not index ₹600');
 broker.recordClosedOptionPnl({ entryPremium: 127.22, quantity: 65 }, 128.15);

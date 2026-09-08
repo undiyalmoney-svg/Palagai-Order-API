@@ -119,6 +119,8 @@ class LiveBroker {
     this.positions = new Map();
     /** @type {Map<string, number>} */
     this.lotsByInstrument = new Map();
+    /** S/R can pin a total ₹ option SL (not Auto Bot ₹300/lot). */
+    this.optionMaxLossRsByInstrument = new Map();
     /** Realised option ₹ this Live session (premium × qty), not index points. */
     this.closedOptionRs = 0;
   }
@@ -200,6 +202,17 @@ class LiveBroker {
 
   lotsFor(instrumentId) {
     return this.lotsByInstrument.get(instrumentId) || 1;
+  }
+
+  setOptionMaxLossRs(instrumentId, rs) {
+    this.optionMaxLossRsByInstrument.set(instrumentId, Math.max(0, Number(rs) || 0));
+  }
+
+  optionMaxLossRs(instrumentId) {
+    if (this.optionMaxLossRsByInstrument.has(instrumentId)) {
+      return this.optionMaxLossRsByInstrument.get(instrumentId);
+    }
+    return (LIVE_GREEN_DNA.liveOps.maxOptionLossRs || 0) * this.lotsFor(instrumentId);
   }
 
   clear() {
@@ -285,7 +298,7 @@ class LiveBroker {
       exchange: pos.exchange,
       tradingSymbol: pos.tradingSymbol,
       ltp,
-      maxLossRs: (LIVE_GREEN_DNA.liveOps.maxOptionLossRs || 0) * this.lotsFor(pos.instrumentId),
+      maxLossRs: this.optionMaxLossRs(pos.instrumentId),
       lotUnits: pos.quantity,
     });
     if (!(trigger > 0)) return;
@@ -528,7 +541,7 @@ class LiveBroker {
       exchange,
       tradingSymbol: sym,
       ltp,
-      maxLossRs: (LIVE_GREEN_DNA.liveOps.maxOptionLossRs || 0) * lotsMult,
+      maxLossRs: this.optionMaxLossRs(instrumentId),
       lotUnits: quantity,
     });
 
@@ -612,7 +625,7 @@ class LiveBroker {
       exchange: pos.exchange,
       tradingSymbol: pos.tradingSymbol,
       ltp,
-      maxLossRs: (LIVE_GREEN_DNA.liveOps.maxOptionLossRs || 0) * this.lotsFor(pos.instrumentId),
+      maxLossRs: this.optionMaxLossRs(pos.instrumentId),
       lotUnits: pos.quantity,
     });
 

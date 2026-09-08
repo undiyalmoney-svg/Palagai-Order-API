@@ -116,6 +116,7 @@ function runSrBreakout(bars5, opts) {
   // means the move is already spent and you are buying the extension.
   // Both 0 = off (default). Measured on Crude, gross per trade:
   //   body 0-20  Rs2 | 20-40 Rs79 | 40-70 -Rs60 | 70+ Rs30   (cost is Rs120)
+  const minScore = num(opts.minScore, 0);
   const minBodyPts = num(opts.minBodyPts, 0);
   const maxBodyPts = num(opts.maxBodyPts, 0);
 
@@ -185,6 +186,7 @@ function runSrBreakout(bars5, opts) {
     if (Math.abs(body) >= entryPts * 1.5) score++;   // big body
     if (gap >= gapLo && gap < gapHi) score++;        // mid gap
     const target = targetByScore[score] || 0;
+    if (minScore > 0 && score < minScore) continue;
 
     const breakoutPrice = b.c, breakoutTime = b.hm;
     let entry = b.c, entryTime = b.hm, retestTime = null;

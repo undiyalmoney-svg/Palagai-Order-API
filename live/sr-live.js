@@ -8,7 +8,7 @@ const market = require('./kite-market');
 const store = require('./live.store');
 const { runSrBreakout } = require('./sr-breakout');
 // Exit/entry rules come from the SHARED config so Live and Paper cannot drift.
-const { exitOptsFor, DEFAULT_LOTS, DAY_LOSS_STOP_RS, DAY_PROFIT_TARGET_RS, LOT_UNITS } = require('./sr-strategy-config');
+const { exitOptsFor, DEFAULT_LOTS, DAY_LOSS_STOP_RS, DAY_PROFIT_TARGET_RS, LOT_UNITS, OPTION_SL_MAX_RS } = require('./sr-strategy-config');
 const { LiveBroker } = require('./live-broker');
 const { NIFTY_50_INSTRUMENT, BANK_NIFTY_INSTRUMENT, CRUDE_OIL_MINI_INSTRUMENT } = require('./strategy-core.cjs');
 
@@ -262,7 +262,12 @@ async function start(userId, body = {}) {
     realOrders: true,
   });
   session.broker.setMaxOpenLegs(0);
-  for (const k of keys) session.broker.setLots(SPEC[k].bookId, session.config.lots);
+  for (const k of keys) {
+    session.broker.setLots(SPEC[k].bookId, session.config.lots);
+    if (OPTION_SL_MAX_RS[k] != null) {
+      session.broker.setOptionMaxLossRs(SPEC[k].bookId, OPTION_SL_MAX_RS[k] * session.config.lots);
+    }
+  }
   pushEvent(session, 'START', session.message);
   try {
     await session.broker.reconcileFromBroker(auth);
@@ -480,7 +485,6 @@ async function pickFreshLiveEntry(session, authorization, spec, key, trades, hm,
       indexStop: indexStopPrice(t, spec),
       indexTarget: t.side === 'BUY' ? t.entryPrice + (t.target || 20) : t.entryPrice - (t.target || 20),
       entryTime: t.entryTime,
-      skipChargeGate: true,
     };
   }
   return null;

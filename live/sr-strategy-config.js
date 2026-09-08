@@ -56,6 +56,14 @@ const DAY_PROFIT_TARGET_RS = 3500;
 const DEFAULT_LOTS = Object.freeze({ nifty: 1, banknifty: 1, crude: 5 });
 
 /**
+ * Protective option SL rupee cap for S/R Live/Paper. Auto Bot DNA is ₹300/lot
+ * and wick-dumps S/R TARGET winners. 0 = do not apply that cap (Bank: no
+ * rupee stop). Nifty/Crude match the index cut so the stop is the strategy,
+ * not Trap v2.
+ */
+const OPTION_SL_MAX_RS = Object.freeze({ nifty: 5000, banknifty: 0, crude: 2500 });
+
+/**
  * Entry + exit rules per instrument. Every value here was walk-forward tested
  * (train 2024-01..2025-07, scored on an untouched 2025-07..2026-09 window)
  * except Crude, which has only 89 days and is marked accordingly.
@@ -96,7 +104,11 @@ const EXIT_RULES = Object.freeze({
   //     (default 0 = off); leave it off unless a longer study says otherwise.
   nifty: Object.freeze({
     wallMode: 'intraday', retest: true, timeStopBars: 6, maxRetestBars: 2,
-    lockArmPts: 8, lockAtPts: 5, giveUpBar: 2, giveUpMinPts: 8,
+    // +8/5 lock was best on INDEX ₹ and a loser on CE/PE (5 pts × 0.41 × 65
+    // ≈ ₹133 before charges; last week TARGET/LOCK in pts, net −₹3k option).
+    // Arm at the 20-pt target, lock 12 pts (~₹320 option) so a lock can pay.
+    lockArmPts: 20, lockAtPts: 12, giveUpBar: 2, giveUpMinPts: 8,
+    minScore: 2,
     capStopToDayBudget: true,
     targetByScore: { 1: 20, 2: 20, 3: 20 },
   }),
@@ -152,7 +164,8 @@ const EXIT_RULES = Object.freeze({
   banknifty: Object.freeze({
     wallMode: 'intraday', timeStopBars: 6,
     retest: true, maxRetestBars: 2,
-    lockArmPts: 10, lockAtPts: 5,
+    // Same option problem as Nifty: lock-at-5 does not clear CE/PE charges.
+    lockArmPts: 20, lockAtPts: 12,
     targetByScore: { 1: 20, 2: 20, 3: 20 },
   }),
   // Crude — had NO time exit, so losers rode to the 23:20 square-off (average
@@ -192,6 +205,6 @@ function exitOptsFor(key, lots = 1) {
 }
 
 module.exports = {
-  EXIT_RULES, CUT_LOSS_RS, LOT_UNITS, DEFAULT_LOTS, exitOptsFor,
+  EXIT_RULES, CUT_LOSS_RS, LOT_UNITS, DEFAULT_LOTS, OPTION_SL_MAX_RS, exitOptsFor,
   DAY_LOSS_STOP_RS, DAY_PROFIT_TARGET_RS,
 };
