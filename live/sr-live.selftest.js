@@ -1,7 +1,7 @@
 'use strict';
 const assert = require('assert');
-const { decideLiveAction, signalId, hmToMin, SPEC, applyDeskLimits } = require('./sr-live');
-const { exitOptsFor } = require('./sr-strategy-config');
+const { decideLiveAction, signalId, hmToMin, SPEC, applyDeskLimits, engineTradeStillOpen, engineBookHasOpenTrade } = require('./sr-live');
+const { exitOptsFor, LOT_UNITS } = require('./sr-strategy-config');
 
 assert.deepStrictEqual(SPEC.nifty.opts, exitOptsFor('nifty'), 'Live Nifty opts must match Paper shared config');
 assert.deepStrictEqual(SPEC.banknifty.opts, exitOptsFor('banknifty'));
@@ -16,6 +16,11 @@ assert.ok(n.lockArmPts > 0 && n.lockAtPts > 0, 'Nifty must have the profit lock'
 assert.ok(n.lockArmPts > n.lockAtPts, 'lock must arm above the level it exits at');
 assert.ok(n.giveUpBar > 0 && n.giveUpMinPts > 0, 'Nifty must have the give-up rule');
 assert.ok(SPEC.nifty.opts.stopPts > 0, 'Nifty Paper/Live share the Rs5000/lot cut-off in points');
+assert.strictEqual(LOT_UNITS.nifty, 65, 'Nifty lot is 65 from Jan 2026');
+assert.strictEqual(LOT_UNITS.banknifty, 30, 'Bank lot is 30 from Jan 2026');
+assert.strictEqual(SPEC.nifty.unitsPerLot, LOT_UNITS.nifty);
+assert.strictEqual(SPEC.banknifty.unitsPerLot, LOT_UNITS.banknifty);
+assert.strictEqual(SPEC.nifty.opts.stopPts, 5000 / 65);
 
 const trade = {
   date: '2026-09-05', side: 'BUY', option: 'CE',
@@ -90,6 +95,12 @@ assert.strictEqual(decideLiveAction({
   trade: { ...trade, entryTime: '19:50', exitTime: '20:30', exitReason: 'CLOSE' },
   nowHm: '23:20', alreadyOpen: true, squareOffHm: SPEC.crude.session.squareOffHm,
 }), 'exit', 'crude square-off');
+
+const locked = { ...trade, exitReason: 'LOCK', exitTime: '12:00' };
+assert.strictEqual(engineTradeStillOpen(locked, '11:59'), true);
+assert.strictEqual(engineTradeStillOpen(locked, '12:00'), false);
+assert.strictEqual(engineBookHasOpenTrade([locked], '12:16'), false, 'two closed index trades must flatten leftover Kite PE');
+assert.strictEqual(engineBookHasOpenTrade([{ ...trade, exitReason: 'CLOSE', exitTime: '12:15' }], '12:16'), true);
 
 // onTick's loop variable is `key`. A typo exitOptsFor(k, lots) throws
 // "k is not defined" on every Nifty/Bank/Crude tick and blocks Live.

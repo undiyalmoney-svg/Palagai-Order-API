@@ -8,7 +8,7 @@ const market = require('./kite-market');
 const store = require('./live.store');
 const { runSrBreakout } = require('./sr-breakout');
 // Exit/entry rules come from the SHARED config so Live and Paper cannot drift.
-const { exitOptsFor, DEFAULT_LOTS, DAY_LOSS_STOP_RS, DAY_PROFIT_TARGET_RS } = require('./sr-strategy-config');
+const { exitOptsFor, DEFAULT_LOTS, DAY_LOSS_STOP_RS, DAY_PROFIT_TARGET_RS, LOT_UNITS } = require('./sr-strategy-config');
 const { LiveBroker } = require('./live-broker');
 const { NIFTY_50_INSTRUMENT, BANK_NIFTY_INSTRUMENT, CRUDE_OIL_MINI_INSTRUMENT } = require('./strategy-core.cjs');
 
@@ -17,14 +17,14 @@ const FRESH_MINUTES = 20;
 
 const SPEC = {
   nifty: {
-    key: 'nifty', name: 'Nifty 50', token: '256265', unitsPerLot: 75,
+    key: 'nifty', name: 'Nifty 50', token: '256265', unitsPerLot: LOT_UNITS.nifty,
     bookId: NIFTY_50_INSTRUMENT.id, root: 'NIFTY', step: 50, spotKey: 'NSE:NIFTY 50',
     session: { entryStartHm: '09:45', entryEndHm: '14:30', squareOffHm: '15:15' },
     entryPts: 27, gapLo: 100, gapHi: 175, targetByScore: { 1: 20, 2: 25, 3: 30 },
     opts: exitOptsFor('nifty'),
   },
   banknifty: {
-    key: 'banknifty', name: 'Bank Nifty', token: '260105', unitsPerLot: 35,
+    key: 'banknifty', name: 'Bank Nifty', token: '260105', unitsPerLot: LOT_UNITS.banknifty,
     bookId: BANK_NIFTY_INSTRUMENT.id, root: 'BANKNIFTY', step: 100, spotKey: 'NSE:NIFTY BANK',
     exchange: 'NFO',
     session: { entryStartHm: '09:45', entryEndHm: '14:30', squareOffHm: '15:15' },
@@ -32,7 +32,7 @@ const SPEC = {
     opts: exitOptsFor('banknifty'),
   },
   crude: {
-    key: 'crude', name: 'Crude Oil Mini', token: null, unitsPerLot: 10,
+    key: 'crude', name: 'Crude Oil Mini', token: null, unitsPerLot: LOT_UNITS.crude,
     bookId: CRUDE_OIL_MINI_INSTRUMENT.id, root: 'CRUDEOILM', step: 50, spotKey: null,
     exchange: 'MCX',
     session: { entryStartHm: '09:30', entryEndHm: '20:00', squareOffHm: '23:20' },
@@ -90,6 +90,17 @@ function indexStopPrice(trade, spec) {
  * exit  = we are in the trade and the engine/session says get out.
  * hold  = stay; skip = too late / already done; wait = bar not reached yet.
  */
+function engineTradeStillOpen(trade, hm) {
+  if (!trade) return false;
+  const now = hmToMin(hm);
+  const exit = hmToMin(trade.exitTime);
+  return !(ENGINE_DONE.has(trade.exitReason) && exit <= now);
+}
+
+function engineBookHasOpenTrade(trades, hm) {
+  return (trades || []).some((t) => engineTradeStillOpen(t, hm));
+}
+
 function decideLiveAction({ trade, nowHm: hm, alreadyOpen, squareOffHm, freshMinutes = FRESH_MINUTES }) {
   const now = hmToMin(hm);
   const entry = hmToMin(trade.entryTime);
@@ -451,27 +462,38 @@ async function onTick(session) {
               tradingSymbol: current.tradingSymbol,
               instrumentToken: current.instrumentToken,
               exchange: current.exchange || spec.exchange || 'NFO',
-              lotSize: spec.unitsPerLot,
+              lotSize: Math.max(1, Number(current.quantity) || spec.unitsPerLot),
             }
             : null;
-          if (openTrade) {
+          // Id can drift if the engine restamps entryTime; fall back to any
+          // engine leg that is still open so we do not hold a Kite PE after
+          // Paper already printed LOCK/TARGET on every trade.
+          let tracked = openTrade;
+          if (!tracked) {
+            tracked = trades.find((t) => engineTradeStillOpen(t, hm)) || null;
+            if (tracked) session.openSignal.set(bookId, signalId(key, tracked));
+          }
+          if (tracked) {
             const act = decideLiveAction({
-              trade: openTrade, nowHm: hm, alreadyOpen: true, squareOffHm: spec.session.squareOffHm,
+              trade: tracked, nowHm: hm, alreadyOpen: true, squareOffHm: spec.session.squareOffHm,
             });
             if (act === 'hold' && opt) {
               open = {
                 option: opt,
-                indexEntry: openTrade.entryPrice,
-                indexStop: indexStopPrice(openTrade, spec),
-                indexTarget: openTrade.side === 'BUY' ? openTrade.entryPrice + openTrade.target : openTrade.entryPrice - openTrade.target,
-                entryTime: openTrade.entryTime,
+                indexEntry: tracked.entryPrice,
+                indexStop: indexStopPrice(tracked, spec),
+                indexTarget: tracked.side === 'BUY' ? tracked.entryPrice + tracked.target : tracked.entryPrice - tracked.target,
+                entryTime: tracked.entryTime,
                 skipChargeGate: true,
               };
             } else if (act === 'exit') {
-              pushEvent(session, 'SIGNAL', `${spec.name} exit · ${openTrade.exitReason} at ${openTrade.exitTime}`);
+              pushEvent(session, 'SIGNAL', `${spec.name} exit · ${tracked.exitReason} at ${tracked.exitTime}`);
               session.openSignal.delete(bookId);
             }
-          } else if (hm >= spec.session.squareOffHm) {
+          } else if (hm >= spec.session.squareOffHm || (trades.length > 0 && !engineBookHasOpenTrade(trades, hm))) {
+            if (trades.length > 0 && !engineBookHasOpenTrade(trades, hm)) {
+              pushEvent(session, 'SIGNAL', `${spec.name} exit · engine book is flat — flattening leftover option`);
+            }
             session.openSignal.delete(bookId);
           } else if (opt) {
             open = {
@@ -535,5 +557,6 @@ function status(userId) {
 }
 
 module.exports = {
-  start, stop, status, decideLiveAction, applyDeskLimits, signalId, hmToMin, SPEC, FRESH_MINUTES, _sessions: sessions,
+  start, stop, status, decideLiveAction, applyDeskLimits, signalId, hmToMin,
+  engineTradeStillOpen, engineBookHasOpenTrade, SPEC, FRESH_MINUTES, _sessions: sessions,
 };

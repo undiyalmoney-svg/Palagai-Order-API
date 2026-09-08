@@ -8,7 +8,7 @@
 const https = require('https');
 const market = require('./kite-market');
 // Exit/entry rules come from the SHARED config so Paper and Live cannot drift.
-const { exitOptsFor, CUT_LOSS_RS, DEFAULT_LOTS, DAY_LOSS_STOP_RS, DAY_PROFIT_TARGET_RS } = require('./sr-strategy-config');
+const { exitOptsFor, CUT_LOSS_RS, DEFAULT_LOTS, DAY_LOSS_STOP_RS, DAY_PROFIT_TARGET_RS, LOT_UNITS } = require('./sr-strategy-config');
 const store = require('./live.store');
 const { runSrBreakout } = require('./sr-breakout');
 const { observe, history: obsHistory, confirmLiveEntry, confirmLiveExit } = require('./sr-observe');
@@ -23,7 +23,7 @@ function userId(req) { return req.user?.id || 'anonymous'; }
 // Mini is an MCX monthly future resolved to its front month at request time.
 const INSTRUMENTS = {
   nifty: {
-    key: 'nifty', name: 'Nifty 50', token: '256265', unitsPerLot: 75, 
+    key: 'nifty', name: 'Nifty 50', token: '256265', unitsPerLot: LOT_UNITS.nifty, 
     // HARD LOSS CUT-OFF per lot. Wide on purpose: it caps the worst trade at
     // -Rs5,000 (was -Rs11,936) and still IMPROVES net on both windows measured
     // together (Rs815,673 vs Rs801,285), with PF 2.53 -> 2.72. Tighter caps cost
@@ -33,7 +33,7 @@ const INSTRUMENTS = {
     entryPts: 27, gapLo: 100, gapHi: 175, targetByScore: { 1: 20, 2: 25, 3: 30 },
   },
   banknifty: {
-    key: 'banknifty', name: 'Bank Nifty', token: '260105', unitsPerLot: 35, 
+    key: 'banknifty', name: 'Bank Nifty', token: '260105', unitsPerLot: LOT_UNITS.banknifty, 
     // NO cutLossRs ON PURPOSE — measured, not assumed. On the 4-bar exit over the
     // walk-forward test window a cut-off destroys this book:
     //   none    net +Rs213,758  PF 3.43  worst -Rs4,538
@@ -52,7 +52,7 @@ const INSTRUMENTS = {
     // trust. Stricter defaults (bigger candle, no new entries in the thin late-US
     // session) turn it from bleeding to green in-sample; the forward paper run is
     // what actually validates it. Bank Nifty + Nifty 50 are the proven books.
-    key: 'crude', name: 'Crude Oil Mini', token: null, unitsPerLot: 10, // token resolved at runtime
+    key: 'crude', name: 'Crude Oil Mini', token: null, unitsPerLot: LOT_UNITS.crude, // token resolved at runtime
     // Crude needs size to clear its own brokerage: the Rs120 cost is per TRADE,
     // not per lot, so the edge scales with lots while the cost does not.
     // Measured over 89 days (226 trades, 427 gross pts/lot):
@@ -241,7 +241,7 @@ async function srBreakout(req, res) {
       const entryPts = numOr(body.entryPts, spec.entryPts);
       // Lots are PER INSTRUMENT. Precedence: explicit per-instrument value from
       // the request, then a single shared `lots`, then the instrument's own
-      // default. Books have very different tick values (Rs75 / Rs35 / Rs10 per
+      // default. Books have very different tick values (Rs65 / Rs30 / Rs10 per
       // point), so one shared size is rarely right for all three.
       const lots = Math.max(1, numOr(body.lotsByInstrument && body.lotsByInstrument[key],
         numOr(body.lots, DEFAULT_LOTS[key] || 1)));

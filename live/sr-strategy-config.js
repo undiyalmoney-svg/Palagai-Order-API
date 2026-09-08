@@ -36,8 +36,11 @@ const CUT_LOSS_RS = Object.freeze({ nifty: 5000, banknifty: 0, crude: 2500 });
 // A tighter ceiling is not the same thing as losing less money. Only reinstate
 // Rs2,000 if a hard per-trade ceiling is required for reasons outside P&L.
 
-/** Units per lot — with `lots`, turns a rupee figure into points. */
-const LOT_UNITS = Object.freeze({ nifty: 75, banknifty: 35, crude: 10 });
+/** Units per lot — with `lots`, turns a rupee figure into points.
+ *  NSE index lots from the Jan 2026 series: Nifty 65 (was 75), Bank 30 (was 35).
+ *  Paper ₹ and Live day-stop points MUST use these, or Paper prints a number
+ *  Kite can never pay (20 Bank pts × 35 = ₹700 vs a 30-qty lot). */
+const LOT_UNITS = Object.freeze({ nifty: 65, banknifty: 30, crude: 10 });
 
 /**
  * Daily risk brakes, in rupees. Paper previously defaulted these to 0 (off)

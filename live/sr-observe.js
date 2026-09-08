@@ -26,6 +26,7 @@ const path = require('path');
 const market = require('./kite-market');
 const { runSrBreakout } = require('./sr-breakout');
 const { EXECUTION_MODE } = require('./sr-execution-guard');
+const { LOT_UNITS } = require('./sr-strategy-config');
 
 // Approved paper exit rule (configurable). Loser is NOT held to premium-zero;
 // the option premium is a risk boundary, not the normal stop.
@@ -50,10 +51,10 @@ const LOT_DAY_LOSS = 3500, LOT_DAY_PROFIT = 3500, MAX_TRADES_DAY = 3;
 // Underlying config — mirrors sr-breakout.controller INSTRUMENTS (not re-tuned).
 const INSTR = {
   nifty: { name: 'Nifty 50', token: '256265', spotKey: 'NSE:NIFTY 50', root: 'NIFTY',
-    step: 50, unitsPerLot: 75, entryPts: 27, gapLo: 100, gapHi: 175, targetByScore: { 1: 20, 2: 25, 3: 30 },
+    step: 50, unitsPerLot: LOT_UNITS.nifty, entryPts: 27, gapLo: 100, gapHi: 175, targetByScore: { 1: 20, 2: 25, 3: 30 },
     session: { entryStartHm: '09:45', entryEndHm: '14:30', squareOffHm: '15:15' }, opt: true },
   banknifty: { name: 'Bank Nifty', token: '260105', spotKey: 'NSE:NIFTY BANK', root: 'BANKNIFTY',
-    step: 100, unitsPerLot: 35, entryPts: 60, gapLo: 275, gapHi: 465, targetByScore: { 1: 40, 2: 50, 3: 60 },
+    step: 100, unitsPerLot: LOT_UNITS.banknifty, entryPts: 60, gapLo: 275, gapHi: 465, targetByScore: { 1: 40, 2: 50, 3: 60 },
     session: { entryStartHm: '09:45', entryEndHm: '14:30', squareOffHm: '15:15' }, opt: true },
 };
 
