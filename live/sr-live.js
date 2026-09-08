@@ -324,6 +324,7 @@ function crudeStrikeStep(optRows, atm) {
 }
 
 async function pickOption(authorization, spec, trade, session) {
+  session = session || {};
   const dir = trade.side === 'BUY' ? 1 : -1;
   const type = dir > 0 ? 'CE' : 'PE';
   const today = trade.date || todayIso();
@@ -369,7 +370,8 @@ async function pickOption(authorization, spec, trade, session) {
     };
   }
 
-  const inst = await market.fetchInstruments(authorization);
+  const inst = session.nfoInstruments
+    || (session.nfoInstruments = await market.fetchInstruments(authorization));
   const rows = inst.filter((r) =>
     String(r.name || '').toUpperCase() === spec.root &&
     r.instrumentType === type &&
@@ -561,5 +563,5 @@ function status(userId) {
 
 module.exports = {
   start, stop, status, decideLiveAction, applyDeskLimits, signalId, hmToMin,
-  engineTradeStillOpen, engineBookHasOpenTrade, SPEC, FRESH_MINUTES, _sessions: sessions,
+  engineTradeStillOpen, engineBookHasOpenTrade, pickOption, SPEC, FRESH_MINUTES, _sessions: sessions,
 };

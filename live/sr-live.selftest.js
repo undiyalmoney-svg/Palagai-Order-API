@@ -1,6 +1,6 @@
 'use strict';
 const assert = require('assert');
-const { decideLiveAction, signalId, hmToMin, SPEC, applyDeskLimits, engineTradeStillOpen, engineBookHasOpenTrade } = require('./sr-live');
+const { decideLiveAction, signalId, hmToMin, SPEC, applyDeskLimits, engineTradeStillOpen, engineBookHasOpenTrade, pickOption } = require('./sr-live');
 const { exitOptsFor, LOT_UNITS } = require('./sr-strategy-config');
 
 assert.deepStrictEqual(SPEC.nifty.opts, exitOptsFor('nifty'), 'Live Nifty opts must match Paper shared config');
@@ -135,5 +135,23 @@ broker.positions.set('nifty', {
   entryPremium: 127.22, lastLtp: 128.15,
 });
 assert.ok(broker.moneySnapshot().openRs > 0);
+
+assert.strictEqual(typeof pickOption, 'function');
+const { optionRupees, pickBar, summarizeOptionTrades } = require('./sr-option-pnl');
+assert.strictEqual(optionRupees(553, 553, 30, 1), 0);
+assert.strictEqual(optionRupees(127.22, 128.15, 65, 1), Math.round((128.15 - 127.22) * 65));
+assert.strictEqual(optionRupees(0, 10, 65, 1), null);
+const bars = [
+  { date: '2026-09-08T11:50:00+0530', close: 127.2 },
+  { date: '2026-09-08T11:55:00+0530', close: 128.0 },
+  { date: '2026-09-08T12:00:00+0530', close: 128.15 },
+];
+assert.strictEqual(pickBar(bars, '11:50').close, 127.2);
+assert.strictEqual(pickBar(bars, '12:00').close, 128.15);
+assert.strictEqual(pickBar(bars, '12:16').close, 128.15);
+assert.strictEqual(summarizeOptionTrades([
+  { rupees: 60, rupeesSource: 'option' },
+  { rupees: -3, rupeesSource: 'option' },
+]).netRupees, 57);
 
 console.log('sr-live.selftest: ok');

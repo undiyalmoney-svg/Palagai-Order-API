@@ -2,8 +2,8 @@
 /**
  * S/R Breakout — Paper controller. RESEARCH / PAPER ONLY.
  * Fetches historical 5-min candles (read-only, via the pushed Kite token) and
- * runs the sr-breakout engine. Places NO orders; imports nothing from the live
- * order path. "Start Paper today" works because it fetches today's candles.
+ * runs the sr-breakout engine. Places NO orders. Paper ₹ is option premium
+ * (same CE/PE Live buys), not index points × lot.
  */
 const https = require('https');
 const market = require('./kite-market');
@@ -16,6 +16,7 @@ const collector = require('./sr-collector');
 const { auditDay } = require('./sr-debug');
 const { research } = require('./sr-research');
 const srLive = require('./sr-live');
+const { optionPnlForTrade, summarizeOptionTrades } = require('./sr-option-pnl');
 
 function userId(req) { return req.user?.id || 'anonymous'; }
 
@@ -269,19 +270,41 @@ async function srBreakout(req, res) {
         ...exitOptsFor(key, lots),
         ...strat.opts,                                 // version overrides (BASELINE = {})
       });
-      // ₹ = points × unitsPerLot × lots (futures-equivalent; option premium differs).
-      const rupees = (pts) => Math.round(pts * perPoint);
-      const tradesR = trades.map((t) => ({ ...t, instrument: spec.name, contract, rupees: rupees(t.points) }));
+      const liveSpec = srLive.SPEC[key];
+      const paperSess = {};
+      const tradesR = [];
+      for (const t of trades) {
+        const indexRupees = Math.round(t.points * perPoint);
+        const opt = liveSpec
+          ? await optionPnlForTrade({
+            authorization, spec: liveSpec, trade: t, lots, session: paperSess,
+            pickOption: srLive.pickOption,
+          })
+          : { rupees: null, rupeesSource: 'unavailable', reason: 'no-spec' };
+        tradesR.push({
+          ...t, instrument: spec.name, contract,
+          indexRupees,
+          rupees: opt.rupees,
+          rupeesSource: opt.rupees != null ? 'option' : 'unavailable',
+          optionSymbol: opt.optionSymbol || null,
+          optionEntryPremium: opt.optionEntryPremium || null,
+          optionExitPremium: opt.optionExitPremium || null,
+        });
+      }
+      const optSum = summarizeOptionTrades(tradesR);
+      const usedOption = optSum.optionPriced > 0;
       results.push({
         key, name: spec.name, contract, token, candles: candles.length,
         strategy: strat.label, strategyStatus: strat.status,   // auto-routed per instrument
-        params: { entryPts, gapLo: spec.gapLo, gapHi: spec.gapHi, targetByScore: spec.targetByScore, lots, unitsPerLot, maxTradesPerDay, dayLossStopRs, dayProfitTargetRs },
+        params: { entryPts, gapLo: spec.gapLo, gapHi: spec.gapHi, targetByScore: spec.targetByScore, lots, unitsPerLot, maxTradesPerDay, dayLossStopRs, dayProfitTargetRs, rupeesMode: usedOption ? 'option' : 'unavailable' },
         summary: {
           ...summary,
-          totalProfitRupees: rupees(summary.profitPoints),
-          totalLossRupees: rupees(summary.lossPoints),
-          netRupees: rupees(summary.grossPoints),
-          grossRupees: rupees(summary.grossPoints),
+          wins: usedOption ? optSum.optionWins : 0,
+          losses: usedOption ? optSum.optionLosses : 0,
+          totalProfitRupees: usedOption ? optSum.totalProfitRupees : 0,
+          totalLossRupees: usedOption ? optSum.totalLossRupees : 0,
+          netRupees: usedOption ? optSum.netRupees : 0,
+          grossRupees: usedOption ? optSum.grossRupees : 0,
         },
         trades: tradesR,
       });
