@@ -185,8 +185,41 @@ async function fetchHistoricalCandles(authorization, instrumentToken, fromDate, 
   }));
 }
 
+/** Kite 5-minute history allows at most 100 days per call. */
+function historicalChunks(fromDate, toDate, maxDays = 90) {
+  const out = [];
+  let start = String(fromDate).slice(0, 10);
+  const endCap = String(toDate).slice(0, 10);
+  if (!start || !endCap || start > endCap) return out;
+  while (start <= endCap) {
+    const d = new Date(start + 'T00:00:00Z');
+    d.setUTCDate(d.getUTCDate() + (maxDays - 1));
+    let end = d.toISOString().slice(0, 10);
+    if (end > endCap) end = endCap;
+    out.push([start, end]);
+    const n = new Date(end + 'T00:00:00Z');
+    n.setUTCDate(n.getUTCDate() + 1);
+    start = n.toISOString().slice(0, 10);
+  }
+  return out;
+}
+
 async function fetchHistorical5m(authorization, instrumentToken, fromDate, toDate) {
-  return fetchHistoricalCandles(authorization, instrumentToken, fromDate, toDate, '5minute');
+  const chunks = historicalChunks(fromDate, toDate, 90);
+  if (chunks.length <= 1) {
+    return fetchHistoricalCandles(authorization, instrumentToken, fromDate, toDate, '5minute');
+  }
+  const all = [];
+  const seen = new Set();
+  for (const [from, to] of chunks) {
+    const rows = await fetchHistoricalCandles(authorization, instrumentToken, from, to, '5minute');
+    for (const r of rows) {
+      if (seen.has(r.date)) continue;
+      seen.add(r.date);
+      all.push(r);
+    }
+  }
+  return all;
 }
 
 async function fetchQuotes(authorization, keys) {
@@ -230,6 +263,7 @@ module.exports = {
   fetchInstrumentsCsv,
   fetchHistorical5m,
   fetchHistoricalCandles,
+  historicalChunks,
   fetchQuotes,
   parseInstrumentsCsv,
 };

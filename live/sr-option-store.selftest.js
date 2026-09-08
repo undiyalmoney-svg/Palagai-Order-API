@@ -12,6 +12,18 @@ assert.strictEqual(store.pickFrontExpiry(['2026-09-15', '2025-03-06', '2025-03-1
 assert.strictEqual(store.pickFrontExpiry(['2026-09-15'], '2025-03-01'), null, 'must not bind an old signal to today\'s weekly');
 assert.strictEqual(store.pickFrontExpiry(['2026-09-15'], '2026-09-08'), '2026-09-15');
 
+const { historicalChunks } = require('./kite-market');
+{
+  const ch = historicalChunks('2026-06-01', '2026-09-08', 90);
+  assert.ok(ch.length >= 2, 'Jun–Sep must split under Kite 100-day cap');
+  assert.strictEqual(ch[0][0], '2026-06-01');
+  assert.strictEqual(ch[ch.length - 1][1], '2026-09-08');
+  for (const [a, b] of ch) {
+    const days = (Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000 + 1;
+    assert.ok(days <= 90, `${a}..${b} is ${days} days`);
+  }
+}
+
 assert.strictEqual(store.loadBars(1, '2026-09-01').length, 0);
 assert.ok(store.saveBars({
   instrumentToken: 99,
