@@ -160,7 +160,7 @@ broker.positions.set('nifty', {
 assert.ok(broker.moneySnapshot().openRs > 0);
 
 assert.strictEqual(typeof pickOption, 'function');
-const { optionRupees, pickBar, summarizeOptionTrades } = require('./sr-option-pnl');
+const { optionRupees, pickBar, summarizeOptionTrades, liveLikeEntryPrem, liveLikeExitPrem, slLimitFill, markOneOpenLeg } = require('./sr-option-pnl');
 assert.strictEqual(optionRupees(553, 553, 30, 1), 0);
 assert.strictEqual(optionRupees(127.22, 128.15, 65, 1), Math.round((128.15 - 127.22) * 65));
 assert.strictEqual(optionRupees(0, 10, 65, 1), null);
@@ -176,5 +176,26 @@ assert.strictEqual(summarizeOptionTrades([
   { rupees: 60, rupeesSource: 'option' },
   { rupees: -3, rupeesSource: 'option' },
 ]).netRupees, 57);
+assert.strictEqual(liveLikeEntryPrem({ close: 100, high: 101 }, 0.5), 100.5);
+assert.strictEqual(liveLikeExitPrem({ close: 100, low: 99 }, 0.5), 99.5);
+assert.ok(liveLikeEntryPrem({ close: 127.2, high: 128 }, 0.5) > 127.2, 'Paper buy must be worse than close (Live ask)');
+assert.ok(liveLikeExitPrem({ close: 128.15, low: 127 }, 0.5) < 128.15, 'Paper sell must be worse than close (Live bid)');
+assert.strictEqual(slLimitFill(100, 95), 95, 'SL fills at the low when low is above the 90% limit');
+assert.strictEqual(slLimitFill(100, 50), 90, 'gapped SL fills at the 90% limit, not the panic low');
+assert.strictEqual(slLimitFill(100, 101), null, 'SL does not fire above the trigger');
+{
+  const seq = markOneOpenLeg([
+    { date: '2026-09-08', entryTime: '11:50', exitTime: '12:00' },
+    { date: '2026-09-08', entryTime: '12:10', exitTime: '12:20' },
+    { date: '2026-09-08', entryTime: '12:12', exitTime: '12:30' },
+  ]);
+  assert.strictEqual(seq[0].liveSkip, undefined);
+  assert.strictEqual(seq[1].liveSkip, undefined, '12:10 is after 12:00 LOCK — Live can take it');
+  assert.strictEqual(seq[2].liveSkip, 'one-leg', 'overlapping 12:12 is not a second Live fill');
+}
+assert.strictEqual(summarizeOptionTrades([
+  { rupees: 100, rupeesSource: 'option-live' },
+  { rupees: 50, rupeesSource: 'option-live', liveSkip: 'one-leg' },
+]).netRupees, 100);
 
 console.log('sr-live.selftest: ok');

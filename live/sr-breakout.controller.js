@@ -3,7 +3,8 @@
  * S/R Breakout — Paper controller. RESEARCH / PAPER ONLY.
  * Fetches historical 5-min candles (read-only, via the pushed Kite token) and
  * runs the sr-breakout engine. Places NO orders. Paper ₹ is option premium
- * (same CE/PE Live buys), not index points × lot.
+ * (same CE/PE Live buys), marked like Live (ask/bid friction, charges, SL-LIMIT),
+ * not index points × lot.
  */
 const https = require('https');
 const market = require('./kite-market');
@@ -16,7 +17,7 @@ const collector = require('./sr-collector');
 const { auditDay } = require('./sr-debug');
 const { research } = require('./sr-research');
 const srLive = require('./sr-live');
-const { optionPnlForTrade, summarizeOptionTrades } = require('./sr-option-pnl');
+const { optionPnlForTrade, summarizeOptionTrades, markOneOpenLeg } = require('./sr-option-pnl');
 
 function userId(req) { return req.user?.id || 'anonymous'; }
 
@@ -273,8 +274,20 @@ async function srBreakout(req, res) {
       const liveSpec = srLive.SPEC[key];
       const paperSess = {};
       const tradesR = [];
-      for (const t of trades) {
+      for (const t of markOneOpenLeg(trades)) {
         const indexRupees = Math.round(t.points * perPoint);
+        if (t.liveSkip) {
+          tradesR.push({
+            ...t, instrument: spec.name, contract,
+            indexRupees,
+            rupees: null,
+            rupeesSource: 'skipped-live-leg',
+            optionSymbol: null,
+            optionEntryPremium: null,
+            optionExitPremium: null,
+          });
+          continue;
+        }
         const opt = liveSpec
           ? await optionPnlForTrade({
             authorization, spec: liveSpec, trade: t, lots, session: paperSess,
@@ -285,10 +298,12 @@ async function srBreakout(req, res) {
           ...t, instrument: spec.name, contract,
           indexRupees,
           rupees: opt.rupees,
-          rupeesSource: opt.rupees != null ? 'option' : 'unavailable',
+          rupeesSource: opt.rupees != null ? (opt.rupeesSource || 'option-live') : 'unavailable',
           optionSymbol: opt.optionSymbol || null,
           optionEntryPremium: opt.optionEntryPremium || null,
           optionExitPremium: opt.optionExitPremium || null,
+          chargesRs: opt.chargesRs || null,
+          exitVia: opt.exitVia || null,
         });
       }
       const optSum = summarizeOptionTrades(tradesR);
@@ -296,7 +311,7 @@ async function srBreakout(req, res) {
       results.push({
         key, name: spec.name, contract, token, candles: candles.length,
         strategy: strat.label, strategyStatus: strat.status,   // auto-routed per instrument
-        params: { entryPts, gapLo: spec.gapLo, gapHi: spec.gapHi, targetByScore: spec.targetByScore, lots, unitsPerLot, maxTradesPerDay, dayLossStopRs, dayProfitTargetRs, rupeesMode: usedOption ? 'option' : 'unavailable' },
+        params: { entryPts, gapLo: spec.gapLo, gapHi: spec.gapHi, targetByScore: spec.targetByScore, lots, unitsPerLot, maxTradesPerDay, dayLossStopRs, dayProfitTargetRs, rupeesMode: usedOption ? 'option-live' : 'unavailable' },
         summary: {
           ...summary,
           wins: usedOption ? optSum.optionWins : 0,
