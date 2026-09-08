@@ -9,6 +9,7 @@ const market = require('./kite-market');
 const { computeProtectiveSlTrigger } = require('./strategy-core.cjs');
 const { estimateRoundTripCharges } = require('./charge-entry-gate');
 const { OPTION_SL_MAX_RS } = require('./sr-strategy-config');
+const optionStore = require('./sr-option-store');
 
 const TICK = 0.05;
 
@@ -124,6 +125,33 @@ function liveFriction() {
   return 0.5;
 }
 
+function todayIso() { return new Date().toISOString().slice(0, 10); }
+
+async function loadOptionCandles(authorization, pick, day, mem) {
+  const key = `${pick.instrumentToken}|${day}`;
+  if (mem.has(key)) return { candles: mem.get(key), barsSource: 'memory' };
+  const disk = optionStore.loadBars(pick.instrumentToken, day);
+  const isToday = day === todayIso();
+  let kite = [];
+  if (authorization && (isToday || !disk.length)) {
+    try {
+      kite = await market.fetchHistorical5m(authorization, pick.instrumentToken, day, day) || [];
+    } catch (_) { kite = []; }
+  }
+  const candles = (kite.length >= disk.length ? kite : disk) || [];
+  if (kite.length) {
+    optionStore.saveBars({
+      instrumentToken: pick.instrumentToken,
+      tradingSymbol: pick.tradingSymbol,
+      date: day,
+      candles: kite,
+    });
+  }
+  mem.set(key, candles);
+  const barsSource = kite.length && kite.length >= disk.length ? 'kite' : (disk.length ? 'cache' : 'empty');
+  return { candles, barsSource };
+}
+
 async function optionPnlForTrade({ authorization, spec, trade, lots, session, pickOption }) {
   const cache = session || {};
   if (!cache._optHist) cache._optHist = new Map();
@@ -131,13 +159,14 @@ async function optionPnlForTrade({ authorization, spec, trade, lots, session, pi
   if (!pick || !(pick.instrumentToken > 0)) {
     return { rupees: null, rupeesSource: 'unavailable', reason: 'no-contract' };
   }
+  optionStore.saveContract({
+    name: spec.root, tradingSymbol: pick.tradingSymbol, instrumentToken: pick.instrumentToken,
+    expiry: pick.expiry, strike: pick.strike, instrumentType: pick.instrumentType,
+    exchange: pick.exchange, lotSize: pick.lotSize,
+  });
   const day = trade.date;
-  const key = `${pick.instrumentToken}|${day}`;
-  let candles = cache._optHist.get(key);
-  if (!candles) {
-    candles = await market.fetchHistorical5m(authorization, pick.instrumentToken, day, day);
-    cache._optHist.set(key, candles || []);
-  }
+  const { candles: rawBars, barsSource } = await loadOptionCandles(authorization, pick, day, cache._optHist);
+  const candles = Array.isArray(rawBars) ? rawBars : [];
   const entryBar = pickBar(candles, trade.entryTime);
   const exitBar = pickBar(candles, trade.exitTime) || (candles.length ? candles[candles.length - 1] : null);
   const friction = liveFriction();
@@ -171,7 +200,7 @@ async function optionPnlForTrade({ authorization, spec, trade, lots, session, pi
   if (gross == null) {
     return {
       rupees: null, rupeesSource: 'unavailable', reason: 'no-option-bars',
-      optionSymbol: pick.tradingSymbol, lotSize,
+      optionSymbol: pick.tradingSymbol, lotSize, barsSource,
     };
   }
   const charged = estimateRoundTripCharges({
@@ -180,7 +209,7 @@ async function optionPnlForTrade({ authorization, spec, trade, lots, session, pi
   const chargesRs = Math.round(Number(charged.totalRs) || 0);
   return {
     rupees: Math.round(gross - chargesRs),
-    rupeesSource: 'option-live',
+    rupeesSource: barsSource === 'cache' ? 'option-cache' : 'option-live',
     optionSymbol: pick.tradingSymbol,
     optionEntryPremium: entryPrem,
     optionExitPremium: exitPrem,
@@ -188,12 +217,27 @@ async function optionPnlForTrade({ authorization, spec, trade, lots, session, pi
     chargesRs,
     exitVia,
     slTrigger: slTrigger || null,
+    barsSource,
+  };
+}
+
+function summarizeSidecar(trades) {
+  const priced = (trades || []).filter((t) => !t.liveSkip && Number.isFinite(t.optionRupees));
+  const wins = priced.filter((t) => t.optionRupees > 0);
+  const losers = priced.filter((t) => t.optionRupees <= 0);
+  return {
+    priced: priced.length,
+    wins: wins.length,
+    losses: losers.length,
+    profit: wins.reduce((a, t) => a + t.optionRupees, 0),
+    loss: losers.reduce((a, t) => a + t.optionRupees, 0),
+    net: priced.reduce((a, t) => a + t.optionRupees, 0),
   };
 }
 
 function summarizeOptionTrades(trades) {
   const priced = trades.filter((t) => (
-    (t.rupeesSource === 'option' || t.rupeesSource === 'option-live' || t.rupeesSource === 'index-fut')
+    (t.rupeesSource === 'option' || t.rupeesSource === 'option-live' || t.rupeesSource === 'option-cache' || t.rupeesSource === 'index-fut')
     && !t.liveSkip
     && Number.isFinite(t.rupees)
   ));
@@ -214,6 +258,6 @@ function summarizeOptionTrades(trades) {
 }
 
 module.exports = {
-  optionRupees, pickBar, optionPnlForTrade, summarizeOptionTrades, hmOf,
+  optionRupees, pickBar, optionPnlForTrade, summarizeOptionTrades, summarizeSidecar, hmOf,
   liveLikeEntryPrem, liveLikeExitPrem, slLimitFill, markOneOpenLeg, barsInHold,
 };

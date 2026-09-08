@@ -3,8 +3,9 @@
  * S/R Breakout — Paper controller. RESEARCH / PAPER ONLY.
  * Fetches historical 5-min candles (read-only, via the pushed Kite token) and
  * runs the sr-breakout engine. Places NO orders. Nifty Paper ₹ defaults to
- * the index future (pts × 65), matching Live. Pass niftyVehicle:'option' to
- * re-price the same signals as CE/PE. Bank/Crude stay option premium.
+ * the index future (pts × 65). Every run also fetches CE/PE 5-min bars, saves
+ * them under sr-observations/option-cache, and fills optionRupees so the
+ * option book can be checked without changing Live.
  */
 const https = require('https');
 const market = require('./kite-market');
@@ -17,7 +18,7 @@ const collector = require('./sr-collector');
 const { auditDay } = require('./sr-debug');
 const { research } = require('./sr-research');
 const srLive = require('./sr-live');
-const { optionPnlForTrade, summarizeOptionTrades, markOneOpenLeg } = require('./sr-option-pnl');
+const { optionPnlForTrade, summarizeOptionTrades, summarizeSidecar, markOneOpenLeg } = require('./sr-option-pnl');
 
 function userId(req) { return req.user?.id || 'anonymous'; }
 
@@ -290,6 +291,13 @@ async function srBreakout(req, res) {
           });
           continue;
         }
+        const optSpec = liveSpec ? { ...liveSpec, vehicle: 'option' } : null;
+        const opt = optSpec
+          ? await optionPnlForTrade({
+            authorization, spec: optSpec, trade: t, lots, session: paperSess,
+            pickOption: srLive.pickOption,
+          })
+          : { rupees: null, rupeesSource: 'unavailable', reason: 'no-spec' };
         if (pricingSpec && pricingSpec.vehicle === 'fut') {
           tradesR.push({
             ...t, instrument: spec.name, contract,
@@ -297,23 +305,27 @@ async function srBreakout(req, res) {
             rupees: indexRupees,
             rupeesSource: 'index-fut',
             optionSymbol: 'NIFTY FUT',
-            optionEntryPremium: t.entryPrice,
-            optionExitPremium: t.exitPrice,
+            optionContract: opt.optionSymbol || null,
+            optionRupees: opt.rupees,
+            optionRupeesSource: opt.rupees != null ? (opt.rupeesSource || 'option-live') : 'unavailable',
+            optionBarsSource: opt.barsSource || null,
+            optionEntryPremium: opt.optionEntryPremium || null,
+            optionExitPremium: opt.optionExitPremium || null,
+            chargesRs: opt.chargesRs || null,
+            exitVia: opt.exitVia || null,
           });
           continue;
         }
-        const opt = pricingSpec
-          ? await optionPnlForTrade({
-            authorization, spec: pricingSpec, trade: t, lots, session: paperSess,
-            pickOption: srLive.pickOption,
-          })
-          : { rupees: null, rupeesSource: 'unavailable', reason: 'no-spec' };
         tradesR.push({
           ...t, instrument: spec.name, contract,
           indexRupees,
           rupees: opt.rupees,
           rupeesSource: opt.rupees != null ? (opt.rupeesSource || 'option-live') : 'unavailable',
           optionSymbol: opt.optionSymbol || null,
+          optionContract: opt.optionSymbol || null,
+          optionRupees: opt.rupees,
+          optionRupeesSource: opt.rupees != null ? (opt.rupeesSource || 'option-live') : 'unavailable',
+          optionBarsSource: opt.barsSource || null,
           optionEntryPremium: opt.optionEntryPremium || null,
           optionExitPremium: opt.optionExitPremium || null,
           chargesRs: opt.chargesRs || null,
@@ -322,10 +334,12 @@ async function srBreakout(req, res) {
       }
       const optSum = summarizeOptionTrades(tradesR);
       const usedOption = optSum.optionPriced > 0;
+      const optionBook = summarizeSidecar(tradesR);
       results.push({
         key, name: spec.name, contract, token, candles: candles.length,
         strategy: strat.label, strategyStatus: strat.status,   // auto-routed per instrument
         params: { entryPts, gapLo: spec.gapLo, gapHi: spec.gapHi, targetByScore: spec.targetByScore, lots, unitsPerLot, maxTradesPerDay, dayLossStopRs, dayProfitTargetRs, rupeesMode: usedOption ? (vehicle === 'fut' ? 'index-fut' : 'option-live') : 'unavailable', vehicle },
+        optionBook,
         summary: {
           ...summary,
           wins: usedOption ? optSum.optionWins : 0,

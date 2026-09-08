@@ -6,6 +6,7 @@
  */
 const market = require('./kite-market');
 const store = require('./live.store');
+const optionStore = require('./sr-option-store');
 const { runSrBreakout } = require('./sr-breakout');
 // Exit/entry rules come from the SHARED config so Live and Paper cannot drift.
 const { exitOptsFor, DEFAULT_LOTS, DAY_LOSS_STOP_RS, DAY_PROFIT_TARGET_RS, LOT_UNITS, OPTION_SL_MAX_RS } = require('./sr-strategy-config');
@@ -441,8 +442,11 @@ async function pickOption(authorization, spec, trade, session) {
     };
   }
 
-  const inst = session.nfoInstruments
-    || (session.nfoInstruments = await market.fetchInstruments(authorization));
+  const liveInst = session.nfoInstruments
+    || (session.nfoInstruments = await market.fetchInstruments(authorization).catch(() => []));
+  const inst = session.paperPick
+    ? optionStore.mergeNfoInstruments(liveInst, optionStore.listContracts(), spec.root, type)
+    : liveInst;
   const rows = inst.filter((r) =>
     String(r.name || '').toUpperCase() === spec.root &&
     r.instrumentType === type &&
@@ -463,13 +467,16 @@ async function pickOption(authorization, spec, trade, session) {
   if (session.paperPick) {
     candMeta.sort((a, b) => Math.abs(a.strike - atm) - Math.abs(b.strike - atm));
     const pick = candMeta[0];
-    return {
-      tradingSymbol: pick.tradingSymbol,
-      instrumentToken: Number(pick.instrumentToken) || 0,
-      exchange: 'NFO',
-      lotSize: Math.max(1, Number(pick.lotSize) || spec.unitsPerLot),
-      optionEntryPremium: null,
-    };
+      return {
+        tradingSymbol: pick.tradingSymbol,
+        instrumentToken: Number(pick.instrumentToken) || 0,
+        exchange: 'NFO',
+        lotSize: Math.max(1, Number(pick.lotSize) || spec.unitsPerLot),
+        optionEntryPremium: null,
+        expiry: pick.expiry,
+        strike: pick.strike,
+        instrumentType: type,
+      };
   }
   const keys = candMeta.map((m) => 'NFO:' + m.tradingSymbol).concat([spec.spotKey]);
   const qmap = await market.fetchQuotes(authorization, keys);
@@ -494,6 +501,9 @@ async function pickOption(authorization, spec, trade, session) {
     exchange: 'NFO',
     lotSize: Math.max(1, Number(pick.lotSize) || spec.unitsPerLot),
     optionEntryPremium: pick.ask || pick.ltp,
+    expiry: pick.expiry,
+    strike: pick.strike,
+    instrumentType: type,
   };
 }
 

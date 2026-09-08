@@ -24,6 +24,7 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const market = require('./kite-market');
+const optionStore = require('./sr-option-store');
 const { runSrBreakout } = require('./sr-breakout');
 const { EXECUTION_MODE } = require('./sr-execution-guard');
 const { LOT_UNITS } = require('./sr-strategy-config');
@@ -231,6 +232,19 @@ async function observe(authorization, opts = {}) {
           // option path (real 5m) — genuine premium excursion + virtual tracks
           try {
             const ob = rec.option_token ? (await market.fetchHistorical5m(authorization, rec.option_token, today, today)) || [] : [];
+            if (ob.length) {
+              optionStore.saveBars({
+                instrumentToken: rec.option_token,
+                tradingSymbol: rec.option_symbol,
+                date: today,
+                candles: ob,
+              });
+              optionStore.saveContract({
+                name: spec.root, tradingSymbol: rec.option_symbol, instrumentToken: rec.option_token,
+                expiry: rec.option_expiry, strike: rec.option_strike, instrumentType: rec.option_type,
+                exchange: 'NFO', lotSize: rec.lot_size,
+              });
+            }
             const oAfter = ob.filter((x) => hm(x.date) > t.entryTime && hm(x.date) <= spec.session.squareOffHm)
               .map((x) => ({ hm: hm(x.date), o: x.open, h: x.high, l: x.low, c: x.close }));
             if (oAfter.length) {
