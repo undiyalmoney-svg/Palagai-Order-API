@@ -279,18 +279,6 @@ async function srBreakout(req, res) {
       const tradesR = [];
       for (const t of markOneOpenLeg(trades)) {
         const indexRupees = Math.round(t.points * perPoint);
-        if (t.liveSkip) {
-          tradesR.push({
-            ...t, instrument: spec.name, contract,
-            indexRupees,
-            rupees: null,
-            rupeesSource: 'skipped-live-leg',
-            optionSymbol: null,
-            optionEntryPremium: null,
-            optionExitPremium: null,
-          });
-          continue;
-        }
         const optSpec = liveSpec ? { ...liveSpec, vehicle: 'option' } : null;
         const opt = optSpec
           ? await optionPnlForTrade({
@@ -298,6 +286,24 @@ async function srBreakout(req, res) {
             pickOption: srLive.pickOption,
           })
           : { rupees: null, rupeesSource: 'unavailable', reason: 'no-spec' };
+        if (t.liveSkip) {
+          tradesR.push({
+            ...t, instrument: spec.name, contract,
+            indexRupees,
+            rupees: null,
+            rupeesSource: 'skipped-live-leg',
+            optionSymbol: opt.optionSymbol || null,
+            optionContract: opt.optionSymbol || null,
+            optionRupees: opt.rupees,
+            optionRupeesSource: opt.rupees != null ? (opt.rupeesSource || 'option-live') : (opt.rupeesSource || 'unavailable'),
+            optionBarsSource: opt.barsSource || null,
+            optionEntryPremium: opt.optionEntryPremium || null,
+            optionExitPremium: opt.optionExitPremium || null,
+            chargesRs: opt.chargesRs || null,
+            exitVia: opt.exitVia || null,
+          });
+          continue;
+        }
         if (pricingSpec && pricingSpec.vehicle === 'fut') {
           tradesR.push({
             ...t, instrument: spec.name, contract,

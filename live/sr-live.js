@@ -7,6 +7,7 @@
 const market = require('./kite-market');
 const store = require('./live.store');
 const optionStore = require('./sr-option-store');
+const { archiveSrInstruments, instrumentsWithArchive } = require('./instrument-archive');
 const { runSrBreakout } = require('./sr-breakout');
 // Exit/entry rules come from the SHARED config so Live and Paper cannot drift.
 const { exitOptsFor, DEFAULT_LOTS, DAY_LOSS_STOP_RS, DAY_PROFIT_TARGET_RS, LOT_UNITS, OPTION_SL_MAX_RS } = require('./sr-strategy-config');
@@ -444,17 +445,32 @@ async function pickOption(authorization, spec, trade, session) {
 
   const liveInst = session.nfoInstruments
     || (session.nfoInstruments = await market.fetchInstruments(authorization).catch(() => []));
-  const inst = session.paperPick
-    ? optionStore.mergeNfoInstruments(liveInst, optionStore.listContracts(), spec.root, type)
-    : liveInst;
+  if (session.paperPick && liveInst.length && !session._srArchived) {
+    session._srArchived = true;
+    archiveSrInstruments(liveInst).catch(() => {});
+  }
+  let inst = liveInst;
+  if (session.paperPick) {
+    if (!session.nfoWithArchive) {
+      session.nfoWithArchive = await instrumentsWithArchive(liveInst);
+    }
+    inst = optionStore.mergeNfoInstruments(session.nfoWithArchive, optionStore.listContracts(), spec.root, type);
+  }
   const rows = inst.filter((r) =>
     String(r.name || '').toUpperCase() === spec.root &&
-    r.instrumentType === type &&
-    r.exchange === 'NFO' &&
-    r.instrumentToken > 0,
-  );
+    String(r.instrumentType || '').toUpperCase() === type &&
+    (r.exchange === 'NFO' || !r.exchange) &&
+    Number(r.instrumentToken) > 0,
+  ).map((r) => ({
+    ...r,
+    expiry: optionStore.expiryIso(r.expiry),
+    strike: Number(r.strike),
+    instrumentToken: Number(r.instrumentToken),
+  }));
   const expiries = [...new Set(rows.map((r) => r.expiry).filter(Boolean))].sort();
-  const expiry = expiries.find((e) => e > today) || expiries.find((e) => e >= today) || null;
+  const expiry = session.paperPick
+    ? optionStore.pickFrontExpiry(expiries, today, 14)
+    : (expiries.find((e) => e > today) || expiries.find((e) => e >= today) || null);
   if (!expiry) return null;
   const atm = Math.round(spot / spec.step) * spec.step;
   const candStrikes = dir > 0 ? [atm - spec.step, atm, atm + spec.step] : [atm + spec.step, atm, atm - spec.step];

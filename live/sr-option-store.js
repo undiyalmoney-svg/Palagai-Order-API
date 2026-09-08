@@ -100,7 +100,7 @@ function mergeNfoInstruments(live, archived, root, type) {
       name: a.name || name,
       tradingSymbol: a.tradingSymbol,
       instrumentToken: tok,
-      expiry: a.expiry,
+      expiry: expiryIso(a.expiry),
       strike: Number(a.strike) || 0,
       instrumentType: a.instrumentType || type,
       exchange: a.exchange || 'NFO',
@@ -110,6 +110,31 @@ function mergeNfoInstruments(live, archived, root, type) {
   return out;
 }
 
+function expiryIso(e) {
+  if (!e) return '';
+  if (e instanceof Date && !Number.isNaN(e.getTime())) return e.toISOString().slice(0, 10);
+  const m = String(e).match(/(\d{4}-\d{2}-\d{2})/);
+  return m ? m[1] : String(e).slice(0, 10);
+}
+
+/**
+ * Front weekly on the trade date. Never bind a 2025 signal to a 2026 weekly
+ * that is merely still listed on Kite today.
+ */
+function pickFrontExpiry(expiries, day, maxDays = 14) {
+  const trade = expiryIso(day);
+  if (!trade) return null;
+  const t0 = Date.parse(trade + 'T00:00:00Z');
+  if (!Number.isFinite(t0)) return null;
+  const sorted = [...new Set((expiries || []).map(expiryIso).filter(Boolean))].sort();
+  const next = sorted.find((e) => e > trade);
+  if (!next) return null;
+  const days = (Date.parse(next + 'T00:00:00Z') - t0) / 86400000;
+  if (!(days > 0) || days > maxDays) return null;
+  return next;
+}
+
 module.exports = {
   rootDir, loadBars, saveBars, listContracts, saveContract, mergeNfoInstruments,
+  expiryIso, pickFrontExpiry,
 };

@@ -8,6 +8,10 @@ const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sr-opt-store-'));
 process.env.SR_OPTION_STORE_DIR = dir;
 const store = require('./sr-option-store');
 
+assert.strictEqual(store.pickFrontExpiry(['2026-09-15', '2025-03-06', '2025-03-13'], '2025-03-01'), '2025-03-06');
+assert.strictEqual(store.pickFrontExpiry(['2026-09-15'], '2025-03-01'), null, 'must not bind an old signal to today\'s weekly');
+assert.strictEqual(store.pickFrontExpiry(['2026-09-15'], '2026-09-08'), '2026-09-15');
+
 assert.strictEqual(store.loadBars(1, '2026-09-01').length, 0);
 assert.ok(store.saveBars({
   instrumentToken: 99,
@@ -43,6 +47,20 @@ assert.strictEqual(store.mergeNfoInstruments([], store.listContracts(), 'NIFTY',
   }, { paperPick: true, nfoInstruments: [] });
   assert.ok(pick);
   assert.strictEqual(pick.tradingSymbol, 'NIFTY2690824100CE');
+  const historic = await pickOption('no-auth', SPEC.nifty, {
+    date: '2025-03-01', side: 'BUY', option: 'CE', entryPrice: 22000,
+  }, {
+    paperPick: true,
+    nfoInstruments: [
+      { name: 'NIFTY', tradingSymbol: 'NIFTY2691524100CE', instrumentToken: 1, expiry: '2026-09-15', strike: 24100, instrumentType: 'CE', exchange: 'NFO', lotSize: 65 },
+      { name: 'NIFTY', tradingSymbol: 'NIFTY2530622000CE', instrumentToken: 2, expiry: '2025-03-06', strike: 22000, instrumentType: 'CE', exchange: 'NFO', lotSize: 65 },
+    ],
+    nfoWithArchive: [
+      { name: 'NIFTY', tradingSymbol: 'NIFTY2691524100CE', instrumentToken: 1, expiry: '2026-09-15', strike: 24100, instrumentType: 'CE', exchange: 'NFO', lotSize: 65 },
+      { name: 'NIFTY', tradingSymbol: 'NIFTY2530622000CE', instrumentToken: 2, expiry: '2025-03-06', strike: 22000, instrumentType: 'CE', exchange: 'NFO', lotSize: 65 },
+    ],
+  });
+  assert.strictEqual(historic.tradingSymbol, 'NIFTY2530622000CE', 'historical trade uses that week\'s contract');
   fs.rmSync(dir, { recursive: true, force: true });
   console.log('sr-option-store.selftest ok');
 })().catch((e) => { console.error(e); process.exit(1); });

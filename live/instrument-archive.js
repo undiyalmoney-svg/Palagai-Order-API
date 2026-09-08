@@ -39,9 +39,28 @@ function isNiftyNfoRow(row) {
   return sym.startsWith('NIFTY') || name === 'NIFTY';
 }
 
+function isSrNfoRow(row) {
+  if (!row || row.exchange !== 'NFO') return false;
+  const name = String(row.name || '').toUpperCase();
+  const sym = String(row.tradingSymbol || '').toUpperCase();
+  if (name === 'BANKNIFTY' || sym.startsWith('BANKNIFTY')) {
+    const type = String(row.instrumentType || '').toUpperCase();
+    return type === 'CE' || type === 'PE' || type === 'FUT';
+  }
+  return isNiftyNfoRow(row);
+}
+
 /** Upsert today's live Nifty NFO rows into the archive. Never throws. */
 async function archiveInstruments(rows) {
-  const niftyRows = (rows || []).filter(isNiftyNfoRow);
+  return writeArchive((rows || []).filter(isNiftyNfoRow));
+}
+
+/** Nifty + Bank Nifty — S/R Paper historical option replay. */
+async function archiveSrInstruments(rows) {
+  return writeArchive((rows || []).filter(isSrNfoRow));
+}
+
+async function writeArchive(niftyRows) {
   if (!niftyRows.length) return { archived: 0 };
   try {
     const db = getDb();
@@ -99,4 +118,4 @@ async function instrumentsWithArchive(liveInstruments) {
   return merged;
 }
 
-module.exports = { archiveInstruments, instrumentsWithArchive, isNiftyNfoRow };
+module.exports = { archiveInstruments, archiveSrInstruments, instrumentsWithArchive, isNiftyNfoRow, isSrNfoRow };

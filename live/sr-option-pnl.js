@@ -222,10 +222,12 @@ async function optionPnlForTrade({ authorization, spec, trade, lots, session, pi
 }
 
 function summarizeSidecar(trades) {
-  const priced = (trades || []).filter((t) => !t.liveSkip && Number.isFinite(t.optionRupees));
+  const attempted = (trades || []).length;
+  const priced = (trades || []).filter((t) => Number.isFinite(t.optionRupees));
   const wins = priced.filter((t) => t.optionRupees > 0);
   const losers = priced.filter((t) => t.optionRupees <= 0);
   return {
+    attempted,
     priced: priced.length,
     wins: wins.length,
     losses: losers.length,
