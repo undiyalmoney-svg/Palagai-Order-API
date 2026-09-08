@@ -119,6 +119,8 @@ class LiveBroker {
     this.positions = new Map();
     /** @type {Map<string, number>} */
     this.lotsByInstrument = new Map();
+    /** Realised option ₹ this Live session (premium × qty), not index points. */
+    this.closedOptionRs = 0;
   }
 
   setMaxOpenLegs(n) {
@@ -147,6 +149,47 @@ class LiveBroker {
     }
   }
 
+  recordClosedOptionPnl(pos, fillPx) {
+    const entry = Number(pos?.entryPremium) || 0;
+    const qty = Number(pos?.quantity) || 0;
+    const px = Number(fillPx) || 0;
+    if (!(entry > 0 && px > 0 && qty > 0)) return 0;
+    const rs = (px - entry) * qty;
+    this.closedOptionRs += rs;
+    return rs;
+  }
+
+  moneySnapshot() {
+    let openRs = 0;
+    const legs = [];
+    for (const [instrumentId, p] of this.positions.entries()) {
+      const qty = Number(p?.quantity) || 0;
+      const entry = Number(p?.entryPremium) || 0;
+      const lastLtp = Number(p?.lastLtp) || 0;
+      const exitPx = Number(p?.exitPremium) || 0;
+      let pnlRs = null;
+      if (p?.status === 'open' && entry > 0 && lastLtp > 0 && qty > 0) {
+        pnlRs = (lastLtp - entry) * qty;
+        openRs += pnlRs;
+      } else if (p?.status === 'flat' && entry > 0 && exitPx > 0 && qty > 0) {
+        pnlRs = (exitPx - entry) * qty;
+      }
+      legs.push({
+        instrumentId,
+        symbol: p?.tradingSymbol || null,
+        status: p?.status || null,
+        quantity: qty,
+        entryPremium: entry || null,
+        exitPremium: exitPx || null,
+        lastLtp: lastLtp || null,
+        pnlRs: pnlRs != null ? Math.round(pnlRs) : null,
+      });
+    }
+    const closedRs = Math.round(this.closedOptionRs);
+    const openRounded = Math.round(openRs);
+    return { closedRs, openRs: openRounded, netRs: closedRs + openRounded, legs };
+  }
+
   setRealOrders(v) {
     this.realOrders = !!v;
   }
@@ -161,6 +204,7 @@ class LiveBroker {
 
   clear() {
     this.positions.clear();
+    this.closedOptionRs = 0;
   }
 
   /**
@@ -301,6 +345,7 @@ class LiveBroker {
         current.closedEntryTime = current.entryTime;
         current.exitPremium = fillPx || null;
         current.slOrderId = null;
+        if (fillPx > 0) this.recordClosedOptionPnl(current, fillPx);
         this.positions.set(instrumentId, current);
         if (fillPx > 0) {
           this.emitFill({
@@ -572,6 +617,7 @@ class LiveBroker {
     });
 
     const units = Math.max(1, Number(pos.quantity) || 0);
+    if (ltp > 0) pos.lastLtp = ltp;
     const liveMfeRs =
       ltp > 0 && pos.entryPremium > 0
         ? Math.max(0, (ltp - pos.entryPremium) * units)
@@ -857,6 +903,7 @@ class LiveBroker {
     pos.slOrderId = null;
     pos.closedBy = 'exit';
     pos.closedEntryTime = pos.entryTime;
+    if (fillPx > 0) this.recordClosedOptionPnl(pos, fillPx);
     this.pushEvent(
       'EXIT',
       `${instrumentName || ''}: SELL ${qty} ${pos.tradingSymbol} ${product} MARKET`.trim() +

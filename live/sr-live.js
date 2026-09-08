@@ -169,6 +169,9 @@ function statusPayload(session) {
     entered: [...session.entered],
     openSignals: Object.fromEntries(session.openSignal),
     positions,
+    kitePnl: session.broker && typeof session.broker.moneySnapshot === 'function'
+      ? session.broker.moneySnapshot()
+      : { closedRs: 0, openRs: 0, netRs: 0, legs: [] },
     events: session.events.slice(-80),
   };
 }

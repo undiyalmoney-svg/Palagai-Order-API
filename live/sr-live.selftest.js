@@ -124,4 +124,16 @@ assert.strictEqual(
 );
 assert.strictEqual(typeof trailCore.evaluateOptionPeakTrail, 'function');
 
+const { LiveBroker } = require('./live-broker');
+const broker = new LiveBroker({ pushEvent: () => {}, realOrders: false });
+broker.recordClosedOptionPnl({ entryPremium: 553, quantity: 30 }, 553);
+assert.strictEqual(broker.moneySnapshot().closedRs, 0, 'flat premium round-trip is ~₹0 option P&L, not index ₹600');
+broker.recordClosedOptionPnl({ entryPremium: 127.22, quantity: 65 }, 128.15);
+assert.strictEqual(broker.moneySnapshot().closedRs, Math.round((128.15 - 127.22) * 65));
+broker.positions.set('nifty', {
+  status: 'open', tradingSymbol: 'NIFTY25SEP23700PE', quantity: 65,
+  entryPremium: 127.22, lastLtp: 128.15,
+});
+assert.ok(broker.moneySnapshot().openRs > 0);
+
 console.log('sr-live.selftest: ok');
