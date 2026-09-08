@@ -362,6 +362,17 @@ async function pickOption(authorization, spec, trade, session) {
       if (found) candMeta.push(found);
     }
     if (!candMeta.length) return null;
+    if (session.paperPick) {
+      candMeta.sort((a, b) => Math.abs(a.strike - atm) - Math.abs(b.strike - atm));
+      const pick = candMeta[0];
+      return {
+        tradingSymbol: pick.sym,
+        instrumentToken: Number(pick.token) || 0,
+        exchange: 'MCX',
+        lotSize: Math.max(1, Number(pick.lotSize) || 1),
+        optionEntryPremium: null,
+      };
+    }
     const keys = candMeta.map((m) => 'MCX:' + m.sym);
     if (fut.symbol) keys.push('MCX:' + fut.symbol);
     const qmap = await market.fetchQuotes(authorization, keys);
@@ -408,6 +419,17 @@ async function pickOption(authorization, spec, trade, session) {
     if (found) candMeta.push(found);
   }
   if (!candMeta.length) return null;
+  if (session.paperPick) {
+    candMeta.sort((a, b) => Math.abs(a.strike - atm) - Math.abs(b.strike - atm));
+    const pick = candMeta[0];
+    return {
+      tradingSymbol: pick.tradingSymbol,
+      instrumentToken: Number(pick.instrumentToken) || 0,
+      exchange: 'NFO',
+      lotSize: Math.max(1, Number(pick.lotSize) || spec.unitsPerLot),
+      optionEntryPremium: null,
+    };
+  }
   const keys = candMeta.map((m) => 'NFO:' + m.tradingSymbol).concat([spec.spotKey]);
   const qmap = await market.fetchQuotes(authorization, keys);
   const cands = candMeta.map((m) => {

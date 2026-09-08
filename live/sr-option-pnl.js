@@ -125,10 +125,17 @@ function liveFriction() {
   return Number.isFinite(n) && n >= 0 ? n : 0.5;
 }
 
+function shouldSimSlLimit(exitReason) {
+  // S/R LOCK/TARGET/GIVEUP flatten with a MARKET sell after canceling the SL.
+  // Simulating the Auto Bot ₹300/lot stop on 5-min option *lows* dumps those
+  // winners (TARGET +20 pts → −₹800). Only the engine STOP is an SL exit.
+  return String(exitReason || '').toUpperCase() === 'STOP';
+}
+
 async function optionPnlForTrade({ authorization, spec, trade, lots, session, pickOption }) {
   const cache = session || {};
   if (!cache._optHist) cache._optHist = new Map();
-  const pick = await pickOption(authorization, spec, trade, cache);
+  const pick = await pickOption(authorization, spec, trade, { ...cache, paperPick: true });
   if (!pick || !(pick.instrumentToken > 0)) {
     return { rupees: null, rupeesSource: 'unavailable', reason: 'no-contract' };
   }
@@ -147,24 +154,27 @@ async function optionPnlForTrade({ authorization, spec, trade, lots, session, pi
   let exitVia = 'bid';
   const lotSize = Math.max(1, Number(pick.lotSize) || spec.unitsPerLot || 1);
   const qty = lotSize * Math.max(1, Number(lots) || 1);
+  let slTrigger = null;
 
-  const indexRisk = Math.abs(Number(trade.entryPrice) - indexStopPrice(trade, spec));
-  const slTrigger = computeProtectiveSlTrigger({
-    fillPremium: entryPrem,
-    indexRiskPts: indexRisk,
-    exchange: spec.exchange || pick.exchange,
-    tradingSymbol: pick.tradingSymbol,
-    ltp: entryPrem,
-    maxLossRs: (LIVE_GREEN_DNA.liveOps.maxOptionLossRs || 0) * Math.max(1, Number(lots) || 1),
-    lotUnits: qty,
-  });
-  for (const bar of barsInHold(candles, trade.entryTime, trade.exitTime)) {
-    const low = Number(bar.low) || Number(bar.close) || 0;
-    const fill = slLimitFill(slTrigger, low);
-    if (fill != null) {
-      exitPrem = fill;
-      exitVia = 'sl-limit';
-      break;
+  if (shouldSimSlLimit(trade.exitReason)) {
+    const indexRisk = Math.abs(Number(trade.entryPrice) - indexStopPrice(trade, spec));
+    slTrigger = computeProtectiveSlTrigger({
+      fillPremium: entryPrem,
+      indexRiskPts: indexRisk,
+      exchange: spec.exchange || pick.exchange,
+      tradingSymbol: pick.tradingSymbol,
+      ltp: entryPrem,
+      maxLossRs: (LIVE_GREEN_DNA.liveOps.maxOptionLossRs || 0) * Math.max(1, Number(lots) || 1),
+      lotUnits: qty,
+    });
+    for (const bar of barsInHold(candles, trade.entryTime, trade.exitTime)) {
+      const low = Number(bar.low) || Number(bar.close) || 0;
+      const fill = slLimitFill(slTrigger, low);
+      if (fill != null) {
+        exitPrem = fill;
+        exitVia = 'sl-limit';
+        break;
+      }
     }
   }
 
@@ -217,4 +227,5 @@ function summarizeOptionTrades(trades) {
 module.exports = {
   optionRupees, pickBar, optionPnlForTrade, summarizeOptionTrades, hmOf,
   liveLikeEntryPrem, liveLikeExitPrem, slLimitFill, markOneOpenLeg, barsInHold,
+  shouldSimSlLimit,
 };

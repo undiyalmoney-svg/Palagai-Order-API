@@ -160,7 +160,7 @@ broker.positions.set('nifty', {
 assert.ok(broker.moneySnapshot().openRs > 0);
 
 assert.strictEqual(typeof pickOption, 'function');
-const { optionRupees, pickBar, summarizeOptionTrades, liveLikeEntryPrem, liveLikeExitPrem, slLimitFill, markOneOpenLeg } = require('./sr-option-pnl');
+const { optionRupees, pickBar, summarizeOptionTrades, liveLikeEntryPrem, liveLikeExitPrem, slLimitFill, markOneOpenLeg, shouldSimSlLimit } = require('./sr-option-pnl');
 assert.strictEqual(optionRupees(553, 553, 30, 1), 0);
 assert.strictEqual(optionRupees(127.22, 128.15, 65, 1), Math.round((128.15 - 127.22) * 65));
 assert.strictEqual(optionRupees(0, 10, 65, 1), null);
@@ -197,5 +197,8 @@ assert.strictEqual(summarizeOptionTrades([
   { rupees: 100, rupeesSource: 'option-live' },
   { rupees: 50, rupeesSource: 'option-live', liveSkip: 'one-leg' },
 ]).netRupees, 100);
+assert.strictEqual(shouldSimSlLimit('TARGET'), false, 'TARGET is a market flatten, not the ₹300 wick SL');
+assert.strictEqual(shouldSimSlLimit('LOCK'), false);
+assert.strictEqual(shouldSimSlLimit('STOP'), true);
 
 console.log('sr-live.selftest: ok');
