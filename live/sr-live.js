@@ -101,6 +101,25 @@ function engineBookHasOpenTrade(trades, hm) {
   return (trades || []).some((t) => engineTradeStillOpen(t, hm));
 }
 
+/** Holding an option from 11:50 while Paper already opened 12:10 must SELL first.
+ *  Attaching the new engine id to the old Kite PE skipped Nifty LOCK #2 and #3.
+ *  After PM2 restart the adopted Kite row has entryTime null — still flatten,
+ *  never glue that fill onto a later still-open engine leg. */
+function mustExitHeldForNewLeg(held, tracked) {
+  const b = tracked?.entryTime;
+  if (!b) return false;
+  const a = held?.entryTime;
+  if (!a) return true;
+  return String(a) !== String(b);
+}
+
+function matchHeldEngineTrade(trades, openTrade, held) {
+  if (openTrade) return openTrade;
+  const t = held?.entryTime;
+  if (!t) return null;
+  return (trades || []).find((x) => String(x.entryTime) === String(t)) || null;
+}
+
 function decideLiveAction({ trade, nowHm: hm, alreadyOpen, squareOffHm, freshMinutes = FRESH_MINUTES }) {
   const now = hmToMin(hm);
   const entry = hmToMin(trade.entryTime);
@@ -415,6 +434,36 @@ async function pickOption(authorization, spec, trade, session) {
   };
 }
 
+async function pickFreshLiveEntry(session, authorization, spec, key, trades, hm, lots) {
+  for (const t of trades) {
+    const id = signalId(key, t);
+    if (session.entered.has(id)) continue;
+    const act = decideLiveAction({
+      trade: t, nowHm: hm, alreadyOpen: false, squareOffHm: spec.session.squareOffHm,
+    });
+    if (act !== 'enter') continue;
+    pushEvent(session, 'SIGNAL', `${t.entryTime} ${spec.name} ${t.option} — placing live BUY`);
+    const option = await pickOption(authorization, spec, t, session);
+    if (!option || !(option.instrumentToken > 0)) {
+      pushEvent(session, 'SKIP', `${spec.name}: no option contract to buy`);
+      session.entered.add(id);
+      continue;
+    }
+    session.entered.add(id);
+    session.openSignal.set(spec.bookId, id);
+    return {
+      option,
+      optionEntryPremium: option.optionEntryPremium,
+      indexEntry: t.entryPrice,
+      indexStop: indexStopPrice(t, spec),
+      indexTarget: t.side === 'BUY' ? t.entryPrice + (t.target || 20) : t.entryPrice - (t.target || 20),
+      entryTime: t.entryTime,
+      skipChargeGate: true,
+    };
+  }
+  return null;
+}
+
 async function onTick(session) {
   if (session.tickBusy) return;
   session.tickBusy = true;
@@ -470,19 +519,30 @@ async function onTick(session) {
               lotSize: Math.max(1, Number(current.quantity) || spec.unitsPerLot),
             }
             : null;
-          // Id can drift if the engine restamps entryTime; fall back to any
-          // engine leg that is still open so we do not hold a Kite PE after
-          // Paper already printed LOCK/TARGET on every trade.
-          let tracked = openTrade;
-          if (!tracked) {
-            tracked = trades.find((t) => engineTradeStillOpen(t, hm)) || null;
-            if (tracked) session.openSignal.set(bookId, signalId(key, tracked));
-          }
-          if (tracked) {
+          // Match the Kite fill to ITS engine row only. Never attach the next
+          // still-open Paper leg (12:10 / 13:20) onto an 11:50 PE we still hold.
+          const tracked = matchHeldEngineTrade(trades, openTrade, current);
+          const nextOpen = trades.find((t) => engineTradeStillOpen(t, hm)) || null;
+          if (tracked && mustExitHeldForNewLeg(current, tracked)) {
+            pushEvent(
+              session,
+              'SIGNAL',
+              `${spec.name} exit · next engine leg ${tracked.entryTime} — flatten held ${current.entryTime || 'adopted'} option first`,
+            );
+            session.openSignal.delete(bookId);
+          } else if (!tracked && nextOpen && mustExitHeldForNewLeg(current, nextOpen)) {
+            pushEvent(
+              session,
+              'SIGNAL',
+              `${spec.name} exit · next engine leg ${nextOpen.entryTime} — flatten held ${current.entryTime || 'adopted'} option first`,
+            );
+            session.openSignal.delete(bookId);
+          } else if (tracked) {
             const act = decideLiveAction({
               trade: tracked, nowHm: hm, alreadyOpen: true, squareOffHm: spec.session.squareOffHm,
             });
             if (act === 'hold' && opt) {
+              session.openSignal.set(bookId, signalId(key, tracked));
               open = {
                 option: opt,
                 indexEntry: tracked.entryPrice,
@@ -510,33 +570,7 @@ async function onTick(session) {
             };
           }
         } else {
-          for (const t of trades) {
-            const id = signalId(key, t);
-            if (session.entered.has(id)) continue;
-            const act = decideLiveAction({
-              trade: t, nowHm: hm, alreadyOpen: false, squareOffHm: spec.session.squareOffHm,
-            });
-            if (act !== 'enter') continue;
-            pushEvent(session, 'SIGNAL', `${t.entryTime} ${spec.name} ${t.option} — placing live BUY`);
-            const option = await pickOption(authorization, spec, t, session);
-            if (!option || !(option.instrumentToken > 0)) {
-              pushEvent(session, 'SKIP', `${spec.name}: no option contract to buy`);
-              session.entered.add(id);
-              break;
-            }
-            session.entered.add(id);
-            session.openSignal.set(bookId, id);
-            open = {
-              option,
-              optionEntryPremium: option.optionEntryPremium,
-              indexEntry: t.entryPrice,
-              indexStop: indexStopPrice(t, spec),
-              indexTarget: t.side === 'BUY' ? t.entryPrice + (t.target || 20) : t.entryPrice - (t.target || 20),
-              entryTime: t.entryTime,
-              skipChargeGate: true,
-            };
-            break;
-          }
+          open = await pickFreshLiveEntry(session, authorization, spec, key, trades, hm, lots);
         }
 
         await session.broker.syncInstrument({
@@ -546,6 +580,19 @@ async function onTick(session) {
           open,
           lots,
         });
+        const after = session.broker.positions.get(bookId);
+        if (!open && (!after || after.status === 'flat' || after.status === 'error')) {
+          const next = await pickFreshLiveEntry(session, authorization, spec, key, trades, hm, lots);
+          if (next) {
+            await session.broker.syncInstrument({
+              authorization,
+              instrumentId: bookId,
+              instrumentName: spec.name,
+              open: next,
+              lots,
+            });
+          }
+        }
       } catch (e) {
         pushEvent(session, 'ERROR', `${spec.name}: ${e.message}`);
       }
@@ -563,5 +610,5 @@ function status(userId) {
 
 module.exports = {
   start, stop, status, decideLiveAction, applyDeskLimits, signalId, hmToMin,
-  engineTradeStillOpen, engineBookHasOpenTrade, pickOption, SPEC, FRESH_MINUTES, _sessions: sessions,
+  engineTradeStillOpen, engineBookHasOpenTrade, mustExitHeldForNewLeg, matchHeldEngineTrade, pickOption, SPEC, FRESH_MINUTES, _sessions: sessions,
 };

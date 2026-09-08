@@ -1,6 +1,6 @@
 'use strict';
 const assert = require('assert');
-const { decideLiveAction, signalId, hmToMin, SPEC, applyDeskLimits, engineTradeStillOpen, engineBookHasOpenTrade, pickOption } = require('./sr-live');
+const { decideLiveAction, signalId, hmToMin, SPEC, applyDeskLimits, engineTradeStillOpen, engineBookHasOpenTrade, mustExitHeldForNewLeg, matchHeldEngineTrade, pickOption } = require('./sr-live');
 const { exitOptsFor, LOT_UNITS } = require('./sr-strategy-config');
 
 assert.deepStrictEqual(SPEC.nifty.opts, exitOptsFor('nifty'), 'Live Nifty opts must match Paper shared config');
@@ -72,6 +72,29 @@ assert.strictEqual(decideLiveAction({
   trade: { ...trade, exitReason: 'LOCK', exitTime: '10:25' },
   nowHm: '10:26', alreadyOpen: true, squareOffHm: '15:15',
 }), 'exit', 'Nifty profit-lock must flatten Live');
+assert.strictEqual(
+  mustExitHeldForNewLeg({ entryTime: '11:50' }, { entryTime: '12:10' }),
+  true,
+  'do not hold 11:50 PE through the 12:10 LOCK',
+);
+assert.strictEqual(mustExitHeldForNewLeg({ entryTime: '11:50' }, { entryTime: '11:50' }), false);
+assert.strictEqual(
+  mustExitHeldForNewLeg({ entryTime: null }, { entryTime: '12:10' }),
+  true,
+  'adopted Kite PE after restart must not be glued to a later Paper leg',
+);
+{
+  const book = [
+    { entryTime: '11:50', exitReason: 'LOCK', exitTime: '12:00' },
+    { entryTime: '12:10', exitReason: 'CLOSE', exitTime: '12:15' },
+  ];
+  assert.strictEqual(
+    matchHeldEngineTrade(book, null, { entryTime: '11:50' }).entryTime,
+    '11:50',
+    'held fill matches its own engine row, not the next open LOCK',
+  );
+  assert.strictEqual(matchHeldEngineTrade(book, null, { entryTime: null }), null);
+}
 assert.strictEqual(decideLiveAction({
   trade: { ...trade, exitReason: 'GIVEUP', exitTime: '10:25' },
   nowHm: '10:26', alreadyOpen: true, squareOffHm: '15:15',
