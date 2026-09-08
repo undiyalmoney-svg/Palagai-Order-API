@@ -1,6 +1,6 @@
 'use strict';
 const assert = require('assert');
-const { decideLiveAction, signalId, hmToMin, SPEC, applyDeskLimits, engineTradeStillOpen, engineBookHasOpenTrade, mustExitHeldForNewLeg, matchHeldEngineTrade, pickOption } = require('./sr-live');
+const { decideLiveAction, signalId, hmToMin, SPEC, applyDeskLimits, engineTradeStillOpen, engineBookHasOpenTrade, mustExitHeldForNewLeg, matchHeldEngineTrade, pickOption, selectNearestFut } = require('./sr-live');
 const { exitOptsFor, LOT_UNITS, OPTION_SL_MAX_RS } = require('./sr-strategy-config');
 
 assert.deepStrictEqual(SPEC.nifty.opts, exitOptsFor('nifty'), 'Live Nifty opts must match Paper shared config');
@@ -24,6 +24,15 @@ assert.strictEqual(LOT_UNITS.banknifty, 30, 'Bank lot is 30 from Jan 2026');
 assert.strictEqual(SPEC.nifty.unitsPerLot, LOT_UNITS.nifty);
 assert.strictEqual(SPEC.banknifty.unitsPerLot, LOT_UNITS.banknifty);
 assert.strictEqual(SPEC.nifty.opts.stopPts, 5000 / 65);
+assert.strictEqual(SPEC.nifty.vehicle, 'fut', 'Nifty Live/Paper enter the index future, not CE/PE');
+{
+  const row = selectNearestFut([
+    { name: 'NIFTY', instrumentType: 'FUT', instrumentToken: 1, expiry: '2026-09-24', tradingSymbol: 'NIFTY26SEPFUT' },
+    { name: 'NIFTY', instrumentType: 'FUT', instrumentToken: 2, expiry: '2026-08-28', tradingSymbol: 'NIFTY26AUGFUT' },
+    { name: 'NIFTY', instrumentType: 'CE', instrumentToken: 3, expiry: '2026-09-15', tradingSymbol: 'NIFTY2591524000CE' },
+  ], 'NIFTY', '2026-09-08');
+  assert.strictEqual(row.tradingSymbol, 'NIFTY26SEPFUT');
+}
 
 const trade = {
   date: '2026-09-05', side: 'BUY', option: 'CE',
@@ -163,7 +172,11 @@ broker.positions.set('nifty', {
   status: 'open', tradingSymbol: 'NIFTY25SEP23700PE', quantity: 65,
   entryPremium: 127.22, lastLtp: 128.15,
 });
-assert.ok(broker.moneySnapshot().openRs > 0);
+broker.positions.set('nifty-short', {
+  status: 'open', tradingSymbol: 'NIFTY26SEPFUT', quantity: 65,
+  entryPremium: 23650, lastLtp: 23645, direction: 'SELL', vehicle: 'fut',
+});
+assert.ok(broker.moneySnapshot().legs.find((l) => l.symbol === 'NIFTY26SEPFUT').pnlRs > 0, 'short fut profits when price falls');
 
 assert.strictEqual(typeof pickOption, 'function');
 const { optionRupees, pickBar, summarizeOptionTrades, liveLikeEntryPrem, liveLikeExitPrem, slLimitFill, markOneOpenLeg } = require('./sr-option-pnl');

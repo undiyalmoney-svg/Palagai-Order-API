@@ -18,6 +18,10 @@ const { fetchQuotes } = require('./kite-market');
 /** "NIFTY26AUG24200CE" -> "Nifty 24200 CE" for human-readable event logs. */
 function niceOption(sym) {
   const s = String(sym || '').toUpperCase();
+  if (/FUT$/.test(s)) {
+    if (s.startsWith('BANKNIFTY')) return 'Bank Fut';
+    if (s.startsWith('NIFTY')) return 'Nifty Fut';
+  }
   const m = /^(BANKNIFTY|NIFTY)\w*?(\d{4,6})(CE|PE)$/.exec(s);
   if (!m) return sym || 'option';
   const name = m[1] === 'BANKNIFTY' ? 'Bank' : 'Nifty';
@@ -41,13 +45,16 @@ function roundOptionTick(p) {
  * F&O, so we place a Stop-Loss LIMIT (order_type 'SL') with the limit ~10%
  * below the trigger so it still fills like a stop-market on a normal move.
  */
-function slOrderFields({ exchange, tradingsymbol, quantity, product, trigger }) {
+function slOrderFields({ exchange, tradingsymbol, quantity, product, trigger, direction }) {
   const trig = Math.max(TICK, Math.round((Number(trigger) || 0) / TICK) * TICK);
-  const limit = Math.max(TICK, Math.round((trig * 0.9) / TICK) * TICK);
+  const isShort = String(direction || 'BUY').toUpperCase() === 'SELL';
+  const limit = isShort
+    ? Math.max(TICK, Math.round((trig * 1.1) / TICK) * TICK)
+    : Math.max(TICK, Math.round((trig * 0.9) / TICK) * TICK);
   return {
     exchange,
     tradingsymbol,
-    transaction_type: 'SELL',
+    transaction_type: isShort ? 'BUY' : 'SELL',
     order_type: 'SL',
     quantity: String(quantity),
     product: product || 'MIS',
@@ -56,6 +63,18 @@ function slOrderFields({ exchange, tradingsymbol, quantity, product, trigger }) 
     price: limit.toFixed(2),
     tag: 'PALAGAISL',
   };
+}
+
+function isFutSymbol(sym) {
+  return /FUT$/i.test(String(sym || ''));
+}
+
+function signedPnl(entry, exit, qty, direction) {
+  const e = Number(entry) || 0;
+  const x = Number(exit) || 0;
+  const q = Number(qty) || 0;
+  if (!(e > 0 && x > 0 && q > 0)) return 0;
+  return (String(direction) === 'SELL' ? (e - x) : (x - e)) * q;
 }
 
 /** Map a broker option symbol back to the desk instrument id. */
@@ -156,7 +175,7 @@ class LiveBroker {
     const qty = Number(pos?.quantity) || 0;
     const px = Number(fillPx) || 0;
     if (!(entry > 0 && px > 0 && qty > 0)) return 0;
-    const rs = (px - entry) * qty;
+    const rs = signedPnl(entry, px, qty, pos.direction);
     this.closedOptionRs += rs;
     return rs;
   }
@@ -171,10 +190,10 @@ class LiveBroker {
       const exitPx = Number(p?.exitPremium) || 0;
       let pnlRs = null;
       if (p?.status === 'open' && entry > 0 && lastLtp > 0 && qty > 0) {
-        pnlRs = (lastLtp - entry) * qty;
+        pnlRs = signedPnl(entry, lastLtp, qty, p.direction);
         openRs += pnlRs;
       } else if (p?.status === 'flat' && entry > 0 && exitPx > 0 && qty > 0) {
-        pnlRs = (exitPx - entry) * qty;
+        pnlRs = signedPnl(entry, exitPx, qty, p.direction);
       }
       legs.push({
         instrumentId,
@@ -237,7 +256,7 @@ class LiveBroker {
       let adopted = 0;
       for (const row of rows) {
         const qty = Number(row.quantity || 0);
-        if (qty <= 0) continue; // only long option positions we hold
+        if (qty === 0) continue;
         const sym = row.tradingsymbol || '';
         const instrumentId = instrumentIdForSymbol(sym);
         if (!instrumentId) continue;
@@ -258,11 +277,12 @@ class LiveBroker {
           tradingSymbol: sym,
           instrumentToken: Number(row.instrument_token || 0) || null,
           quantity: Math.abs(qty),
-          direction: 'BUY',
+          direction: qty < 0 ? 'SELL' : 'BUY',
+          vehicle: isFutSymbol(sym) ? 'fut' : 'option',
           entryOrderId: null,
           slOrderId: sl?.order_id || null,
           exitOrderId: null,
-          entryPremium: Number(row.average_price || row.buy_price || 0) || null,
+          entryPremium: Number(row.average_price || row.buy_price || row.sell_price || 0) || null,
           slTrigger: sl?.trigger_price != null ? Number(sl.trigger_price) : null,
           entryTime: null,
           exchange,
@@ -292,15 +312,18 @@ class LiveBroker {
       ? Math.abs(open.indexEntry - open.indexStop)
       : Math.abs(Number(pos.indexEntry || 0) - Number(pos.indexStop || 0));
     const ltp = await this.resolveOptionLtp(authorization, pos.tradingSymbol, pos.exchange);
-    const trigger = computeProtectiveSlTrigger({
-      fillPremium: pos.entryPremium,
-      indexRiskPts: indexRisk,
-      exchange: pos.exchange,
-      tradingSymbol: pos.tradingSymbol,
-      ltp,
-      maxLossRs: this.optionMaxLossRs(pos.instrumentId),
-      lotUnits: pos.quantity,
-    });
+    const fut = pos.vehicle === 'fut' || isFutSymbol(pos.tradingSymbol) || open?.vehicle === 'fut';
+    const trigger = fut && (open?.indexStop > 0 || pos.indexStop > 0)
+      ? roundOptionTick(open?.indexStop || pos.indexStop)
+      : computeProtectiveSlTrigger({
+        fillPremium: pos.entryPremium,
+        indexRiskPts: indexRisk,
+        exchange: pos.exchange,
+        tradingSymbol: pos.tradingSymbol,
+        ltp,
+        maxLossRs: this.optionMaxLossRs(pos.instrumentId),
+        lotUnits: pos.quantity,
+      });
     if (!(trigger > 0)) return;
     const res = await kiteService.placeOrder(
       authorization,
@@ -311,6 +334,7 @@ class LiveBroker {
         quantity: pos.quantity,
         product: pos.product,
         trigger,
+        direction: pos.direction,
       }),
     );
     const id = res.data?.data?.order_id || null;
@@ -480,7 +504,9 @@ class LiveBroker {
     const lotsMult = this.lotsFor(instrumentId);
     const quantity = lotSize * lotsMult;
     const product = 'MIS';
-    if (!open.skipChargeGate) {
+    const direction = open.direction === 'SELL' ? 'SELL' : 'BUY';
+    const vehicle = open.vehicle === 'fut' || isFutSymbol(sym) ? 'fut' : 'option';
+    if (!open.skipChargeGate && vehicle !== 'fut') {
       const chargeGate = evaluateChargeEntryGate({
         instrumentId,
         entryPremium: open.optionEntryPremium,
@@ -500,7 +526,7 @@ class LiveBroker {
     const response = await kiteService.placeOrder(authorization, 'regular', {
       exchange,
       tradingsymbol: sym,
-      transaction_type: 'BUY',
+      transaction_type: direction,
       order_type: 'MARKET',
       quantity: String(quantity),
       product,
@@ -511,7 +537,7 @@ class LiveBroker {
     const entryOrderId = response.data?.data?.order_id;
     if (response.status >= 400 || !entryOrderId) {
       const msg = response.data?.message || `entry HTTP ${response.status}`;
-      this.pushEvent('ERROR', `Buy order failed — ${msg}`);
+      this.pushEvent('ERROR', `${direction === 'SELL' ? 'Sell' : 'Buy'} order failed — ${msg}`);
       this.positions.set(instrumentId, {
         status: 'error',
         tradingSymbol: sym,
@@ -522,7 +548,7 @@ class LiveBroker {
 
     this.pushEvent(
       'ENTRY',
-      `Bought ${lotsMult} lot${lotsMult > 1 ? 's' : ''} ${niceOption(sym)} (${quantity} qty)`,
+      `${direction === 'SELL' ? 'Sold' : 'Bought'} ${lotsMult} lot${lotsMult > 1 ? 's' : ''} ${niceOption(sym)} (${quantity} qty)`,
     );
 
     await delay(900);
@@ -535,20 +561,22 @@ class LiveBroker {
     );
     const indexRisk = Math.abs(open.indexEntry - open.indexStop);
     const ltp = await this.resolveOptionLtp(authorization, sym, exchange);
-    const slTrigger = computeProtectiveSlTrigger({
-      fillPremium,
-      indexRiskPts: indexRisk,
-      exchange,
-      tradingSymbol: sym,
-      ltp,
-      maxLossRs: this.optionMaxLossRs(instrumentId),
-      lotUnits: quantity,
-    });
+    const slTrigger = vehicle === 'fut' && open.indexStop > 0
+      ? roundOptionTick(open.indexStop)
+      : computeProtectiveSlTrigger({
+        fillPremium,
+        indexRiskPts: indexRisk,
+        exchange,
+        tradingSymbol: sym,
+        ltp,
+        maxLossRs: this.optionMaxLossRs(instrumentId),
+        lotUnits: quantity,
+      });
 
     const slRes = await kiteService.placeOrder(
       authorization,
       'regular',
-      slOrderFields({ exchange, tradingsymbol: sym, quantity, product, trigger: slTrigger }),
+      slOrderFields({ exchange, tradingsymbol: sym, quantity, product, trigger: slTrigger, direction }),
     );
     const slOrderId = slRes.data?.data?.order_id || null;
     if (slRes.status >= 400 || !slOrderId) {
@@ -570,7 +598,8 @@ class LiveBroker {
       tradingSymbol: sym,
       instrumentToken: option.instrumentToken,
       quantity,
-      direction: 'BUY',
+      direction,
+      vehicle,
       entryOrderId,
       slOrderId,
       exitOrderId: null,
@@ -688,6 +717,7 @@ class LiveBroker {
   }
 
   async syncProtectiveSl(authorization, pos, open, instrumentName) {
+    if (pos.vehicle === 'fut' || isFutSymbol(pos.tradingSymbol) || open?.vehicle === 'fut') return;
     if (!pos.slOrderId || !(pos.entryPremium > 0)) return;
     const ltp = await this.resolveOptionLtp(authorization, pos.tradingSymbol, pos.exchange);
     const { trigger: next, forceExit, floorPremium } = this.computeTrailingSlTrigger(
@@ -786,7 +816,6 @@ class LiveBroker {
         return (
           (o.tradingsymbol || '').toUpperCase() === sym &&
           (ot === 'SL' || ot === 'SL-M') &&
-          String(o.transaction_type || '').toUpperCase() === 'SELL' &&
           isPendingSl(o.status)
         );
       });
@@ -820,7 +849,6 @@ class LiveBroker {
       return (
         (o.tradingsymbol || '').toUpperCase() === sym &&
         (ot === 'SL' || ot === 'SL-M') &&
-        String(o.transaction_type || '').toUpperCase() === 'SELL' &&
         isPendingSl(o.status)
       );
     });
@@ -890,10 +918,11 @@ class LiveBroker {
     }
 
     const product = pos.product || 'MIS';
+    const exitTxn = pos.direction === 'SELL' ? 'BUY' : 'SELL';
     const res = await kiteService.placeOrder(authorization, 'regular', {
       exchange: pos.exchange,
       tradingsymbol: pos.tradingSymbol,
-      transaction_type: 'SELL',
+      transaction_type: exitTxn,
       order_type: 'MARKET',
       quantity: String(qty),
       product,
@@ -919,7 +948,7 @@ class LiveBroker {
     if (fillPx > 0) this.recordClosedOptionPnl(pos, fillPx);
     this.pushEvent(
       'EXIT',
-      `${instrumentName || ''}: SELL ${qty} ${pos.tradingSymbol} ${product} MARKET`.trim() +
+      `${instrumentName || ''}: ${exitTxn} ${qty} ${pos.tradingSymbol} ${product} MARKET`.trim() +
         (fillPx ? ` @ ${tickStr(fillPx)}` : ''),
     );
     if (fillPx > 0) {
@@ -958,8 +987,9 @@ class LiveBroker {
           continue;
         }
         const q = Number(row.quantity || 0);
-        // Long options only — never abs(short) or we would sell into a larger short.
-        if (q > 0) return q;
+        if (pos.direction === 'SELL') {
+          if (q < 0) return Math.abs(q);
+        } else if (q > 0) return q;
       }
       return 0;
     };

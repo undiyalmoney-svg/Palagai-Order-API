@@ -288,6 +288,18 @@ async function srBreakout(req, res) {
           });
           continue;
         }
+        if (liveSpec && liveSpec.vehicle === 'fut') {
+          tradesR.push({
+            ...t, instrument: spec.name, contract,
+            indexRupees,
+            rupees: indexRupees,
+            rupeesSource: 'index-fut',
+            optionSymbol: 'NIFTY FUT',
+            optionEntryPremium: t.entryPrice,
+            optionExitPremium: t.exitPrice,
+          });
+          continue;
+        }
         const opt = liveSpec
           ? await optionPnlForTrade({
             authorization, spec: liveSpec, trade: t, lots, session: paperSess,
@@ -311,7 +323,7 @@ async function srBreakout(req, res) {
       results.push({
         key, name: spec.name, contract, token, candles: candles.length,
         strategy: strat.label, strategyStatus: strat.status,   // auto-routed per instrument
-        params: { entryPts, gapLo: spec.gapLo, gapHi: spec.gapHi, targetByScore: spec.targetByScore, lots, unitsPerLot, maxTradesPerDay, dayLossStopRs, dayProfitTargetRs, rupeesMode: usedOption ? 'option-live' : 'unavailable' },
+        params: { entryPts, gapLo: spec.gapLo, gapHi: spec.gapHi, targetByScore: spec.targetByScore, lots, unitsPerLot, maxTradesPerDay, dayLossStopRs, dayProfitTargetRs, rupeesMode: usedOption ? (liveSpec && liveSpec.vehicle === 'fut' ? 'index-fut' : 'option-live') : 'unavailable' },
         summary: {
           ...summary,
           wins: usedOption ? optSum.optionWins : 0,

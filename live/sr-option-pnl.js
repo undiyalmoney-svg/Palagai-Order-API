@@ -193,7 +193,7 @@ async function optionPnlForTrade({ authorization, spec, trade, lots, session, pi
 
 function summarizeOptionTrades(trades) {
   const priced = trades.filter((t) => (
-    (t.rupeesSource === 'option' || t.rupeesSource === 'option-live')
+    (t.rupeesSource === 'option' || t.rupeesSource === 'option-live' || t.rupeesSource === 'index-fut')
     && !t.liveSkip
     && Number.isFinite(t.rupees)
   ));

@@ -21,6 +21,9 @@ const SPEC = {
     bookId: NIFTY_50_INSTRUMENT.id, root: 'NIFTY', step: 50, spotKey: 'NSE:NIFTY 50',
     session: { entryStartHm: '09:45', entryEndHm: '14:30', squareOffHm: '15:15' },
     entryPts: 27, gapLo: 100, gapHi: 175, targetByScore: { 1: 20, 2: 25, 3: 30 },
+    // Cash Nifty 50 cannot be traded. Nearest NFO future: 1 pt = ₹65, same as
+    // the green Paper pts column. CE signal = BUY fut, PE = SELL fut.
+    vehicle: 'fut',
     opts: exitOptsFor('nifty'),
   },
   banknifty: {
@@ -347,6 +350,39 @@ function crudeStrikeStep(optRows, atm) {
   return best || 50;
 }
 
+function selectNearestFut(rows, root, today) {
+  const want = String(root || '').toUpperCase();
+  const list = (rows || []).filter((r) =>
+    String(r.name || '').toUpperCase() === want &&
+    String(r.instrumentType || '').toUpperCase() === 'FUT' &&
+    Number(r.instrumentToken) > 0,
+  );
+  const expiries = [...new Set(list.map((r) => r.expiry).filter(Boolean))].sort();
+  const expiry = expiries.find((e) => e > today) || expiries.find((e) => e >= today) || null;
+  if (!expiry) return null;
+  return list.find((r) => r.expiry === expiry) || null;
+}
+
+async function pickIndexFuture(authorization, spec, session, today) {
+  session = session || {};
+  const inst = session.nfoInstruments
+    || (session.nfoInstruments = await market.fetchInstruments(authorization));
+  const found = selectNearestFut(inst, spec.root, today || todayIso());
+  if (!found) return null;
+  let ltp = null;
+  try {
+    const qmap = await market.fetchQuotes(authorization, ['NFO:' + found.tradingSymbol]);
+    ltp = qmap['NFO:' + found.tradingSymbol]?.last_price ?? null;
+  } catch (_) { /* paper can price from index pts without LTP */ }
+  return {
+    tradingSymbol: found.tradingSymbol,
+    instrumentToken: Number(found.instrumentToken) || 0,
+    exchange: 'NFO',
+    lotSize: Math.max(1, Number(found.lotSize) || spec.unitsPerLot),
+    optionEntryPremium: ltp,
+  };
+}
+
 async function pickOption(authorization, spec, trade, session) {
   session = session || {};
   const dir = trade.side === 'BUY' ? 1 : -1;
@@ -469,10 +505,13 @@ async function pickFreshLiveEntry(session, authorization, spec, key, trades, hm,
       trade: t, nowHm: hm, alreadyOpen: false, squareOffHm: spec.session.squareOffHm,
     });
     if (act !== 'enter') continue;
-    pushEvent(session, 'SIGNAL', `${t.entryTime} ${spec.name} ${t.option} — placing live BUY`);
-    const option = await pickOption(authorization, spec, t, session);
+    const fut = spec.vehicle === 'fut';
+    pushEvent(session, 'SIGNAL', `${t.entryTime} ${spec.name} ${fut ? 'FUT ' + t.side : t.option} — placing live ${fut && t.side === 'SELL' ? 'SELL' : 'BUY'}`);
+    const option = fut
+      ? await pickIndexFuture(authorization, spec, session, t.date)
+      : await pickOption(authorization, spec, t, session);
     if (!option || !(option.instrumentToken > 0)) {
-      pushEvent(session, 'SKIP', `${spec.name}: no option contract to buy`);
+      pushEvent(session, 'SKIP', `${spec.name}: no ${fut ? 'Nifty future' : 'option contract'} to trade`);
       session.entered.add(id);
       continue;
     }
@@ -485,6 +524,9 @@ async function pickFreshLiveEntry(session, authorization, spec, key, trades, hm,
       indexStop: indexStopPrice(t, spec),
       indexTarget: t.side === 'BUY' ? t.entryPrice + (t.target || 20) : t.entryPrice - (t.target || 20),
       entryTime: t.entryTime,
+      direction: t.side === 'SELL' ? 'SELL' : 'BUY',
+      vehicle: fut ? 'fut' : 'option',
+      skipChargeGate: !!fut,
     };
   }
   return null;
@@ -576,6 +618,8 @@ async function onTick(session) {
                 indexTarget: tracked.side === 'BUY' ? tracked.entryPrice + tracked.target : tracked.entryPrice - tracked.target,
                 entryTime: tracked.entryTime,
                 skipChargeGate: true,
+                direction: current.direction || (tracked.side === 'SELL' ? 'SELL' : 'BUY'),
+                vehicle: spec.vehicle || current.vehicle || 'option',
               };
             } else if (act === 'exit') {
               pushEvent(session, 'SIGNAL', `${spec.name} exit · ${tracked.exitReason} at ${tracked.exitTime}`);
@@ -593,6 +637,8 @@ async function onTick(session) {
               indexStop: current.indexStop,
               entryTime: current.entryTime,
               skipChargeGate: true,
+              direction: current.direction || 'BUY',
+              vehicle: current.vehicle || spec.vehicle || 'option',
             };
           }
         } else {
@@ -636,5 +682,5 @@ function status(userId) {
 
 module.exports = {
   start, stop, status, decideLiveAction, applyDeskLimits, signalId, hmToMin,
-  engineTradeStillOpen, engineBookHasOpenTrade, mustExitHeldForNewLeg, matchHeldEngineTrade, pickOption, SPEC, FRESH_MINUTES, _sessions: sessions,
+  engineTradeStillOpen, engineBookHasOpenTrade, mustExitHeldForNewLeg, matchHeldEngineTrade, pickOption, pickIndexFuture, selectNearestFut, SPEC, FRESH_MINUTES, _sessions: sessions,
 };
