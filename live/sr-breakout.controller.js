@@ -292,15 +292,7 @@ async function srBreakout(req, res) {
             indexRupees,
             rupees: null,
             rupeesSource: 'skipped-live-leg',
-            optionSymbol: opt.optionSymbol || null,
-            optionContract: opt.optionSymbol || null,
-            optionRupees: opt.rupees,
-            optionRupeesSource: opt.rupees != null ? (opt.rupeesSource || 'option-live') : (opt.rupeesSource || 'unavailable'),
-            optionBarsSource: opt.barsSource || null,
-            optionEntryPremium: opt.optionEntryPremium || null,
-            optionExitPremium: opt.optionExitPremium || null,
-            chargesRs: opt.chargesRs || null,
-            exitVia: opt.exitVia || null,
+            ...optionRowFields(opt),
           });
           continue;
         }
@@ -310,15 +302,8 @@ async function srBreakout(req, res) {
             indexRupees,
             rupees: indexRupees,
             rupeesSource: 'index-fut',
+            ...optionRowFields(opt),
             optionSymbol: 'NIFTY FUT',
-            optionContract: opt.optionSymbol || null,
-            optionRupees: opt.rupees,
-            optionRupeesSource: opt.rupees != null ? (opt.rupeesSource || 'option-live') : 'unavailable',
-            optionBarsSource: opt.barsSource || null,
-            optionEntryPremium: opt.optionEntryPremium || null,
-            optionExitPremium: opt.optionExitPremium || null,
-            chargesRs: opt.chargesRs || null,
-            exitVia: opt.exitVia || null,
           });
           continue;
         }
@@ -327,15 +312,7 @@ async function srBreakout(req, res) {
           indexRupees,
           rupees: opt.rupees,
           rupeesSource: opt.rupees != null ? (opt.rupeesSource || 'option-live') : 'unavailable',
-          optionSymbol: opt.optionSymbol || null,
-          optionContract: opt.optionSymbol || null,
-          optionRupees: opt.rupees,
-          optionRupeesSource: opt.rupees != null ? (opt.rupeesSource || 'option-live') : 'unavailable',
-          optionBarsSource: opt.barsSource || null,
-          optionEntryPremium: opt.optionEntryPremium || null,
-          optionExitPremium: opt.optionExitPremium || null,
-          chargesRs: opt.chargesRs || null,
-          exitVia: opt.exitVia || null,
+          ...optionRowFields(opt),
         });
       }
       const optSum = summarizeOptionTrades(tradesR);
@@ -369,6 +346,23 @@ async function srBreakout(req, res) {
 }
 
 function numOr(v, d) { const n = Number(v); return Number.isFinite(n) && v !== '' && v != null ? n : d; }
+
+function optionRowFields(opt) {
+  const o = opt || {};
+  const token = Number(o.instrumentToken);
+  return {
+    optionSymbol: o.optionSymbol || null,
+    optionContract: o.optionSymbol || null,
+    optionInstrumentToken: token > 0 ? token : null,
+    optionRupees: o.rupees,
+    optionRupeesSource: o.rupees != null ? (o.rupeesSource || 'option-live') : (o.rupeesSource || 'unavailable'),
+    optionBarsSource: o.barsSource || null,
+    optionEntryPremium: o.optionEntryPremium || null,
+    optionExitPremium: o.optionExitPremium || null,
+    chargesRs: o.chargesRs || null,
+    exitVia: o.exitVia || null,
+  };
+}
 
 /**
  * POST /live/sr-observe  — REAL-OPTION OBSERVATION (paper data collection).

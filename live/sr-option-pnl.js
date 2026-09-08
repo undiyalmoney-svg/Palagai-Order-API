@@ -157,7 +157,7 @@ async function optionPnlForTrade({ authorization, spec, trade, lots, session, pi
   if (!cache._optHist) cache._optHist = new Map();
   const pick = await pickOption(authorization, spec, trade, { ...cache, paperPick: true });
   if (!pick || !(pick.instrumentToken > 0)) {
-    return { rupees: null, rupeesSource: 'unavailable', reason: 'no-contract' };
+    return { rupees: null, rupeesSource: 'unavailable', reason: 'no-contract', instrumentToken: null };
   }
   optionStore.saveContract({
     name: spec.root, tradingSymbol: pick.tradingSymbol, instrumentToken: pick.instrumentToken,
@@ -200,7 +200,10 @@ async function optionPnlForTrade({ authorization, spec, trade, lots, session, pi
   if (gross == null) {
     return {
       rupees: null, rupeesSource: 'unavailable', reason: 'no-option-bars',
-      optionSymbol: pick.tradingSymbol, lotSize, barsSource,
+      optionSymbol: pick.tradingSymbol, instrumentToken: Number(pick.instrumentToken) || 0,
+      lotSize, barsSource,
+      optionEntryPremium: entryPrem || null,
+      optionExitPremium: exitPrem || null,
     };
   }
   const charged = estimateRoundTripCharges({
@@ -211,6 +214,7 @@ async function optionPnlForTrade({ authorization, spec, trade, lots, session, pi
     rupees: Math.round(gross - chargesRs),
     rupeesSource: barsSource === 'cache' ? 'option-cache' : 'option-live',
     optionSymbol: pick.tradingSymbol,
+    instrumentToken: Number(pick.instrumentToken) || 0,
     optionEntryPremium: entryPrem,
     optionExitPremium: exitPrem,
     lotSize,
