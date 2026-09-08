@@ -8,6 +8,7 @@ const market = require('./kite-market');
 const store = require('./live.store');
 const optionStore = require('./sr-option-store');
 const { archiveSrInstruments, instrumentsWithArchive } = require('./instrument-archive');
+const { connectMongo, getDb } = require('./live.mongo');
 const { runSrBreakout } = require('./sr-breakout');
 // Exit/entry rules come from the SHARED config so Live and Paper cannot drift.
 const { exitOptsFor, DEFAULT_LOTS, DAY_LOSS_STOP_RS, DAY_PROFIT_TARGET_RS, LOT_UNITS, OPTION_SL_MAX_RS } = require('./sr-strategy-config');
@@ -447,11 +448,17 @@ async function pickOption(authorization, spec, trade, session) {
     || (session.nfoInstruments = await market.fetchInstruments(authorization).catch(() => []));
   if (session.paperPick && liveInst.length && !session._srArchived) {
     session._srArchived = true;
-    archiveSrInstruments(liveInst).catch(() => {});
+    if (!getDb()) {
+      try { await connectMongo(); } catch (_) { /* paper still uses live + file cache */ }
+    }
+    await archiveSrInstruments(liveInst).catch(() => {});
   }
   let inst = liveInst;
   if (session.paperPick) {
     if (!session.nfoWithArchive) {
+      if (!getDb()) {
+        try { await connectMongo(); } catch (_) { /* live-only fallback */ }
+      }
       session.nfoWithArchive = await instrumentsWithArchive(liveInst);
     }
     inst = optionStore.mergeNfoInstruments(session.nfoWithArchive, optionStore.listContracts(), spec.root, type);
