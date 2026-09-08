@@ -27,7 +27,7 @@ function hmToMin(hm) {
 function tickPrem(p) {
   const n = Number(p);
   if (!(n > 0)) return 0;
-  return Math.max(TICK, Math.round(n / TICK) * TICK);
+  return Number(Math.max(TICK, Math.round(n / TICK) * TICK).toFixed(2));
 }
 
 /** Last 5-min option bar whose clock is <= hm (causal). */

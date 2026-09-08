@@ -177,7 +177,7 @@ assert.strictEqual(summarizeOptionTrades([
   { rupees: -3, rupeesSource: 'option' },
 ]).netRupees, 57);
 assert.strictEqual(liveLikeEntryPrem({ close: 100, high: 101 }, 0.5), 100.5);
-assert.strictEqual(liveLikeExitPrem({ close: 100, low: 99 }, 0.5), 99.5);
+assert.strictEqual(liveLikeExitPrem({ close: 135.7, low: 134.8 }, 0.5), 135.2);
 assert.ok(liveLikeEntryPrem({ close: 127.2, high: 128 }, 0.5) > 127.2, 'Paper buy must be worse than close (Live ask)');
 assert.ok(liveLikeExitPrem({ close: 128.15, low: 127 }, 0.5) < 128.15, 'Paper sell must be worse than close (Live bid)');
 assert.strictEqual(slLimitFill(100, 95), 95, 'SL fills at the low when low is above the 90% limit');
