@@ -2,14 +2,14 @@
 /**
  * S/R Breakout — Paper controller. RESEARCH / PAPER ONLY.
  * Fetches historical 5-min candles (read-only, via the pushed Kite token) and
- * runs the sr-breakout engine. Places NO orders. Paper ₹ is option premium
- * (same CE/PE Live buys), marked like Live (ask/bid friction, charges, SL-LIMIT),
- * not index points × lot.
+ * runs the sr-breakout engine. Places NO orders. Nifty Paper ₹ defaults to
+ * the index future (pts × 65), matching Live. Pass niftyVehicle:'option' to
+ * re-price the same signals as CE/PE. Bank/Crude stay option premium.
  */
 const https = require('https');
 const market = require('./kite-market');
 // Exit/entry rules come from the SHARED config so Paper and Live cannot drift.
-const { exitOptsFor, CUT_LOSS_RS, DEFAULT_LOTS, DAY_LOSS_STOP_RS, DAY_PROFIT_TARGET_RS, LOT_UNITS } = require('./sr-strategy-config');
+const { exitOptsFor, CUT_LOSS_RS, DEFAULT_LOTS, DAY_LOSS_STOP_RS, DAY_PROFIT_TARGET_RS, LOT_UNITS, paperVehicleFor } = require('./sr-strategy-config');
 const store = require('./live.store');
 const { runSrBreakout } = require('./sr-breakout');
 const { observe, history: obsHistory, confirmLiveEntry, confirmLiveExit } = require('./sr-observe');
@@ -211,7 +211,7 @@ function shiftDays(iso, delta) { const d = new Date(iso + 'T00:00:00Z'); d.setUT
 /**
  * POST /live/sr-breakout
  * body: { instruments:['nifty'|'banknifty'|'crude'], fromDate, toDate,
- *         entryPts?, bigPts?, targetPts?, cutHm?, lotSize? }
+ *         niftyVehicle?: 'fut'|'option', entryPts?, lots?, lotSize? }
  * When fromDate/toDate == today, it fetches today's candles → today's results.
  */
 async function srBreakout(req, res) {
@@ -272,6 +272,8 @@ async function srBreakout(req, res) {
         ...strat.opts,                                 // version overrides (BASELINE = {})
       });
       const liveSpec = srLive.SPEC[key];
+      const vehicle = paperVehicleFor(key, liveSpec && liveSpec.vehicle, body.niftyVehicle);
+      const pricingSpec = liveSpec ? { ...liveSpec, vehicle } : null;
       const paperSess = {};
       const tradesR = [];
       for (const t of markOneOpenLeg(trades)) {
@@ -288,7 +290,7 @@ async function srBreakout(req, res) {
           });
           continue;
         }
-        if (liveSpec && liveSpec.vehicle === 'fut') {
+        if (pricingSpec && pricingSpec.vehicle === 'fut') {
           tradesR.push({
             ...t, instrument: spec.name, contract,
             indexRupees,
@@ -300,9 +302,9 @@ async function srBreakout(req, res) {
           });
           continue;
         }
-        const opt = liveSpec
+        const opt = pricingSpec
           ? await optionPnlForTrade({
-            authorization, spec: liveSpec, trade: t, lots, session: paperSess,
+            authorization, spec: pricingSpec, trade: t, lots, session: paperSess,
             pickOption: srLive.pickOption,
           })
           : { rupees: null, rupeesSource: 'unavailable', reason: 'no-spec' };
@@ -323,7 +325,7 @@ async function srBreakout(req, res) {
       results.push({
         key, name: spec.name, contract, token, candles: candles.length,
         strategy: strat.label, strategyStatus: strat.status,   // auto-routed per instrument
-        params: { entryPts, gapLo: spec.gapLo, gapHi: spec.gapHi, targetByScore: spec.targetByScore, lots, unitsPerLot, maxTradesPerDay, dayLossStopRs, dayProfitTargetRs, rupeesMode: usedOption ? (liveSpec && liveSpec.vehicle === 'fut' ? 'index-fut' : 'option-live') : 'unavailable' },
+        params: { entryPts, gapLo: spec.gapLo, gapHi: spec.gapHi, targetByScore: spec.targetByScore, lots, unitsPerLot, maxTradesPerDay, dayLossStopRs, dayProfitTargetRs, rupeesMode: usedOption ? (vehicle === 'fut' ? 'index-fut' : 'option-live') : 'unavailable', vehicle },
         summary: {
           ...summary,
           wins: usedOption ? optSum.optionWins : 0,

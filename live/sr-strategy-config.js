@@ -204,7 +204,19 @@ function exitOptsFor(key, lots = 1) {
   return cut > 0 && perPoint > 0 ? { ...rules, stopPts: cut / perPoint } : { ...rules };
 }
 
+/**
+ * Paper ₹ vehicle. Live Nifty stays futures; Paper can re-price the same
+ * signals as CE/PE (niftyVehicle=option) so you can check the option book
+ * without changing Live. Bank/Crude ignore the toggle — they are always options.
+ */
+function paperVehicleFor(instrumentKey, liveVehicle, requested) {
+  if (instrumentKey !== 'nifty') return liveVehicle || 'option';
+  const v = String(requested || '').toLowerCase().trim();
+  if (v === 'option' || v === 'opt' || v === 'cepe' || v === 'ce/pe') return 'option';
+  return liveVehicle || 'fut';
+}
+
 module.exports = {
   EXIT_RULES, CUT_LOSS_RS, LOT_UNITS, DEFAULT_LOTS, OPTION_SL_MAX_RS, exitOptsFor,
-  DAY_LOSS_STOP_RS, DAY_PROFIT_TARGET_RS,
+  DAY_LOSS_STOP_RS, DAY_PROFIT_TARGET_RS, paperVehicleFor,
 };
