@@ -57,7 +57,15 @@ assert.strictEqual(decideLiveAction({
 assert.strictEqual(decideLiveAction({
   trade: { ...trade, exitReason: 'TARGET', exitTime: '10:18' },
   nowHm: '10:20', alreadyOpen: false, squareOffHm: '15:15',
-}), 'skip', 'already completed in engine — too late');
+}), 'enter', 'fresh entry must still hit Kite even if the next 5m bar already TARGET-wicked');
+// 9 Sep 2026: Paper 11:50 SELL TARGET at 11:55 (+20 wick). Live was on from 11:22 and sent nothing.
+assert.strictEqual(decideLiveAction({
+  trade: {
+    ...trade, side: 'SELL', option: 'PE', entryTime: '11:50', exitTime: '11:55',
+    exitReason: 'TARGET', entryPrice: 23512.6, points: 20,
+  },
+  nowHm: '11:56', alreadyOpen: false, squareOffHm: '15:15',
+}), 'enter', '9 Sep 11:50 Nifty SELL must enter at 11:56 even after Paper TARGET');
 
 // Live today: only candles up to "now" exist, so an unfinished trade is CLOSE
 // at the last bar. That must still ENTER (this is what blocked 7 Sep buys).
@@ -68,7 +76,11 @@ assert.strictEqual(decideLiveAction({
 assert.strictEqual(decideLiveAction({
   trade: { ...trade, entryTime: '10:50', exitTime: '10:55', exitReason: 'GIVEUP' },
   nowHm: '10:56', alreadyOpen: false, squareOffHm: '15:15',
-}), 'skip', 'GIVEUP already printed — do not chase');
+}), 'enter', 'fresh GIVEUP replay still enters; next tick exits if already filled');
+assert.strictEqual(decideLiveAction({
+  trade: { ...trade, entryTime: '10:50', exitTime: '10:55', exitReason: 'TARGET' },
+  nowHm: '11:20', alreadyOpen: false, squareOffHm: '15:15',
+}), 'skip', 'stale TARGET (30m) must not chase');
 
 assert.strictEqual(decideLiveAction({
   trade: { ...trade, exitReason: 'TARGET', exitTime: '10:40' },

@@ -137,7 +137,13 @@ function decideLiveAction({ trade, nowHm: hm, alreadyOpen, squareOffHm, freshMin
     if (sessionOver || finished) return 'exit';
     return 'hold';
   }
-  if (sessionOver || finished) return 'skip';
+  // Do NOT skip a fresh entry just because the replay already printed TARGET /
+  // LOCK / GIVEUP. Nifty retest only emits the trade once a 5-min bar exists
+  // AFTER fill; that same bar can wick +20 and mark TARGET. Live then never
+  // sent Kite (9 Sep 2026 11:50 SELL: Paper TARGET at 11:55, entered=[]).
+  // Enter while the signal is still inside the fresh window; the next tick
+  // flattens if the engine is already done.
+  if (sessionOver) return 'skip';
   if (now < entry) return 'wait';
   if (now - entry > freshMinutes) return 'skip';
   return 'enter';
@@ -537,7 +543,18 @@ async function pickFreshLiveEntry(session, authorization, spec, key, trades, hm,
     const act = decideLiveAction({
       trade: t, nowHm: hm, alreadyOpen: false, squareOffHm: spec.session.squareOffHm,
     });
-    if (act !== 'enter') continue;
+    if (act !== 'enter') {
+      if (act === 'skip' && !session.entered.has(id)) {
+        const age = hmToMin(hm) - hmToMin(t.entryTime);
+        pushEvent(
+          session,
+          'SKIP',
+          `${t.entryTime} ${spec.name} ${t.exitReason || ''} — not entering (${age}m after entry, need <${FRESH_MINUTES}m)`,
+        );
+        session.entered.add(id);
+      }
+      continue;
+    }
     const fut = spec.vehicle === 'fut';
     pushEvent(session, 'SIGNAL', `${t.entryTime} ${spec.name} ${fut ? 'FUT ' + t.side : t.option} — placing live ${fut && t.side === 'SELL' ? 'SELL' : 'BUY'}`);
     const option = fut
