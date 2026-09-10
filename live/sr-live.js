@@ -14,6 +14,7 @@ const { runSrBreakout } = require('./sr-breakout');
 const { exitOptsFor, DEFAULT_LOTS, DAY_LOSS_STOP_RS, DAY_PROFIT_TARGET_RS, LOT_UNITS, OPTION_SL_MAX_RS, STRATEGY_ID, STRATEGY_VERSION } = require('./sr-strategy-config');
 const { LiveBroker } = require('./live-broker');
 const { approveLiveStart, approveLiveEntry } = require('./engine/risk');
+const { confirmDirection, selectTradeExpiry, liveTransactionType } = require('./engine/pipeline');
 const { NIFTY_50_INSTRUMENT, BANK_NIFTY_INSTRUMENT, CRUDE_OIL_MINI_INSTRUMENT } = require('./strategy-core.cjs');
 
 const TICK_MS = Number(process.env.SR_LIVE_INTERVAL_MS || 60_000);
@@ -90,13 +91,6 @@ function indexStopPrice(trade, spec) {
   const pts = stopDistancePts(trade, spec);
   return trade.side === 'BUY' ? trade.entryPrice - pts : trade.entryPrice + pts;
 }
-
-/** Kite transaction for this signal. Options are always bought; futures follow the index side. */
-function liveTransactionType(spec, trade) {
-  if (spec && spec.vehicle === 'fut') return trade && trade.side === 'SELL' ? 'SELL' : 'BUY';
-  return 'BUY';
-}
-
 
 /**
  * Decide what Live should do for one engine trade.
@@ -383,7 +377,7 @@ function selectNearestFut(rows, root, today) {
     Number(r.instrumentToken) > 0,
   );
   const expiries = [...new Set(list.map((r) => r.expiry).filter(Boolean))].sort();
-  const expiry = expiries.find((e) => e > today) || expiries.find((e) => e >= today) || null;
+  const expiry = selectTradeExpiry(expiries, today);
   if (!expiry) return null;
   return list.find((r) => r.expiry === expiry) || null;
 }
@@ -410,8 +404,9 @@ async function pickIndexFuture(authorization, spec, session, today) {
 
 async function pickOption(authorization, spec, trade, session) {
   session = session || {};
-  const dir = trade.side === 'BUY' ? 1 : -1;
-  const type = dir > 0 ? 'CE' : 'PE';
+  const intent = confirmDirection(trade);
+  const dir = intent.side === 'BUY' ? 1 : -1;
+  const type = intent.optionType;
   const today = trade.date || todayIso();
   const spot = trade.entryPrice;
 
@@ -437,6 +432,8 @@ async function pickOption(authorization, spec, trade, session) {
         exchange: 'MCX',
         lotSize: Math.max(1, Number(pick.lotSize) || 1),
         optionEntryPremium: null,
+        expiry: fut.expiry,
+        expiryRolled: parseMcxCsv(fut.csv || '').some((r) => r.type === 'FUT' && r.expiry === today),
       };
     }
     const keys = candMeta.map((m) => 'MCX:' + m.sym);
@@ -499,8 +496,9 @@ async function pickOption(authorization, spec, trade, session) {
   const expiries = [...new Set(rows.map((r) => r.expiry).filter(Boolean))].sort();
   const expiry = session.paperPick
     ? optionStore.pickFrontExpiry(expiries, today, 14)
-    : (expiries.find((e) => e > today) || expiries.find((e) => e >= today) || null);
+    : selectTradeExpiry(expiries, today);
   if (!expiry) return null;
+  const expiryRolled = expiries.includes(today);
   const atm = Math.round(spot / spec.step) * spec.step;
   const candStrikes = dir > 0 ? [atm - spec.step, atm, atm + spec.step] : [atm + spec.step, atm, atm - spec.step];
   const candMeta = [];
@@ -521,6 +519,7 @@ async function pickOption(authorization, spec, trade, session) {
         expiry: pick.expiry,
         strike: pick.strike,
         instrumentType: type,
+        expiryRolled,
       };
   }
   const keys = candMeta.map((m) => 'NFO:' + m.tradingSymbol).concat([spec.spotKey]);
@@ -549,6 +548,7 @@ async function pickOption(authorization, spec, trade, session) {
     expiry: pick.expiry,
     strike: pick.strike,
     instrumentType: type,
+    expiryRolled,
   };
 }
 
@@ -584,8 +584,9 @@ async function pickFreshLiveEntry(session, authorization, spec, key, trades, hm,
       continue;
     }
     const fut = spec.vehicle === 'fut';
+    const intent = confirmDirection(t);
     const tx = liveTransactionType(spec, t);
-    pushEvent(session, 'SIGNAL', `${t.entryTime} ${spec.name} ${fut ? 'FUT ' + t.side : t.option} — placing live ${tx}`);
+    pushEvent(session, 'DIRECTION', `${t.entryTime} ${spec.name} ${intent.side} → ${intent.optionType}`);
     const option = fut
       ? await pickIndexFuture(authorization, spec, session, t.date)
       : await pickOption(authorization, spec, t, session);
@@ -594,6 +595,15 @@ async function pickFreshLiveEntry(session, authorization, spec, key, trades, hm,
       session.entered.add(id);
       continue;
     }
+    const rolled = !!(option.expiryRolled);
+    pushEvent(
+      session,
+      'SELECT',
+      `${spec.name} ${option.tradingSymbol}` +
+        (option.expiry ? ` exp ${option.expiry}` : '') +
+        (rolled ? ' (next expiry — skipped today)' : ''),
+    );
+    pushEvent(session, 'SIGNAL', `${t.entryTime} ${spec.name} ${fut ? 'FUT ' + t.side : intent.optionType} — Kite ${tx} + SL`);
     session.entered.add(id);
     session.openSignal.set(spec.bookId, id);
     return {
@@ -605,9 +615,10 @@ async function pickFreshLiveEntry(session, authorization, spec, key, trades, hm,
       entryTime: t.entryTime,
       direction: tx,
       vehicle: fut ? 'fut' : 'option',
-      // S/R has its own option SL + day brakes. Auto Bot charge-cover DNA
-      // must not skip a valid CE/PE buy.
       skipChargeGate: true,
+      // Resting SL stays put. Engine leave → broker cancels SL then exits.
+      // Do not run Auto Bot peak-trail while S/R is holding.
+      protectOnly: true,
     };
   }
   return null;
@@ -702,6 +713,7 @@ async function onTick(session) {
                 indexTarget: tracked.side === 'BUY' ? tracked.entryPrice + tracked.target : tracked.entryPrice - tracked.target,
                 entryTime: tracked.entryTime,
                 skipChargeGate: true,
+                protectOnly: true,
                 direction: current.direction || liveTransactionType(spec, tracked),
                 vehicle: current.vehicle || spec.vehicle || 'option',
               };
@@ -721,6 +733,7 @@ async function onTick(session) {
               indexStop: current.indexStop,
               entryTime: current.entryTime,
               skipChargeGate: true,
+              protectOnly: true,
               direction: current.direction || 'BUY',
               vehicle: current.vehicle || spec.vehicle || 'option',
             };

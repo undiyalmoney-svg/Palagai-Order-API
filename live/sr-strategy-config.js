@@ -220,5 +220,5 @@ module.exports = {
   EXIT_RULES, CUT_LOSS_RS, LOT_UNITS, DEFAULT_LOTS, OPTION_SL_MAX_RS, exitOptsFor,
   DAY_LOSS_STOP_RS, DAY_PROFIT_TARGET_RS, paperVehicleFor,
   STRATEGY_ID: 'sr-breakout',
-  STRATEGY_VERSION: 'sr-breakout.2026-09-10.2',
+  STRATEGY_VERSION: 'sr-breakout.2026-09-10.3',
 };

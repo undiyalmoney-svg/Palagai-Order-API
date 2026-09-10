@@ -36,6 +36,13 @@ assert.strictEqual(liveTransactionType({ vehicle: 'fut' }, { side: 'SELL' }), 'S
   ], 'NIFTY', '2026-09-08');
   assert.strictEqual(row.tradingSymbol, 'NIFTY26SEPFUT');
 }
+{
+  const row = selectNearestFut([
+    { name: 'NIFTY', instrumentType: 'FUT', instrumentToken: 1, expiry: '2026-09-24', tradingSymbol: 'NIFTY26SEPFUT' },
+    { name: 'NIFTY', instrumentType: 'FUT', instrumentToken: 4, expiry: '2026-10-29', tradingSymbol: 'NIFTY26OCTFUT' },
+  ], 'NIFTY', '2026-09-24');
+  assert.strictEqual(row.tradingSymbol, 'NIFTY26OCTFUT', 'expiry day skips the dying future');
+}
 
 const trade = {
   date: '2026-09-05', side: 'BUY', option: 'CE',

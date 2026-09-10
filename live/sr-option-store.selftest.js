@@ -10,7 +10,7 @@ const store = require('./sr-option-store');
 
 assert.strictEqual(store.pickFrontExpiry(['2026-09-15', '2025-03-06', '2025-03-13'], '2025-03-01'), '2025-03-06');
 assert.strictEqual(store.pickFrontExpiry(['2026-09-15'], '2025-03-01'), null, 'must not bind an old signal to today\'s weekly');
-assert.strictEqual(store.pickFrontExpiry(['2026-09-15'], '2026-09-08'), '2026-09-15');
+assert.strictEqual(store.pickFrontExpiry(['2026-09-15', '2026-09-22'], '2026-09-15'), '2026-09-22', 'expiry day rolls to next weekly');
 
 const { historicalChunks } = require('./kite-market');
 {
