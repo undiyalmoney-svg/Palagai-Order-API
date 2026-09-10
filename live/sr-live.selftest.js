@@ -1,6 +1,6 @@
 'use strict';
 const assert = require('assert');
-const { decideLiveAction, signalId, hmToMin, SPEC, applyDeskLimits, engineTradeStillOpen, engineBookHasOpenTrade, mustExitHeldForNewLeg, matchHeldEngineTrade, pickOption, selectNearestFut } = require('./sr-live');
+const { decideLiveAction, signalId, hmToMin, SPEC, applyDeskLimits, engineTradeStillOpen, engineBookHasOpenTrade, mustExitHeldForNewLeg, matchHeldEngineTrade, pickOption, selectNearestFut, liveTransactionType } = require('./sr-live');
 const { exitOptsFor, LOT_UNITS, OPTION_SL_MAX_RS } = require('./sr-strategy-config');
 
 assert.deepStrictEqual(SPEC.nifty.opts, exitOptsFor('nifty'), 'Live Nifty opts must match Paper shared config');
@@ -24,7 +24,10 @@ assert.strictEqual(LOT_UNITS.banknifty, 30, 'Bank lot is 30 from Jan 2026');
 assert.strictEqual(SPEC.nifty.unitsPerLot, LOT_UNITS.nifty);
 assert.strictEqual(SPEC.banknifty.unitsPerLot, LOT_UNITS.banknifty);
 assert.strictEqual(SPEC.nifty.opts.stopPts, 5000 / 65);
-assert.strictEqual(SPEC.nifty.vehicle, 'fut', 'Nifty Live/Paper enter the index future, not CE/PE');
+assert.strictEqual(SPEC.nifty.vehicle, 'option', 'Nifty Live buys ATM CE/PE, not the index future');
+assert.strictEqual(liveTransactionType(SPEC.nifty, { side: 'SELL', option: 'PE' }), 'BUY', 'PE signal must BUY the put, not sell futures');
+assert.strictEqual(liveTransactionType(SPEC.nifty, { side: 'BUY', option: 'CE' }), 'BUY');
+assert.strictEqual(liveTransactionType({ vehicle: 'fut' }, { side: 'SELL' }), 'SELL');
 {
   const row = selectNearestFut([
     { name: 'NIFTY', instrumentType: 'FUT', instrumentToken: 1, expiry: '2026-09-24', tradingSymbol: 'NIFTY26SEPFUT' },

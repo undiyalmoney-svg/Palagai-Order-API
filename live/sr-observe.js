@@ -27,7 +27,7 @@ const market = require('./kite-market');
 const optionStore = require('./sr-option-store');
 const { runSrBreakout } = require('./sr-breakout');
 const { EXECUTION_MODE } = require('./sr-execution-guard');
-const { LOT_UNITS } = require('./sr-strategy-config');
+const { LOT_UNITS, exitOptsFor } = require('./sr-strategy-config');
 
 // Approved paper exit rule (configurable). Loser is NOT held to premium-zero;
 // the option premium is a risk boundary, not the normal stop.
@@ -147,6 +147,7 @@ async function observe(authorization, opts = {}) {
         targetByScore: spec.targetByScore, maxTradesPerDay: MAX_TRADES_DAY,
         dayLossStop: LOT_DAY_LOSS / (spec.unitsPerLot * lots), dayProfitTarget: LOT_DAY_PROFIT / (spec.unitsPerLot * lots),
         reportFromDate: today, ...spec.session,
+        ...exitOptsFor(key, lots),
       });
 
       // spot + intraday underlying path (for underlying MFE/MAE)

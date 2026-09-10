@@ -3,14 +3,15 @@
  * S/R Breakout — Paper controller. RESEARCH / PAPER ONLY.
  * Fetches historical 5-min candles (read-only, via the pushed Kite token) and
  * runs the sr-breakout engine. Places NO orders. Nifty Paper ₹ defaults to
- * the index future (pts × 65). Every run also fetches CE/PE 5-min bars, saves
+ * ATM CE/PE (same as Live). Pass niftyVehicle=fut for pts × 65. Every run
+ * also fetches CE/PE 5-min bars, saves
  * them under sr-observations/option-cache, and fills optionRupees so the
  * option book can be checked without changing Live.
  */
 const https = require('https');
 const market = require('./kite-market');
 // Exit/entry rules come from the SHARED config so Paper and Live cannot drift.
-const { exitOptsFor, CUT_LOSS_RS, DEFAULT_LOTS, DAY_LOSS_STOP_RS, DAY_PROFIT_TARGET_RS, LOT_UNITS, paperVehicleFor } = require('./sr-strategy-config');
+const { exitOptsFor, CUT_LOSS_RS, DEFAULT_LOTS, DAY_LOSS_STOP_RS, DAY_PROFIT_TARGET_RS, LOT_UNITS, paperVehicleFor, STRATEGY_ID, STRATEGY_VERSION } = require('./sr-strategy-config');
 const store = require('./live.store');
 const { runSrBreakout } = require('./sr-breakout');
 const { observe, history: obsHistory, confirmLiveEntry, confirmLiveExit } = require('./sr-observe');
@@ -340,6 +341,7 @@ async function srBreakout(req, res) {
   }
   res.json({
     status: 'ok', mode: 'paper', strategy: 'Auto (best eligible per instrument)',
+    strategyId: STRATEGY_ID, strategyVersion: STRATEGY_VERSION,
     autoRouting: AUTO_STRATEGY, gate: GATE,
     fromDate, toDate, isToday: toDate === todayIso(), ranAt: new Date().toISOString(), results,
   });
