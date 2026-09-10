@@ -1,28 +1,25 @@
 /**
  * Server Live strategy worker — Nifty 50 Paper≡Live desk:
- * 1) Nifty Trap (one-leg, option-₹ day lock). Bank Nifty & Crude are hard-off.
- * Paper path rejects estimated premiums + fill friction (same as broker skips).
- * Places orders via live-broker → kite.service (does NOT touch kiteOrders.controller).
+ * Align Combo · GENIE (ATM CE/PE). Bank & Crude hard-off. S/R Breakout retired.
  */
 const {
   NIFTY_50_INSTRUMENT,
   BANK_NIFTY_INSTRUMENT,
-  createTrapStrategyV2,
   replayPaperOnIndex,
   effectiveProtectiveStop,
 } = require('./strategy-core.cjs');
 const { fetchInstruments, fetchHistorical5m } = require('./kite-market');
 const { LiveBroker } = require('./live-broker');
-const { indexDayRiskOverrides, riskStatusLabels, deskRiskLots, profitLockMoneyRs, greenProtectMoneyRs, strictStopMoneyRs } = require('./daily-desk-defaults');
+const { riskStatusLabels, deskRiskLots, profitLockMoneyRs, greenProtectMoneyRs, strictStopMoneyRs } = require('./daily-desk-defaults');
 const {
   ingestReplayTrades,
   applyBrokerFill,
   moneyTotals,
   publicTrades,
 } = require('./live-trades');
-const { LIVE_GREEN_DNA, liveGreenTrapExtras, clampMaxTradesToDna } = require('./dna-live-green');
+const { LIVE_GREEN_DNA } = require('./dna-live-green');
 const { livePathReplayOpts, isEstimatedOrSynthetic } = require('./live-path');
-const { archiveInstruments } = require('./instrument-archive');
+const { makeGenieStrategy } = require('./genie-desk');
 
 const LOOKBACK_DAYS = 12;
 
@@ -87,35 +84,8 @@ function toLiveOpen(replayOpen) {
     optionBarLow: replayOpen.optionBarLow ?? null,
     optionLotUnits: replayOpen.optionLotUnits ?? null,
     lotsMultiplier: replayOpen.lotsMultiplier ?? 1,
-    trailExtras: liveGreenTrapExtras(),
+    trailExtras: replayOpen.trailExtras || null,
   };
-}
-
-/**
- * Only genuine live-only/UI overrides go here — everything else comes from
- * createTrapStrategyV2()'s own defaultSettings (single source: doc 51 RCA
- * fix). `maxTradesPerDay` defaults to the strategy's own cap (3) unless the
- * UI explicitly asks for a different budget; `optionStandDownRs` is a
- * user-tunable secondary soft check on top of the hard broker-side cap.
- */
-function trapInitOverrides(config, instrumentId) {
-  const risk =
-    indexDayRiskOverrides({
-      instrumentId,
-      enableNifty: !!config.enableNifty,
-      enableBank: !!config.enableBank,
-      dayProfitLock: !!config.dayProfitLock,
-      strictDayStop: !!config.strictDayStop,
-    }) || {};
-  const extras = liveGreenTrapExtras(instrumentId);
-  if (config.optionStandDownRs != null) {
-    extras.optionStandDownRs = Number(config.optionStandDownRs);
-  }
-  const bank = /bank/i.test(String(instrumentId || ''));
-  const fromUi = bank ? config.bankMaxTradesDay : config.niftyMaxTradesDay;
-  const overrides = { ...risk, extras };
-  overrides.maxTradesPerDay = clampMaxTradesToDna(fromUi);
-  return overrides;
 }
 
 class LiveWorker {
@@ -397,11 +367,7 @@ class LiveWorker {
       kuttyAlone: !!config.kuttyAlone,
       today,
       livePath,
-      makeStrategy: () => {
-        const s = createTrapStrategyV2();
-        s.initialize(trapInitOverrides(config, instrument.id));
-        return s;
-      },
+      makeStrategy: () => makeGenieStrategy(config, instrument.id),
     });
     ingestReplayTrades(this.liveTrades, replay.trades, { rejectEstimated: true });
     await this.broker.syncInstrument({

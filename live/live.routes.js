@@ -40,8 +40,7 @@ router.post('/backtest', asyncHandler(ctrl.backtest));
   router.get('/sr-breakout/live/status', asyncHandler(srCtrl.srLiveStatus));
 router.put('/auth', asyncHandler(ctrl.putAuth));
 
-// Auto-start the read-only real-option collector at server boot (singleton-
-// guarded, market-hours gated). Additive; does not touch the live-order worker.
-try { require('./sr-collector').boot(); } catch (e) { console.error('[sr-collector] boot skipped:', e.message); }
+// S/R collector retired with the S/R Live desk.
+
 
 module.exports = router;

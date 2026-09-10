@@ -492,14 +492,15 @@ function srLiveExit(req, res) {
   res.status(out.ok ? 200 : 400).json({ status: out.ok ? 'ok' : 'error', ...out });
 }
 
-/** POST /live/sr-breakout/live/start — real MIS when a signal fires. */
+/** POST /live/sr-breakout/live/start — retired. Use Auto Bot (Genie). */
 async function srLiveStart(req, res) {
   try {
-    const out = await srLive.start(userId(req), req.body || {});
-    res.json(out);
-  } catch (e) {
-    res.status(e.status || 400).json({ status: 'error', message: String(e.message || e) });
-  }
+    await srLive.stop(userId(req));
+  } catch (_) { /* idle is fine */ }
+  res.status(410).json({
+    status: 'error',
+    message: 'S/R Breakout Live is retired. Use Auto Bot (Genie) for Nifty ATM CE/PE.',
+  });
 }
 
 /** POST /live/sr-breakout/live/stop */
