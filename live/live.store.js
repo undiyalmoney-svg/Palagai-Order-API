@@ -165,6 +165,8 @@ function statusPayload(session) {
     tradeCounts: money.tradeCounts || { nifty: 0, bank: 0, crude: 0, other: 0, total: 0 },
     mongo: !!mongoDb,
     userId: session.userId,
+    liveMoney: !!(cfg.liveMoney || cfg.realOrders),
+    realOrders: !!cfg.realOrders,
   };
 }
 
@@ -262,9 +264,7 @@ async function attachMongo(db) {
         };
       }
       if (session.status === 'running') {
-        session.status = 'stopped';
-        session.message = 'Auto Bot retired — not resumed';
-        await persistRun(session);
+        startTickLoop(session);
       }
     }
     // Migrate legacy primary → leave in place for owner who re-pushes

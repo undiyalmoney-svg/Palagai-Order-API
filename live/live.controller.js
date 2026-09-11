@@ -1,4 +1,6 @@
 const store = require('./live.store');
+const { runBacktest } = require('./backtest');
+const { parseTradeBotWindow } = require('./trade-bot-dates');
 const {
   APP_BUILD,
   APP_VERSION,
@@ -18,7 +20,7 @@ async function health(_req, res) {
   res.json({
     status: 'ok',
     service: 'palagai-live-control',
-    note: 'Auto Bot and S/R Live are retired. Kite token push still works.',
+    note: 'Trade Bot: paper and live share one engine. Live money checkbox places Kite orders.',
     version: APP_VERSION,
     appBuild: APP_BUILD,
     dnaId: LIVE_GREEN_DNA.id,
@@ -115,13 +117,55 @@ async function defaults(_req, res) {
   });
 }
 
+async function kiteAuthorization(req) {
+  return (
+    req.headers['x-kite-authorization'] ||
+    req.headers['x-kite-authorisation'] ||
+    (await store.getAuthorizationFor(userId(req)))
+  );
+}
+
+/**
+ * One Trade Bot run. Paper and live are the same engine.
+ * `liveMoney` (or `realOrders`) is the only switch that places Kite orders.
+ */
 async function start(req, res) {
-  try {
-    await store.stop(userId(req));
-  } catch (_) { /* already idle */ }
-  res.status(410).json({
-    status: 'error',
-    message: 'Auto Bot is removed. Start a new desk from scratch.',
+  const body = req.body || {};
+  const window = parseTradeBotWindow(body);
+  const config = { ...body, ...window, realOrders: window.liveMoney };
+  if (!window.liveMoney) {
+    const authorization = await kiteAuthorization(req);
+    if (!authorization) {
+      res.status(400).json({
+        status: 'error',
+        message: 'Kite session required — Get Token, then Run (or push the token).',
+      });
+      return;
+    }
+    const out = await runBacktest({
+      authorization,
+      fromDate: window.fromDate,
+      toDate: window.toDate,
+      config,
+    });
+    res.json({
+      ...out,
+      mode: 'paper',
+      liveMoney: false,
+      realOrders: false,
+      today: window.today,
+    });
+    return;
+  }
+  const out = await store.start(userId(req), config);
+  res.json({
+    ...out,
+    mode: 'live',
+    liveMoney: true,
+    realOrders: true,
+    fromDate: window.fromDate,
+    toDate: window.toDate,
+    today: window.today,
   });
 }
 
@@ -141,10 +185,8 @@ async function putAuth(req, res) {
  * historical data only — no orders are placed).
  */
 async function backtest(req, res) {
-  res.status(410).json({
-    status: 'error',
-    message: 'Auto Bot Paper is removed. Start a new desk from scratch.',
-  });
+  req.body = { ...(req.body || {}), liveMoney: false, realOrders: false };
+  return start(req, res);
 }
 
 module.exports = { health, status, events, defaults, start, stop, putAuth, backtest };

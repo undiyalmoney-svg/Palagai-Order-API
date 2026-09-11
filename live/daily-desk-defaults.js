@@ -384,6 +384,7 @@ function normalizeStartConfig(config = {}) {
     enableKutty: !!config.enableKutty,
     kuttyAlone: !!config.kuttyAlone,
     realOrders: !!config.realOrders,
+    liveMoney: !!(config.liveMoney || config.realOrders),
     dnaId: config.dnaId || preset.dnaId,
     maxOpenLegs:
       config.maxOpenLegs != null

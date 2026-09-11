@@ -15,7 +15,7 @@ function requireAutoModule(req, res, next) {
     next();
     return;
   }
-  res.status(403).json({ status: 'error', message: 'Auto Trader not enabled for this account' });
+  res.status(403).json({ status: 'error', message: 'Trade Bot not enabled for this account' });
 }
 
 router.get('/health', asyncHandler(ctrl.health));
