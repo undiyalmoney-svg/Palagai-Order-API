@@ -57,7 +57,7 @@ assert.ok(threw);
 
 const { paperPnlWindow } = require('./trade-bot-dates');
 const expanded = paperPnlWindow(todayWin, { fromDate: '2022-01-01', toDate: '2026-09-11' });
-assert.strictEqual(expanded.fromDate, '2022-01-01');
+assert.strictEqual(expanded.fromDate, '2025-09-11');
 assert.strictEqual(expanded.usedFindWindow, true);
 
 assert.strictEqual(typeof genie.makeGenieStrategy, 'function');

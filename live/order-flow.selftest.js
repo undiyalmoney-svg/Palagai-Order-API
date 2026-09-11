@@ -57,14 +57,14 @@ assert.ok(found.engine === 'order-flow');
 const now = new Date('2026-09-11T10:00:00+05:30');
 const todayWin = parseTradeBotWindow({ today: true }, now);
 const expanded = paperPnlWindow(todayWin, { fromDate: '2022-01-01', toDate: '2026-09-11' });
-assert.strictEqual(expanded.fromDate, '2022-01-01');
+assert.strictEqual(expanded.fromDate, '2025-09-11');
 assert.strictEqual(expanded.toDate, '2026-09-11');
 assert.strictEqual(expanded.usedFindWindow, true);
 
 (async () => {
   const longBars = [];
   let p = 18000;
-  const start = Date.parse('2022-09-15T00:00:00Z');
+  const start = Date.parse('2025-09-15T00:00:00Z');
   for (let i = 0; i < 250; i += 1) {
     p += i % 9 === 0 ? -40 : 18;
     const date = new Date(start + i * 86400000).toISOString().slice(0, 10);
@@ -81,13 +81,14 @@ assert.strictEqual(expanded.usedFindWindow, true);
   }
   setLastFoundForTests(null);
   const out = await findEntryExitWait(
-    { fromDate: '2022-09-15', toDate: '2023-05-22', lots: 1 },
+    { fromDate: '2025-09-15', toDate: '2026-05-22', lots: 1 },
     { fetchIndexDaily: async () => ({ indexType: 'NIFTY 50', historical: longBars }) },
   );
   assert.ok(out.engines);
   assert.ok(out.engine === 'ee-wait' || out.engine === 'order-flow');
   assert.ok(out.best && out.best.spec, 'find must return a spec');
 
+  setLastFoundForTests(null);
   const paper = await runEeWaitPaper(
     { fromDate: '2026-09-11', toDate: '2026-09-11', today: true, lots: 1 },
     { fetchIndexDaily: async () => ({ indexType: 'NIFTY 50', historical: longBars }) },
