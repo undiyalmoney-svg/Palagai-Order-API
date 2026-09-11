@@ -1,5 +1,4 @@
 const store = require('./live.store');
-const { runBacktest } = require('./backtest');
 const {
   APP_BUILD,
   APP_VERSION,
@@ -19,7 +18,7 @@ async function health(_req, res) {
   res.json({
     status: 'ok',
     service: 'palagai-live-control',
-    note: 'Server Live — Nifty 50 only · Pivot S/R trap · lots from UI · Paper≡Live',
+    note: 'Auto Bot and S/R Live are retired. Kite token push still works.',
     version: APP_VERSION,
     appBuild: APP_BUILD,
     dnaId: LIVE_GREEN_DNA.id,
@@ -117,8 +116,13 @@ async function defaults(_req, res) {
 }
 
 async function start(req, res) {
-  const out = await store.start(userId(req), req.body || {});
-  res.json(out);
+  try {
+    await store.stop(userId(req));
+  } catch (_) { /* already idle */ }
+  res.status(410).json({
+    status: 'error',
+    message: 'Auto Bot is removed. Start a new desk from scratch.',
+  });
 }
 
 async function stop(req, res) {
@@ -137,27 +141,10 @@ async function putAuth(req, res) {
  * historical data only — no orders are placed).
  */
 async function backtest(req, res) {
-  // Prefer the browser's Kite session header; fall back to the server-stored
-  // token (pushed via Push Kite token) so Paper works like Live.
-  const authorization =
-    req.headers['x-kite-authorization'] ||
-    req.headers['x-kite-authorisation'] ||
-    (await store.getAuthorizationFor(userId(req)));
-  if (!authorization) {
-    res.status(400).json({
-      status: 'error',
-      message: 'Kite session required — Get Token (or Push Kite token to server), then retry Paper.',
-    });
-    return;
-  }
-  const body = req.body || {};
-  const out = await runBacktest({
-    authorization,
-    fromDate: body.fromDate,
-    toDate: body.toDate,
-    config: body,
+  res.status(410).json({
+    status: 'error',
+    message: 'Auto Bot Paper is removed. Start a new desk from scratch.',
   });
-  res.json(out);
 }
 
 module.exports = { health, status, events, defaults, start, stop, putAuth, backtest };

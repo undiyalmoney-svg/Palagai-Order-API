@@ -499,7 +499,7 @@ async function srLiveStart(req, res) {
   } catch (_) { /* idle is fine */ }
   res.status(410).json({
     status: 'error',
-    message: 'S/R Breakout Live is retired. Use Auto Bot (Genie) for Nifty ATM CE/PE.',
+    message: 'S/R Breakout Live is retired.',
   });
 }
 

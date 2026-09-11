@@ -262,7 +262,9 @@ async function attachMongo(db) {
         };
       }
       if (session.status === 'running') {
-        startTickLoop(session);
+        session.status = 'stopped';
+        session.message = 'Auto Bot retired — not resumed';
+        await persistRun(session);
       }
     }
     // Migrate legacy primary → leave in place for owner who re-pushes
