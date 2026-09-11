@@ -160,12 +160,14 @@ async function fetchInstruments(authorization) {
 }
 
 /** interval: 'minute' | '5minute' | '60minute' | 'day' etc (Kite Connect intervals). */
-async function fetchHistoricalCandles(authorization, instrumentToken, fromDate, toDate, interval = '5minute') {
+async function fetchHistoricalCandles(authorization, instrumentToken, fromDate, toDate, interval = '5minute', opts = {}) {
+  const params = { from: fromDate, to: toDate };
+  if (opts.oi) params.oi = 1;
   const res = await getWithRetry(
     `/instruments/historical/${instrumentToken}/${interval}`,
     {
       headers: headers(authorization),
-      params: { from: fromDate, to: toDate },
+      params,
     },
     'historical',
   );
@@ -175,14 +177,18 @@ async function fetchHistoricalCandles(authorization, instrumentToken, fromDate, 
     );
   }
   const rows = res.data?.data?.candles || [];
-  return rows.map((r) => ({
-    date: String(r[0]),
-    open: Number(r[1]),
-    high: Number(r[2]),
-    low: Number(r[3]),
-    close: Number(r[4]),
-    volume: Number(r[5]) || 0,
-  }));
+  return rows.map((r) => {
+    const bar = {
+      date: String(r[0]),
+      open: Number(r[1]),
+      high: Number(r[2]),
+      low: Number(r[3]),
+      close: Number(r[4]),
+      volume: Number(r[5]) || 0,
+    };
+    if (r.length > 6 && r[6] != null) bar.oi = Number(r[6]) || 0;
+    return bar;
+  });
 }
 
 /** Kite 5-minute history allows at most 100 days per call. */
@@ -204,15 +210,15 @@ function historicalChunks(fromDate, toDate, maxDays = 90) {
   return out;
 }
 
-async function fetchHistorical5m(authorization, instrumentToken, fromDate, toDate) {
+async function fetchHistorical5m(authorization, instrumentToken, fromDate, toDate, opts = {}) {
   const chunks = historicalChunks(fromDate, toDate, 90);
   if (chunks.length <= 1) {
-    return fetchHistoricalCandles(authorization, instrumentToken, fromDate, toDate, '5minute');
+    return fetchHistoricalCandles(authorization, instrumentToken, fromDate, toDate, '5minute', opts);
   }
   const all = [];
   const seen = new Set();
   for (const [from, to] of chunks) {
-    const rows = await fetchHistoricalCandles(authorization, instrumentToken, from, to, '5minute');
+    const rows = await fetchHistoricalCandles(authorization, instrumentToken, from, to, '5minute', opts);
     for (const r of rows) {
       if (seen.has(r.date)) continue;
       seen.add(r.date);
@@ -236,6 +242,44 @@ async function fetchQuotes(authorization, keys) {
   );
   if (res.status >= 400 || res.data?.status === 'error') {
     throw new Error(res.data?.message || `quote HTTP ${res.status}`);
+  }
+  return res.data?.data || {};
+}
+
+/** Day OHLC + last price (lighter than /quote). Keys like NFO:SYMBOL. */
+async function fetchQuoteOhlc(authorization, keys) {
+  if (!keys.length) return {};
+  const res = await getWithRetry(
+    '/quote/ohlc',
+    {
+      headers: headers(authorization),
+      params: { i: keys },
+      paramsSerializer: (params) =>
+        (params.i || []).map((k) => `i=${encodeURIComponent(k)}`).join('&'),
+    },
+    'quote-ohlc',
+  );
+  if (res.status >= 400 || res.data?.status === 'error') {
+    throw new Error(res.data?.message || `quote/ohlc HTTP ${res.status}`);
+  }
+  return res.data?.data || {};
+}
+
+/** Last traded price only. */
+async function fetchQuoteLtp(authorization, keys) {
+  if (!keys.length) return {};
+  const res = await getWithRetry(
+    '/quote/ltp',
+    {
+      headers: headers(authorization),
+      params: { i: keys },
+      paramsSerializer: (params) =>
+        (params.i || []).map((k) => `i=${encodeURIComponent(k)}`).join('&'),
+    },
+    'quote-ltp',
+  );
+  if (res.status >= 400 || res.data?.status === 'error') {
+    throw new Error(res.data?.message || `quote/ltp HTTP ${res.status}`);
   }
   return res.data?.data || {};
 }
@@ -265,5 +309,7 @@ module.exports = {
   fetchHistoricalCandles,
   historicalChunks,
   fetchQuotes,
+  fetchQuoteOhlc,
+  fetchQuoteLtp,
   parseInstrumentsCsv,
 };

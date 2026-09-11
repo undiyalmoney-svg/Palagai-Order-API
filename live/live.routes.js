@@ -27,6 +27,7 @@ router.get('/events', asyncHandler(ctrl.events));
 router.post('/start', asyncHandler(ctrl.start));
 router.post('/stop', asyncHandler(ctrl.stop));
 router.post('/backtest', asyncHandler(ctrl.backtest));
+router.post('/options/ohlc', asyncHandler(ctrl.optionOhlc));
   router.post('/sr-breakout', asyncHandler(srCtrl.srBreakout));
   router.post('/sr-observe', asyncHandler(srCtrl.srObserve));
   router.post('/sr-breakout/debug', asyncHandler(srCtrl.srDebug));

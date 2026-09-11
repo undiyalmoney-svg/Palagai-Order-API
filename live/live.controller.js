@@ -1,6 +1,6 @@
 const store = require('./live.store');
 const { runBacktest } = require('./backtest');
-const { parseTradeBotWindow } = require('./trade-bot-dates');
+const { getOptionOhlcAndPrice } = require('./option-ohlc');
 const {
   APP_BUILD,
   APP_VERSION,
@@ -189,4 +189,37 @@ async function backtest(req, res) {
   return start(req, res);
 }
 
-module.exports = { health, status, events, defaults, start, stop, putAuth, backtest };
+/**
+ * Option OHLC (historical candles) and/or live price.
+ * Body: tradingSymbol | instrumentToken | atm:true, fromDate, toDate,
+ * today, historical, live, interval, optionType (CE|PE|BOTH).
+ */
+async function optionOhlc(req, res) {
+  const authorization = await kiteAuthorization(req);
+  if (!authorization) {
+    res.status(400).json({
+      status: 'error',
+      message: 'Kite session required — Get Token, then retry.',
+    });
+    return;
+  }
+  const body = req.body || {};
+  let fromDate = body.fromDate;
+  let toDate = body.toDate;
+  let today = false;
+  if (body.today === true || body.today === 'true') {
+    const w = parseTradeBotWindow({ today: true, liveMoney: false });
+    fromDate = w.fromDate;
+    toDate = w.toDate;
+    today = true;
+  }
+  const out = await getOptionOhlcAndPrice({
+    authorization,
+    ...body,
+    fromDate,
+    toDate,
+  });
+  res.json({ status: 'ok', today, ...out });
+}
+
+module.exports = { health, status, events, defaults, start, stop, putAuth, backtest, optionOhlc };
