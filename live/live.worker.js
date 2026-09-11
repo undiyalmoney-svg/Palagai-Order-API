@@ -24,7 +24,8 @@ const { archiveInstruments } = require('./instrument-archive');
 const { makeGenieStrategy } = require('./genie-desk');
 const { fetchIndexDaily } = require('./nse-index-history');
 const { simulate, dailyBarsFromFiveMinute } = require('./ee-wait-engine');
-const { getLastFound } = require('./ee-wait-research');
+const { simulateOrderFlow } = require('./order-flow-engine');
+const { getLastFound, isOrderFlowSpec } = require('./ee-wait-research');
 
 const LOOKBACK_DAYS = 12;
 
@@ -278,8 +279,11 @@ class LiveWorker {
       }
 
       const { date: today, hhmm: now } = istParts();
-      const eeWait = String(config.engine || '').toLowerCase() === 'ee-wait';
-      const halt = eeWait ? '' : this.deskHaltReason(today);
+      const researchEngine =
+        String(config.engine || '').toLowerCase() === 'ee-wait' ||
+        String(config.engine || '').toLowerCase() === 'order-flow' ||
+        String(config.engine || '').toLowerCase() === 'confluence';
+      const halt = researchEngine ? '' : this.deskHaltReason(today);
       if (halt && halt !== this.lastDeskHalt) {
         this.lastDeskHalt = halt;
         this.pushEvent('DESK_HALT', halt);
@@ -298,7 +302,7 @@ class LiveWorker {
           authorization,
           book: 'nifty',
           instrument: NIFTY_50_INSTRUMENT,
-          label: eeWait ? 'Nifty EE-wait' : 'Nifty Trap',
+          label: researchEngine ? 'Nifty research' : 'Nifty Trap',
           lots: config.niftyLots || config.deskLots || config.lots || 1,
           config,
           now,
@@ -308,7 +312,7 @@ class LiveWorker {
         });
       }
 
-      if (!eeWait && config.enableBank && indexSession) {
+      if (!researchEngine && config.enableBank && indexSession) {
         await this.runBook({
           authorization,
           book: 'bank',
@@ -362,7 +366,9 @@ class LiveWorker {
     livePath,
     enableKutty,
   }) {
-    if (String(config.engine || '').toLowerCase() === 'ee-wait') {
+    if (
+      ['ee-wait', 'order-flow', 'confluence'].includes(String(config.engine || '').toLowerCase())
+    ) {
       await this.runEeWaitBook({ authorization, lots, config, today });
       return;
     }
@@ -401,9 +407,9 @@ class LiveWorker {
   }
 
   async runEeWaitBook({ authorization, lots, config, today }) {
-    const spec = config.eeWait || config.spec || getLastFound()?.best?.spec;
+    const spec = config.eeWait || config.spec || config.orderFlow || getLastFound()?.best?.spec;
     if (!spec) {
-      this.pushEvent('ERROR', 'Find entry/exit/wait first, then Start live.');
+      this.pushEvent('ERROR', 'Find first, then Start live.');
       return;
     }
     if (!this.eeWaitDaily || this.eeWaitDailyAt !== today) {
@@ -419,7 +425,9 @@ class LiveWorker {
     let bars = (this.eeWaitDaily || []).filter((b) => b.date < today);
     if (todayBar) bars = bars.concat(todayBar);
     else bars = this.eeWaitDaily || [];
-    const run = simulate(bars, spec);
+    const run = isOrderFlowSpec(spec) || String(config.engine || '').toLowerCase() === 'order-flow'
+      ? simulateOrderFlow(bars, spec)
+      : simulate(bars, spec);
     let open = null;
     if (run.open) {
       let spot = 0;

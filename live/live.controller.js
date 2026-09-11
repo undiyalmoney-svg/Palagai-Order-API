@@ -131,13 +131,19 @@ async function kiteAuthorization(req) {
  * One Trade Bot run. Paper and live are the same engine.
  * `liveMoney` (or `realOrders`) is the only switch that places Kite orders.
  */
+function isResearchEngine(engine) {
+  const e = String(engine || '').toLowerCase();
+  return !e || e === 'ee-wait' || e === 'order-flow' || e === 'confluence';
+}
+
 async function start(req, res) {
   const body = req.body || {};
   const window = parseTradeBotWindow(body);
-  const engine = String(body.engine || (body.eeWait ? 'ee-wait' : '')).toLowerCase();
+  const engine = String(body.engine || (body.eeWait ? 'ee-wait' : body.orderFlow ? 'order-flow' : '')).toLowerCase();
   const universe = parseUniverse(body.universe || body.indexType);
   const config = { ...body, ...window, realOrders: window.liveMoney, engine, universe };
-  if (engine === 'ee-wait' && window.liveMoney && universe === 'nifty-100-stocks') {
+  const researchLive = isResearchEngine(engine);
+  if (researchLive && window.liveMoney && universe === 'nifty-100-stocks') {
     res.status(400).json({
       status: 'error',
       message:
@@ -145,12 +151,14 @@ async function start(req, res) {
     });
     return;
   }
-  if (engine === 'ee-wait' && !window.liveMoney) {
+  if (researchLive && !window.liveMoney) {
     const out = await runEeWaitPaper({
       fromDate: window.fromDate,
       toDate: window.toDate,
+      today: window.today,
       lots: body.lots || body.niftyLots || 1,
-      spec: body.eeWait || body.spec,
+      spec: body.eeWait || body.spec || body.orderFlow,
+      engine,
       indexType: body.indexType,
       universe,
       symbol: body.symbol,
