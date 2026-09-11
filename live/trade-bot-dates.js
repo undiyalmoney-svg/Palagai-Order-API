@@ -44,29 +44,14 @@ function parseTradeBotWindow(body = {}, now = new Date()) {
   };
 }
 
-function addCalendarYears(iso, deltaYears) {
-  const [y, m, d] = String(iso).split('-').map(Number);
-  const dt = new Date(Date.UTC(y + deltaYears, m - 1, d));
-  return dt.toISOString().slice(0, 10);
-}
-
 /**
- * Paper P&L follows the From/To the user picked.
- * Today (or a single day) uses the last 1 year ending that day.
+ * Paper uses the same From/To as the date boxes.
+ * Today means today — not last year. Warmup bars are fetched before From
+ * so signals can fire, but closed trades must fall inside From→To.
  */
-function paperPnlWindow(window, _lastFound, now = new Date()) {
+function paperPnlWindow(window) {
   if (!window) return window;
-  const single = !!window.today || window.fromDate === window.toDate;
-  if (!single) {
-    return { ...window, usedFindWindow: false };
-  }
-  const today = window.toDate || istToday(now);
-  return {
-    ...window,
-    fromDate: addCalendarYears(today, -1),
-    toDate: today,
-    usedFindWindow: true,
-  };
+  return { ...window, usedFindWindow: false };
 }
 
 module.exports = { truthy, istToday, parseTradeBotWindow, paperPnlWindow };

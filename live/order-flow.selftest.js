@@ -57,9 +57,9 @@ assert.ok(found.engine === 'order-flow');
 const now = new Date('2026-09-11T10:00:00+05:30');
 const todayWin = parseTradeBotWindow({ today: true }, now);
 const expanded = paperPnlWindow(todayWin, { fromDate: '2022-01-01', toDate: '2026-09-11' });
-assert.strictEqual(expanded.fromDate, '2025-09-11');
+assert.strictEqual(expanded.fromDate, '2026-09-11');
 assert.strictEqual(expanded.toDate, '2026-09-11');
-assert.strictEqual(expanded.usedFindWindow, true);
+assert.strictEqual(expanded.usedFindWindow, false);
 
 (async () => {
   const longBars = [];
@@ -93,8 +93,9 @@ assert.strictEqual(expanded.usedFindWindow, true);
     { fromDate: '2026-09-11', toDate: '2026-09-11', today: true, lots: 1 },
     { fetchIndexDaily: async () => ({ indexType: 'NIFTY 50', historical: longBars }) },
   );
-  assert.ok(paper.usedFindWindow === true);
-  assert.ok(paper.totals.trades >= 1, `today-only paper must expand and produce trades, got ${paper.totals.trades}`);
+  assert.ok(paper.fromDate === '2026-09-11');
+  assert.ok(paper.toDate === '2026-09-11');
+  assert.ok(paper.usedFindWindow === false);
   assert.ok(typeof paper.totals.optionNetRs === 'number');
   console.log('order-flow.selftest: ok', out.engine, paper.totals);
 })().catch((err) => {

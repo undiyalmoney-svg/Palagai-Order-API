@@ -259,13 +259,15 @@ function paperEeWait({
     open: run.open,
     message:
       totals.trades === 0
-        ? 'No trades in this window. Paper needs a multi-day Find window — Today is only for live orders.'
+        ? fromDate === toDate
+          ? `No paper trades on ${fromDate}. Today only counts that session. Uncheck Today and use Last 1 year for historical P&L.`
+          : 'No trades in this date range. Widen From/To and Run paper again.'
         : undefined,
     note:
       (size === 1
         ? `${resolvedEngine}: stock P&L = rupee move × lots (share qty). Not option premium.`
         : `${resolvedEngine}: index-point P&L marked as rupees via Nifty lot size × 65. Not option premium.`) +
-      (usedFindWindow ? ' Dates were a single day, so paper used the last 1 year ending that day.' : ''),
+      (fromDate === toDate ? ` Window is ${fromDate} only.` : ''),
   };
 }
 
@@ -338,7 +340,7 @@ async function runEeWaitPaper(opts = {}, deps = {}) {
     const equityFn = deps.fetchEquityDaily || fetchEquityDaily;
     const series = await equityFn({
       symbol,
-      fromDate: addDaysIso(fromDate, -40),
+      fromDate: addDaysIso(fromDate, -90),
       toDate,
     });
     const bars = series.historical || [];
