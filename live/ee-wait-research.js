@@ -373,7 +373,7 @@ async function runEeWaitPaper(opts = {}, deps = {}) {
   const fetchDaily = deps.fetchIndexDaily || fetchIndexDaily;
   const series = await fetchDaily({
     indexType,
-    fromDate: addDaysIso(fromDate, -40),
+    fromDate: addDaysIso(fromDate, -90),
     toDate,
   });
   const bars = series.historical || [];
