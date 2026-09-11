@@ -8,7 +8,9 @@ const {
   specGridLite,
   NIFTY_LOT_SIZE,
 } = require('./ee-wait-engine');
+const { searchOrderFlow, simulateOrderFlow } = require('./order-flow-engine');
 const { addDaysIso } = require('./nse-option-history');
+const { paperPnlWindow } = require('./trade-bot-dates');
 
 let lastFound = null;
 
@@ -43,16 +45,63 @@ function resolveWindow(opts, universe) {
   return { fromDate, toDate };
 }
 
-function slimStockRow(symbol, bars, found, lots) {
-  if (!found?.best) return null;
+function isOrderFlowSpec(spec) {
+  const engine = String(spec?.engine || '').toLowerCase();
+  return engine === 'order-flow' || String(spec?.entry || '') === 'confluence';
+}
+
+function pickWinner(eeFound, ofFound) {
+  const a = eeFound?.best;
+  const b = ofFound?.best;
+  if (a && b) {
+    const ar = (a.oos?.rupees || 0) + (a.score || 0);
+    const br = (b.oos?.rupees || 0) + (b.score || 0);
+    return br > ar
+      ? { engine: 'order-flow', best: b, source: ofFound }
+      : { engine: 'ee-wait', best: a, source: eeFound };
+  }
+  if (b) return { engine: 'order-flow', best: b, source: ofFound };
+  if (a) return { engine: 'ee-wait', best: a, source: eeFound };
+  return { engine: 'ee-wait', best: null, source: eeFound };
+}
+
+function searchBoth(bars, { lots, lotSize, folds, lite }) {
+  const ee = searchSpecs(bars, {
+    lots,
+    lotSize,
+    folds,
+    grid: lite ? specGridLite() : undefined,
+    skipChecks: !!lite,
+  });
+  const oflow = searchOrderFlow(bars, { lots, lotSize, folds, lite: !!lite });
+  const picked = pickWinner(ee, oflow);
+  return {
+    ee,
+    oflow,
+    picked,
+    engines: {
+      'ee-wait': ee?.best
+        ? { spec: ee.best.spec, oos: ee.best.oos, score: ee.best.score }
+        : null,
+      'order-flow': oflow?.best
+        ? { spec: oflow.best.spec, oos: oflow.best.oos, score: oflow.best.score }
+        : null,
+    },
+  };
+}
+
+function slimStockRow(symbol, bars, picked, lots, engines) {
+  if (!picked?.best) return null;
   return {
     symbol,
     bars: bars.length,
-    spec: found.best.spec,
-    oos: found.best.oos,
-    score: found.best.score,
+    engine: picked.engine,
+    spec: picked.best.spec,
+    oos: picked.best.oos,
+    score: picked.best.score,
     lots,
     lotSize: 1,
+    engines,
   };
 }
 
@@ -70,7 +119,8 @@ async function findOnIndex(opts, deps, universe, window, lots) {
     err.status = 400;
     throw err;
   }
-  const found = searchSpecs(bars, { lots, lotSize: NIFTY_LOT_SIZE, folds: opts.folds });
+  const both = searchBoth(bars, { lots, lotSize: NIFTY_LOT_SIZE, folds: opts.folds, lite: false });
+  const found = both.picked.source || both.ee;
   return {
     at: new Date().toISOString(),
     universe,
@@ -79,9 +129,15 @@ async function findOnIndex(opts, deps, universe, window, lots) {
     fromDate: window.fromDate,
     toDate: window.toDate,
     bars: bars.length,
-    engine: 'ee-wait',
+    engine: both.picked.engine,
     lotSize: NIFTY_LOT_SIZE,
     ...found,
+    best: both.picked.best,
+    engines: both.engines,
+    note:
+      both.picked.engine === 'order-flow'
+        ? both.oflow.note
+        : found.note,
   };
 }
 
@@ -100,14 +156,8 @@ async function findOnNifty100Stocks(opts, deps, window, lots) {
       });
       const bars = series.historical || [];
       if (bars.length < 80) return { symbol, skipped: true, bars: bars.length };
-      const found = searchSpecs(bars, {
-        lots,
-        lotSize: 1,
-        folds: opts.folds || 2,
-        grid: specGridLite(),
-        skipChecks: true,
-      });
-      const slim = slimStockRow(symbol, bars, found, lots);
+      const both = searchBoth(bars, { lots, lotSize: 1, folds: opts.folds || 2, lite: true });
+      const slim = slimStockRow(symbol, bars, both.picked, lots, both.engines);
       return slim || { symbol, skipped: true, bars: bars.length, reason: 'no-oos-edge' };
     } catch (err) {
       return { symbol, skipped: true, error: err.message };
@@ -121,7 +171,7 @@ async function findOnNifty100Stocks(opts, deps, window, lots) {
     indexType: 'NIFTY 100',
     fromDate: window.fromDate,
     toDate: window.toDate,
-    engine: 'ee-wait',
+    engine: best?.engine || 'ee-wait',
     lotSize: 1,
     scanned: symbols.length,
     ranked: ranked.length,
@@ -144,7 +194,7 @@ async function findOnNifty100Stocks(opts, deps, window, lots) {
     symbol: best?.symbol || null,
     stocks: ranked.slice(0, 15),
     note:
-      'Nifty 100 cash stocks, NSE daily OHLC. Rupees = ₹ move per share × lots (share qty). Same kill-failure engine. Live money stays Nifty 50 ATM options; this universe is paper/research.',
+      'Nifty 100 cash stocks, NSE daily OHLC. Compares entry/wait/exit vs order-flow confluence (volume profile + signed-volume delta). Rupees = ₹ move per share × lots. Live money stays Nifty 50 ATM options; this universe is paper/research.',
   };
 }
 
@@ -163,17 +213,33 @@ function getLastFound() {
   return lastFound;
 }
 
-function paperEeWait({ bars, spec, fromDate, toDate, lots, lotSize, symbol, universe }) {
+function paperEeWait({
+  bars,
+  spec,
+  fromDate,
+  toDate,
+  lots,
+  lotSize,
+  symbol,
+  universe,
+  engine,
+  usedFindWindow,
+}) {
   const size = Number(lotSize) > 0 ? Number(lotSize) : NIFTY_LOT_SIZE;
-  const run = simulate(bars, spec, { fromDate, toDate });
+  const of = isOrderFlowSpec(spec) || String(engine || '').toLowerCase() === 'order-flow';
+  const run = of
+    ? simulateOrderFlow(bars, spec, { fromDate, toDate })
+    : simulate(bars, spec, { fromDate, toDate });
   const totals = summarizeTrades(run.trades, lots, size);
+  const resolvedEngine = of ? 'order-flow' : 'ee-wait';
   return {
-    engine: 'ee-wait',
+    engine: resolvedEngine,
     universe: universe || 'nifty-50',
     symbol: symbol || null,
-    spec,
+    spec: run.spec || spec,
     fromDate,
     toDate,
+    usedFindWindow: !!usedFindWindow,
     totals: {
       trades: totals.trades,
       wins: totals.wins,
@@ -181,6 +247,8 @@ function paperEeWait({ bars, spec, fromDate, toDate, lots, lotSize, symbol, univ
       optionNetRs: totals.rupees,
       optionNetAfterChargesRs: totals.rupees,
       underlyingPoints: totals.points,
+      profitFactor: totals.profitFactor,
+      maxDrawdownPoints: totals.maxDrawdownPoints,
     },
     trades: run.trades.map((t) => ({
       ...t,
@@ -189,24 +257,48 @@ function paperEeWait({ bars, spec, fromDate, toDate, lots, lotSize, symbol, univ
       netOptionPnlRs: Math.round(t.points * size * Math.max(1, lots || 1)),
     })),
     open: run.open,
+    message:
+      totals.trades === 0
+        ? 'No trades in this window. Paper needs a multi-day Find window — Today is only for live orders.'
+        : undefined,
     note:
-      size === 1
-        ? 'Stock P&L = rupee move × lots (treated as share qty). Not option premium.'
-        : 'Index-point P&L marked as rupees via Nifty lot size. Not option premium marks.',
+      (size === 1
+        ? `${resolvedEngine}: stock P&L = rupee move × lots (share qty). Not option premium.`
+        : `${resolvedEngine}: index-point P&L marked as rupees via Nifty lot size × 65. Not option premium.`) +
+      (usedFindWindow ? ' Today is for live only — paper used the Find date window.' : ''),
   };
 }
 
 async function runEeWaitPaper(opts = {}, deps = {}) {
-  const spec = opts.spec || lastFound?.best?.spec || lastFound?.full?.spec;
+  const lots = Math.max(1, Math.floor(Number(opts.lots)) || 1);
+  const universe = parseUniverse(opts.universe || lastFound?.universe);
+  const rawWindow = {
+    fromDate: String(opts.fromDate || lastFound?.fromDate || '').slice(0, 10),
+    toDate: String(opts.toDate || lastFound?.toDate || '').slice(0, 10),
+    today: !!opts.today,
+    liveMoney: false,
+  };
+  const expanded = paperPnlWindow(rawWindow, lastFound);
+  const fromDate = expanded.fromDate;
+  const toDate = expanded.toDate;
+  let spec = opts.spec || lastFound?.best?.spec || lastFound?.full?.spec;
+  let engine = String(opts.engine || spec?.engine || lastFound?.engine || '').toLowerCase();
   if (!spec) {
-    const err = new Error('Find entry/exit/wait first, then Run paper.');
+    lastFound = await findEntryExitWait(
+      { fromDate, toDate, lots, universe, symbol: opts.symbol, folds: opts.folds },
+      deps,
+    );
+    spec = lastFound?.best?.spec || lastFound?.full?.spec;
+    engine = lastFound?.engine || engine;
+  }
+  if (!spec) {
+    const err = new Error(
+      'No profitable entry/wait/exit or order-flow spec in this window (out-of-sample net ≤ 0). Widen From/To or pick another universe.',
+    );
     err.status = 400;
     throw err;
   }
-  const lots = Math.max(1, Math.floor(Number(opts.lots)) || 1);
-  const universe = parseUniverse(opts.universe || lastFound?.universe);
-  const fromDate = String(opts.fromDate || lastFound?.fromDate || '').slice(0, 10);
-  const toDate = String(opts.toDate || lastFound?.toDate || '').slice(0, 10);
+  const usedFindWindow = !!expanded.usedFindWindow;
   if (universe === 'nifty-100-stocks') {
     const symbol = String(opts.symbol || lastFound?.symbol || '').toUpperCase();
     if (!symbol) {
@@ -229,6 +321,8 @@ async function runEeWaitPaper(opts = {}, deps = {}) {
       lotSize: 1,
       symbol,
       universe,
+      engine,
+      usedFindWindow,
     });
   }
   const indexType = universe === 'nifty-100' ? 'NIFTY 100' : 'NIFTY 50';
@@ -247,6 +341,8 @@ async function runEeWaitPaper(opts = {}, deps = {}) {
     lotSize: NIFTY_LOT_SIZE,
     symbol: indexType,
     universe,
+    engine,
+    usedFindWindow,
   });
 }
 
@@ -262,4 +358,6 @@ module.exports = {
   setLastFoundForTests,
   defaultWindow,
   parseUniverse,
+  isOrderFlowSpec,
+  searchBoth,
 };

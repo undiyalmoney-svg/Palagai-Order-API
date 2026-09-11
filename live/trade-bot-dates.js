@@ -44,4 +44,25 @@ function parseTradeBotWindow(body = {}, now = new Date()) {
   };
 }
 
-module.exports = { truthy, istToday, parseTradeBotWindow };
+/**
+ * Paper P&L cannot run on a single "Today" bar — Find/research needs a
+ * multi-year window. Live still uses the Today date for orders.
+ */
+function paperPnlWindow(window, lastFound, now = new Date()) {
+  if (!window) return window;
+  const single = !!window.today || window.fromDate === window.toDate;
+  if (!single) {
+    return { ...window, usedFindWindow: false };
+  }
+  const foundFrom = String(lastFound?.fromDate || '').slice(0, 10);
+  const foundTo = String(lastFound?.toDate || '').slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(foundFrom) && /^\d{4}-\d{2}-\d{2}$/.test(foundTo) && foundFrom < foundTo) {
+    return { ...window, fromDate: foundFrom, toDate: foundTo, usedFindWindow: true };
+  }
+  const today = window.toDate || istToday(now);
+  const [y, m, d] = today.split('-').map(Number);
+  const fromDate = `${y - 4}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  return { ...window, fromDate, toDate: today, usedFindWindow: true };
+}
+
+module.exports = { truthy, istToday, parseTradeBotWindow, paperPnlWindow };

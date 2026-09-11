@@ -339,13 +339,15 @@ function dailyBarsFromFiveMinute(candles) {
     const h = num(c.high);
     const l = num(c.low);
     const cl = num(c.close);
+    const v = num(c.volume);
     const row = byDay.get(date);
     if (!row) {
-      byDay.set(date, { date, open: o, high: h, low: l, close: cl });
+      byDay.set(date, { date, open: o, high: h, low: l, close: cl, volume: v });
     } else {
       row.high = Math.max(row.high, h);
       row.low = Math.min(row.low, l);
       row.close = cl;
+      row.volume = (row.volume || 0) + v;
     }
   }
   return [...byDay.values()].sort((a, b) => a.date.localeCompare(b.date));

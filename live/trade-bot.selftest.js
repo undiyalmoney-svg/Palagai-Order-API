@@ -55,6 +55,11 @@ try {
 }
 assert.ok(threw);
 
+const { paperPnlWindow } = require('./trade-bot-dates');
+const expanded = paperPnlWindow(todayWin, { fromDate: '2022-01-01', toDate: '2026-09-11' });
+assert.strictEqual(expanded.fromDate, '2022-01-01');
+assert.strictEqual(expanded.usedFindWindow, true);
+
 assert.strictEqual(typeof genie.makeGenieStrategy, 'function');
 assert.strictEqual(genie.DESK_STRATEGY_ID, 'align-combo-genie');
 
@@ -62,6 +67,8 @@ const ctrl = fs.readFileSync(path.join(__dirname, 'live.controller.js'), 'utf8')
 assert.match(ctrl, /parseTradeBotWindow/);
 assert.match(ctrl, /findEntryExitWait/);
 assert.match(ctrl, /runEeWaitPaper/);
+assert.match(ctrl, /isResearchEngine/);
+assert.match(ctrl, /paperPnlWindow|today: window.today/);
 assert.match(ctrl, /Kite session required for live price or ATM lookup/);
 assert.match(ctrl, /liveMoney/);
 assert.doesNotMatch(ctrl, /Auto Bot is removed/);

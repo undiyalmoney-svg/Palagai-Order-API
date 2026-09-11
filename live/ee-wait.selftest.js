@@ -90,8 +90,9 @@ assert.strictEqual(collapsed[0].close, 2.8);
   assert.ok(stocks.scanned === 2);
   assert.ok(stocks.symbol === 'AAA' || stocks.symbol === 'BBB');
 
+  setLastFoundForTests(out);
   const paper = await runEeWaitPaper(
-    { fromDate: '2021-06-01', toDate: '2021-09-01', lots: 2 },
+    { fromDate: '2021-06-01', toDate: '2021-09-01', lots: 2, universe: 'nifty-50' },
     {
       fetchIndexDaily: async () => ({
         indexType: 'NIFTY 50',
