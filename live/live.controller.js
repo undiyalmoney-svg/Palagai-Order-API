@@ -1,5 +1,6 @@
 const store = require('./live.store');
 const { runBacktest } = require('./backtest');
+const { parseTradeBotWindow } = require('./trade-bot-dates');
 const { getOptionOhlcAndPrice } = require('./option-ohlc');
 const {
   APP_BUILD,
