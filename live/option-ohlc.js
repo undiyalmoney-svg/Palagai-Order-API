@@ -1,13 +1,16 @@
 'use strict';
 /**
  * Option OHLC + price for Trade Bot.
- * Historical: Kite candles (default 5-minute, with OI).
+ * Historical listed: Kite candles (default 5-minute, with OI).
+ * Historical expired: NSE foCPV daily OHLC (Kite has no expired option series).
  * Live: Kite /quote last_price + day's OHLC + bid/ask.
  */
 const defaultMarket = require('./kite-market');
 const { findInstrumentInCsv, inferInstrumentExchanges } = defaultMarket;
 const { resolveAtmWeeklyOption } = require('./strategy-core.cjs');
 const { archiveInstruments, instrumentsWithArchive } = require('./instrument-archive');
+const defaultNseHistory = require('./nse-option-history');
+const { parseOptionContract, isExpiredIso } = defaultNseHistory;
 
 const NIFTY_SPOT_KEY = 'NSE:NIFTY 50';
 const BANK_SPOT_KEY = 'NSE:NIFTY BANK';
@@ -235,16 +238,59 @@ async function fetchHistoricalFor(market, authorization, token, fromDate, toDate
  * Identify one contract with tradingSymbol / instrumentToken, or set atm:true
  * for Nifty (or kind=banknifty) ATM CE/PE.
  */
+function contractFromParsed(spec, parsed, extra = {}) {
+  return {
+    instrumentToken: 0,
+    tradingSymbol: parsed.tradingSymbol || spec.tradingSymbol,
+    exchange: spec.exchange || 'NFO',
+    instrumentType: parsed.optionType,
+    strike: parsed.strike,
+    expiry: parsed.expiryIso,
+    lotSize: null,
+    name: parsed.underlying,
+    source: extra.source || 'nse',
+    nse: parsed,
+  };
+}
+
+function shouldUseNseHistory(c, historical, interval) {
+  if (String(c.exchange || '').toUpperCase() === 'MCX') return false;
+  const parsed = c.nse || parseOptionContract(c.tradingSymbol);
+  if (!parsed) return false;
+  if (String(interval || '') === 'day' && (!historical || !historical.length)) return true;
+  if (!c.instrumentToken) return true;
+  if (isExpiredIso(c.expiry || parsed.expiryIso)) return true;
+  return !historical || !historical.length;
+}
+
+async function loadNseHistory(nseHistory, c, opts, fromDate, toDate, interval) {
+  const out = await nseHistory.fetchExpiredOptionDayCandles({
+    tradingSymbol: c.tradingSymbol,
+    parsed: c.nse || parseOptionContract(c.tradingSymbol),
+    fromDate,
+    toDate,
+    expiryDate: opts.expiryDate || opts.expiry,
+  });
+  const note =
+    String(interval || '') !== 'day'
+      ? `${out.note} Requested ${interval}; returning daily bars.`
+      : out.note;
+  if (out.parsed) {
+    c.nse = out.parsed;
+    c.expiry = out.parsed.expiryIso || c.expiry;
+    c.strike = c.strike ?? out.parsed.strike;
+    c.instrumentType = c.instrumentType || out.parsed.optionType;
+    c.name = c.name || out.parsed.underlying;
+  }
+  return { historical: out.historical || [], dataSource: 'nse', intervalUsed: 'day', note };
+}
+
 async function getOptionOhlcAndPrice(opts = {}, deps = {}) {
   const market = deps.market || defaultMarket;
+  const nseHistory = deps.nseHistory || defaultNseHistory;
   const authorization = opts.authorization;
-  if (!authorization) {
-    const err = new Error('Kite session required');
-    err.status = 400;
-    throw err;
-  }
-  const wantHist = opts.historical !== false;
-  const wantLive = opts.live !== false;
+  const wantHist = opts.historical === undefined ? true : truthy(opts.historical);
+  const wantLive = opts.live === undefined ? !!authorization : truthy(opts.live);
   if (!wantHist && !wantLive) {
     const err = new Error('Enable historical and/or live');
     err.status = 400;
@@ -260,6 +306,11 @@ async function getOptionOhlcAndPrice(opts = {}, deps = {}) {
   const interval = opts.interval || '5minute';
   const requested = collectSymbols(opts);
   const atm = truthy(opts.atm) && !requested.length;
+  if ((atm || wantLive) && !authorization) {
+    const err = new Error('Kite session required for live price or ATM lookup — Get Token, then retry.');
+    err.status = 400;
+    throw err;
+  }
   let meta = { atm: !!atm, kind: opts.kind || 'nifty', spot: null, spotKey: null };
   let listed = [];
   if (atm) {
@@ -275,18 +326,27 @@ async function getOptionOhlcAndPrice(opts = {}, deps = {}) {
   } else if (requested.length) {
     const csvCache = new Map();
     for (const spec of requested) {
-      const one = await resolveAnyOption(market, authorization, spec, csvCache);
+      let one = null;
+      if (authorization) {
+        one = await resolveAnyOption(market, authorization, spec, csvCache);
+      }
       if (!one?.instrumentToken) {
+        const parsed = parseOptionContract(spec.tradingSymbol);
+        if (parsed && wantHist) {
+          listed.push(contractFromParsed(spec, parsed));
+          continue;
+        }
         const err = new Error(
-          `Unknown option ${spec.tradingSymbol || spec.instrumentToken}. Use any listed NFO/MCX tradingsymbol (e.g. BANKNIFTY2591655000CE or RELIANCE259181400CE) or instrument token.`,
+          `Unknown option ${spec.tradingSymbol || spec.instrumentToken}. Use a Kite tradingsymbol (listed) or an NSE-style expired symbol such as NIFTY21JUN15600CE.`,
         );
         err.status = 400;
         throw err;
       }
-      listed.push(one);
+      const parsed = parseOptionContract(one.tradingSymbol || spec.tradingSymbol);
+      listed.push(parsed ? { ...one, nse: parsed } : one);
     }
   } else {
-    const err = new Error('Pass tradingSymbol (any listed option), instrumentToken, or atm:true');
+    const err = new Error('Pass tradingSymbol (listed or expired option), instrumentToken, or atm:true');
     err.status = 400;
     throw err;
   }
@@ -295,7 +355,7 @@ async function getOptionOhlcAndPrice(opts = {}, deps = {}) {
     .map((c) => quoteKey(c.exchange, c.tradingSymbol))
     .filter(Boolean);
   let qmap = {};
-  if (wantLive && keys.length && typeof market.fetchQuotes === 'function') {
+  if (wantLive && keys.length && authorization && typeof market.fetchQuotes === 'function') {
     qmap = await market.fetchQuotes(authorization, keys);
   }
 
@@ -303,20 +363,52 @@ async function getOptionOhlcAndPrice(opts = {}, deps = {}) {
   for (const c of listed) {
     const key = quoteKey(c.exchange, c.tradingSymbol);
     let historical = [];
+    let dataSource = null;
+    let intervalUsed = wantHist ? interval : null;
+    let note = null;
     if (wantHist) {
-      try {
-        historical = await fetchHistoricalFor(
-          market,
-          authorization,
-          c.instrumentToken,
-          fromDate,
-          toDate,
-          interval,
-          opts.oi !== false,
-        );
-      } catch (err) {
-        historical = [];
-        c.historicalError = err.message;
+      const preferNse =
+        String(opts.source || '').toLowerCase() === 'nse' ||
+        isExpiredIso(c.expiry || c.nse?.expiryIso);
+      if (!preferNse && c.instrumentToken && authorization) {
+        try {
+          historical = await fetchHistoricalFor(
+            market,
+            authorization,
+            c.instrumentToken,
+            fromDate,
+            toDate,
+            interval,
+            opts.oi !== false,
+          );
+          if (historical.length) {
+            dataSource = 'kite';
+            intervalUsed = interval;
+          }
+        } catch (err) {
+          historical = [];
+          c.historicalError = err.message;
+        }
+      }
+      if (shouldUseNseHistory(c, historical, interval) || preferNse) {
+        try {
+          const nse = await loadNseHistory(nseHistory, c, opts, fromDate, toDate, interval);
+          if (nse.historical.length || !historical.length) {
+            historical = nse.historical;
+            dataSource = nse.dataSource;
+            intervalUsed = nse.intervalUsed;
+            note = nse.note;
+            delete c.historicalError;
+            if (!historical.length) {
+              c.historicalError =
+                'NSE foCPV returned no daily bars for this expiry/strike. For monthlies, pass expiryDate (DD-MMM-YYYY).';
+            }
+          }
+        } catch (err) {
+          if (!historical.length) {
+            c.historicalError = err.message;
+          }
+        }
       }
     }
     const live = wantLive ? liveFromQuote(lookupQuote(qmap, key, c.instrumentToken)) : null;
@@ -328,6 +420,9 @@ async function getOptionOhlcAndPrice(opts = {}, deps = {}) {
       historical,
       lastBar,
       price: live?.price ?? lastBar?.close ?? null,
+      dataSource,
+      intervalUsed,
+      note,
     });
   }
 
@@ -348,5 +443,6 @@ module.exports = {
   quoteKey,
   splitExchangeSymbol,
   collectSymbols,
+  parseOptionContract,
   NIFTY_SPOT_KEY,
 };

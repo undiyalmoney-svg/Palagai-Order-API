@@ -197,14 +197,16 @@ async function backtest(req, res) {
  */
 async function optionOhlc(req, res) {
   const authorization = await kiteAuthorization(req);
-  if (!authorization) {
+  const body = req.body || {};
+  const wantLive = body.live === undefined ? !!authorization : body.live === true || body.live === 'true';
+  const atm = body.atm === true || body.atm === 'true';
+  if ((wantLive || atm) && !authorization) {
     res.status(400).json({
       status: 'error',
-      message: 'Kite session required — Get Token, then retry.',
+      message: 'Kite session required for live price or ATM lookup — Get Token, then retry.',
     });
     return;
   }
-  const body = req.body || {};
   let fromDate = body.fromDate;
   let toDate = body.toDate;
   let today = false;

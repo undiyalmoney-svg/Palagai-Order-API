@@ -136,11 +136,91 @@ assert.strictEqual(live.price, 122.4);
 
   threw = false;
   try {
-    await getOptionOhlcAndPrice({ tradingSymbol: 'X', historical: true, live: false }, { market });
+    await getOptionOhlcAndPrice(
+      {
+        tradingSymbol: 'X',
+        fromDate: '2026-09-11',
+        toDate: '2026-09-11',
+        historical: true,
+        live: false,
+      },
+      { market },
+    );
   } catch (err) {
-    threw = err.status === 400;
+    threw = err.status === 400 && /Unknown option/.test(err.message);
   }
-  assert.ok(threw, 'missing kite session');
+  assert.ok(threw, 'unparseable option must 400');
+
+  let nseCalls = 0;
+  const expired = await getOptionOhlcAndPrice(
+    {
+      tradingSymbol: 'NIFTY21JUN15600CE',
+      fromDate: '2021-06-01',
+      toDate: '2021-06-24',
+      historical: true,
+      live: false,
+      interval: '5minute',
+    },
+    {
+      market,
+      nseHistory: {
+        async fetchExpiredOptionDayCandles(q) {
+          nseCalls += 1;
+          assert.strictEqual(q.tradingSymbol, 'NIFTY21JUN15600CE');
+          return {
+            source: 'nse',
+            interval: 'day',
+            note: 'NSE expired/listed option history is end-of-day OHLC (foCPV), not intraday.',
+            parsed: {
+              tradingSymbol: 'NIFTY21JUN15600CE',
+              underlying: 'NIFTY',
+              optionType: 'CE',
+              strike: 15600,
+              expiryIso: '2021-06-24',
+              expiryNse: '24-JUN-2021',
+            },
+            historical: [
+              {
+                date: '2021-06-24T15:30:00+0530',
+                open: 157.3,
+                high: 200,
+                low: 140,
+                close: 188.45,
+                volume: 100,
+                oi: 50,
+              },
+            ],
+          };
+        },
+      },
+    },
+  );
+  assert.strictEqual(nseCalls, 1);
+  assert.strictEqual(expired.contracts[0].dataSource, 'nse');
+  assert.strictEqual(expired.contracts[0].intervalUsed, 'day');
+  assert.strictEqual(expired.contracts[0].historical[0].close, 188.45);
+  assert.match(expired.contracts[0].note || '', /end-of-day/);
+
+  const listedKeepsKite = await getOptionOhlcAndPrice(
+    {
+      authorization: 'token x:y',
+      tradingSymbol: 'RELIANCE259181400CE',
+      fromDate: '2026-09-01',
+      toDate: '2026-09-11',
+      historical: true,
+      live: false,
+    },
+    {
+      market,
+      nseHistory: {
+        async fetchExpiredOptionDayCandles() {
+          throw new Error('NSE must not run when Kite already has listed bars');
+        },
+      },
+    },
+  );
+  assert.strictEqual(listedKeepsKite.contracts[0].dataSource, 'kite');
+  assert.strictEqual(listedKeepsKite.contracts[0].historical.length, 2);
 
   console.log('option-ohlc.selftest: ok');
 })().catch((err) => {
