@@ -2,7 +2,7 @@ const store = require('./live.store');
 const { runBacktest } = require('./backtest');
 const { parseTradeBotWindow } = require('./trade-bot-dates');
 const { getOptionOhlcAndPrice } = require('./option-ohlc');
-const { findEntryExitWait, runEeWaitPaper, getLastFound } = require('./ee-wait-research');
+const { findEntryExitWait, runEeWaitPaper, getLastFound, parseUniverse } = require('./ee-wait-research');
 const {
   APP_BUILD,
   APP_VERSION,
@@ -135,7 +135,16 @@ async function start(req, res) {
   const body = req.body || {};
   const window = parseTradeBotWindow(body);
   const engine = String(body.engine || (body.eeWait ? 'ee-wait' : '')).toLowerCase();
-  const config = { ...body, ...window, realOrders: window.liveMoney, engine };
+  const universe = parseUniverse(body.universe || body.indexType);
+  const config = { ...body, ...window, realOrders: window.liveMoney, engine, universe };
+  if (engine === 'ee-wait' && window.liveMoney && universe === 'nifty-100-stocks') {
+    res.status(400).json({
+      status: 'error',
+      message:
+        'Nifty 100 stocks is paper/research (cash OHLC). Live money still uses Nifty 50 ATM options — switch universe or uncheck Live money.',
+    });
+    return;
+  }
   if (engine === 'ee-wait' && !window.liveMoney) {
     const out = await runEeWaitPaper({
       fromDate: window.fromDate,
@@ -143,6 +152,8 @@ async function start(req, res) {
       lots: body.lots || body.niftyLots || 1,
       spec: body.eeWait || body.spec,
       indexType: body.indexType,
+      universe,
+      symbol: body.symbol,
     });
     res.json({
       ...out,
@@ -251,6 +262,9 @@ async function findEeWait(req, res) {
     toDate: body.toDate,
     lots: body.lots || body.niftyLots || 1,
     indexType: body.indexType,
+    universe: body.universe,
+    symbol: body.symbol,
+    maxSymbols: body.maxSymbols,
   });
   res.json({ status: 'ok', ...out });
 }

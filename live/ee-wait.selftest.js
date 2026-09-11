@@ -76,6 +76,20 @@ assert.strictEqual(collapsed[0].close, 2.8);
   assert.ok(out.best.spec.hold);
   assert.ok(out.checks && (out.checks.btstOvernight || out.checks));
 
+  const stocks = await findEntryExitWait(
+    { fromDate: '2021-01-01', toDate: '2021-12-01', lots: 1, universe: 'nifty-100-stocks' },
+    {
+      fetchNifty100Symbols: async () => ['AAA', 'BBB'],
+      fetchEquityDaily: async ({ symbol }) => ({
+        symbol,
+        historical: fakeBars.map((b) => ({ ...b, close: b.close + (symbol === 'BBB' ? 3 : 0) })),
+      }),
+    },
+  );
+  assert.strictEqual(stocks.universe, 'nifty-100-stocks');
+  assert.ok(stocks.scanned === 2);
+  assert.ok(stocks.symbol === 'AAA' || stocks.symbol === 'BBB');
+
   const paper = await runEeWaitPaper(
     { fromDate: '2021-06-01', toDate: '2021-09-01', lots: 2 },
     {

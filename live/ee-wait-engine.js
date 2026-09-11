@@ -215,6 +215,24 @@ function specGrid() {
   return out;
 }
 
+function specGridLite() {
+  const out = [];
+  for (const entry of ['thrust', 'range_break', 'breakdown', 'btst']) {
+    for (const lookback of [3, 5, 8]) {
+      for (const wait of [1, 2]) {
+        for (const hold of [1, 3, 5]) {
+          for (const stopPct of [0.5, 1.2]) {
+            for (const targetPct of [1.2, 2.5]) {
+              out.push({ entry, lookback, wait, hold, stopPct, targetPct, killFailures: true });
+            }
+          }
+        }
+      }
+    }
+  }
+  return out;
+}
+
 function score(stats) {
   if (!stats.trades) return -1e9;
   return stats.points - stats.maxDrawdownPoints * 0.25 + Math.min(stats.trades, 40) * 0.01;
@@ -273,22 +291,26 @@ function searchSpecs(bars, opts = {}) {
   const folds = splitFolds(bars, opts.folds);
   const best = rankGrid(bars, grid, lots, lotSize, folds);
   const full = best ? simulate(bars, best.spec) : { trades: [], spec: null, open: null };
-  const btst = rankGrid(
-    bars,
-    grid.filter((s) => s.entry === 'btst' && s.hold === 1),
-    lots,
-    lotSize,
-    folds,
-  );
-  const btstFull = (() => {
-    let row = null;
-    for (const spec of grid.filter((s) => s.entry === 'btst' && s.hold === 1)) {
-      const st = summarizeTrades(simulate(bars, spec).trades, lots, lotSize);
-      if (!st.trades) continue;
-      if (!row || st.points > row.full.points) row = { spec, full: st };
-    }
-    return row;
-  })();
+  const btstFull = opts.skipChecks
+    ? null
+    : (() => {
+        let row = null;
+        for (const spec of grid.filter((s) => s.entry === 'btst' && s.hold === 1)) {
+          const st = summarizeTrades(simulate(bars, spec).trades, lots, lotSize);
+          if (!st.trades) continue;
+          if (!row || st.points > row.full.points) row = { spec, full: st };
+        }
+        return row;
+      })();
+  const btst = opts.skipChecks
+    ? null
+    : rankGrid(
+        bars,
+        grid.filter((s) => s.entry === 'btst' && s.hold === 1),
+        lots,
+        lotSize,
+        folds,
+      );
   return {
     best,
     full: best
@@ -335,6 +357,7 @@ module.exports = {
   summarizeTrades,
   searchSpecs,
   specGrid,
+  specGridLite,
   rawSignal,
   confirmedSignal,
   dailyBarsFromFiveMinute,
