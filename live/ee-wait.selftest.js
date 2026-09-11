@@ -16,7 +16,11 @@ function upTrend(n) {
 
 const bars = upTrend(200);
 assert.strictEqual(rawSignal('breakout', bars, 10, 3), 1);
-assert.strictEqual(confirmedSignal('breakout', bars, 10, 3, 2), 1);
+assert.strictEqual(rawSignal('btst', [
+  { date: '2021-01-01', open: 100, high: 101, low: 99, close: 100.5 },
+  { date: '2021-01-02', open: 100.5, high: 102, low: 100, close: 101 },
+  { date: '2021-01-03', open: 101.8, high: 102.2, low: 100.2, close: 100.4 },
+], 2, 2), -1);
 
 const run = simulate(bars, {
   entry: 'breakout',
@@ -56,6 +60,7 @@ assert.strictEqual(collapsed[0].close, 2.8);
   assert.ok(out.best.spec.lookback);
   assert.ok(out.best.spec.wait);
   assert.ok(out.best.spec.hold);
+  assert.ok(out.checks && (out.checks.btstOvernight || out.checks));
 
   const paper = await runEeWaitPaper(
     { fromDate: '2021-06-01', toDate: '2021-09-01', lots: 2 },

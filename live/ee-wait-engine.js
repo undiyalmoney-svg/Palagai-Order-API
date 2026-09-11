@@ -40,6 +40,13 @@ function rawSignal(entry, bars, i, lookback) {
     if (bar.close < w.minLow) return -1;
     return 0;
   }
+  if (entry === 'btst') {
+    // Rejection at a prior swing high, weak close → short (buy PE), typically hold overnight.
+    if (!w.prev) return 0;
+    const tagged = bar.high >= w.maxHigh;
+    const weak = bar.close < bar.open && bar.close < (bar.high + bar.low) / 2;
+    return tagged && weak ? -1 : 0;
+  }
   return 0;
 }
 
@@ -180,7 +187,7 @@ function simulate(bars, spec, opts = {}) {
 
 function specGrid() {
   const out = [];
-  for (const entry of ['breakout', 'breakdown', 'thrust', 'range_break']) {
+  for (const entry of ['breakout', 'breakdown', 'thrust', 'range_break', 'btst']) {
     for (const lookback of [2, 3, 5, 8]) {
       for (const wait of [1, 2, 3]) {
         for (const hold of [1, 2, 3, 5]) {
@@ -219,13 +226,8 @@ function splitFolds(bars, folds) {
   return out.length ? out : [{ train: bars.slice(0, Math.floor(n * 0.7)), test: bars.slice(Math.floor(n * 0.7)) }];
 }
 
-function searchSpecs(bars, opts = {}) {
-  const lots = opts.lots || 1;
-  const lotSize = opts.lotSize || NIFTY_LOT_SIZE;
-  const grid = opts.grid || specGrid();
-  const folds = splitFolds(bars, opts.folds);
+function rankGrid(bars, grid, lots, lotSize, folds) {
   let best = null;
-
   for (const spec of grid) {
     const oosTrades = [];
     let trainPoints = 0;
@@ -248,19 +250,48 @@ function searchSpecs(bars, opts = {}) {
     };
     if (!best || row.score > best.score) best = row;
   }
+  return best;
+}
 
+function searchSpecs(bars, opts = {}) {
+  const lots = opts.lots || 1;
+  const lotSize = opts.lotSize || NIFTY_LOT_SIZE;
+  const grid = opts.grid || specGrid();
+  const folds = splitFolds(bars, opts.folds);
+  const best = rankGrid(bars, grid, lots, lotSize, folds);
   const full = best ? simulate(bars, best.spec) : { trades: [], spec: null, open: null };
+  const btst = rankGrid(
+    bars,
+    grid.filter((s) => s.entry === 'btst' && s.hold === 1),
+    lots,
+    lotSize,
+    folds,
+  );
+  const btstFull = (() => {
+    let row = null;
+    for (const spec of grid.filter((s) => s.entry === 'btst' && s.hold === 1)) {
+      const st = summarizeTrades(simulate(bars, spec).trades, lots, lotSize);
+      if (!st.trades) continue;
+      if (!row || st.points > row.full.points) row = { spec, full: st };
+    }
+    return row;
+  })();
   return {
     best,
     full: best
       ? { spec: best.spec, ...summarizeTrades(full.trades, lots, lotSize), tradeCount: full.trades.length }
       : null,
+    checks: {
+      btstOvernight: btst
+        ? { spec: btst.spec, oos: btst.oos, full: btstFull?.full || null }
+        : btstFull,
+    },
     folds: folds.length,
     combos: grid.length,
     lots,
     lotSize,
     note:
-      'Walk-forward on NSE Nifty 50 daily OHLC. Rupees = index points × lot size × lots (futures-equivalent). Option live buys ATM CE (long) or PE (short). Not a guaranteed daily profit.',
+      'Walk-forward on NSE Nifty 50 daily OHLC. Rupees = index points × lot size × lots (futures-equivalent). Option live buys ATM CE (long) or PE (short). BTST check = reject swing high, buy PE, exit next day. Not a guaranteed daily profit.',
   };
 }
 
