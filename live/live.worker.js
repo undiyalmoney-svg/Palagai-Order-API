@@ -19,6 +19,7 @@ const {
 } = require('./live-trades');
 const { LIVE_GREEN_DNA } = require('./dna-live-green');
 const { livePathReplayOpts, isEstimatedOrSynthetic } = require('./live-path');
+const { archiveInstruments } = require('./instrument-archive');
 const { makeGenieStrategy } = require('./genie-desk');
 
 const LOOKBACK_DAYS = 12;

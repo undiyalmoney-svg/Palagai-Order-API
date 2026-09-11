@@ -11,6 +11,8 @@ assert.strictEqual(s.id, 'align-combo-genie');
 const worker = fs.readFileSync(path.join(__dirname, 'live.worker.js'), 'utf8');
 assert.match(worker, /makeGenieStrategy/, 'Live worker must run Genie');
 assert.doesNotMatch(worker, /createTrapStrategyV2\(\)/, 'Trap V2 must not be the live desk');
+assert.match(worker, /require\('\.\/instrument-archive'\)/, 'archiveInstruments must be imported');
+assert.match(worker, /archiveInstruments\(this\.instruments\)/, 'worker archives NFO dump after fetch');
 
 const ctrl = fs.readFileSync(path.join(__dirname, 'sr-breakout.controller.js'), 'utf8');
 assert.match(ctrl, /S\/R Breakout Live is retired/, 'S/R Live start must be retired');
