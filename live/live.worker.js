@@ -7,8 +7,9 @@ const {
   BANK_NIFTY_INSTRUMENT,
   replayPaperOnIndex,
   effectiveProtectiveStop,
+  resolveAtmWeeklyOption,
 } = require('./strategy-core.cjs');
-const { fetchInstruments, fetchHistorical5m } = require('./kite-market');
+const { fetchInstruments, fetchHistorical5m, fetchQuotes } = require('./kite-market');
 const { LiveBroker } = require('./live-broker');
 const { riskStatusLabels, deskRiskLots, profitLockMoneyRs, greenProtectMoneyRs, strictStopMoneyRs } = require('./daily-desk-defaults');
 const {
@@ -21,6 +22,9 @@ const { LIVE_GREEN_DNA } = require('./dna-live-green');
 const { livePathReplayOpts, isEstimatedOrSynthetic } = require('./live-path');
 const { archiveInstruments } = require('./instrument-archive');
 const { makeGenieStrategy } = require('./genie-desk');
+const { fetchIndexDaily } = require('./nse-index-history');
+const { simulate, dailyBarsFromFiveMinute } = require('./ee-wait-engine');
+const { getLastFound } = require('./ee-wait-research');
 
 const LOOKBACK_DAYS = 12;
 
@@ -274,7 +278,8 @@ class LiveWorker {
       }
 
       const { date: today, hhmm: now } = istParts();
-      const halt = this.deskHaltReason(today);
+      const eeWait = String(config.engine || '').toLowerCase() === 'ee-wait';
+      const halt = eeWait ? '' : this.deskHaltReason(today);
       if (halt && halt !== this.lastDeskHalt) {
         this.lastDeskHalt = halt;
         this.pushEvent('DESK_HALT', halt);
@@ -293,7 +298,7 @@ class LiveWorker {
           authorization,
           book: 'nifty',
           instrument: NIFTY_50_INSTRUMENT,
-          label: 'Nifty Trap',
+          label: eeWait ? 'Nifty EE-wait' : 'Nifty Trap',
           lots: config.niftyLots || config.deskLots || config.lots || 1,
           config,
           now,
@@ -303,7 +308,7 @@ class LiveWorker {
         });
       }
 
-      if (config.enableBank && indexSession) {
+      if (!eeWait && config.enableBank && indexSession) {
         await this.runBook({
           authorization,
           book: 'bank',
@@ -357,6 +362,10 @@ class LiveWorker {
     livePath,
     enableKutty,
   }) {
+    if (String(config.engine || '').toLowerCase() === 'ee-wait') {
+      await this.runEeWaitBook({ authorization, lots, config, today });
+      return;
+    }
     const replay = await this.replayIndexLive({
       authorization,
       instrument,
@@ -387,6 +396,66 @@ class LiveWorker {
       : `Watching for a setup — ${String(replay.lastSignal || '').replace(/\s*·\s*[\d.]+R$/, '')}`;
     if (sig !== this.lastSignals[book]) {
       this.lastSignals[book] = sig;
+      this.pushEvent('SIGNAL', sig);
+    }
+  }
+
+  async runEeWaitBook({ authorization, lots, config, today }) {
+    const spec = config.eeWait || config.spec || getLastFound()?.best?.spec;
+    if (!spec) {
+      this.pushEvent('ERROR', 'Find entry/exit/wait first, then Start live.');
+      return;
+    }
+    if (!this.eeWaitDaily || this.eeWaitDailyAt !== today) {
+      const series = await fetchIndexDaily({
+        indexType: 'NIFTY 50',
+        fromDate: addDaysIso(today, -60),
+        toDate: today,
+      });
+      this.eeWaitDaily = series.historical || [];
+      this.eeWaitDailyAt = today;
+    }
+    const todayBar = dailyBarsFromFiveMinute(this.candles.nifty).find((b) => b.date === today);
+    let bars = (this.eeWaitDaily || []).filter((b) => b.date < today);
+    if (todayBar) bars = bars.concat(todayBar);
+    else bars = this.eeWaitDaily || [];
+    const run = simulate(bars, spec);
+    let open = null;
+    if (run.open) {
+      let spot = 0;
+      try {
+        const qmap = await fetchQuotes(authorization, ['NSE:NIFTY 50']);
+        spot = Number(qmap['NSE:NIFTY 50']?.last_price || qmap['NSE:NIFTY 50']?.ohlc?.close) || 0;
+      } catch {
+        spot = Number(run.open.entry) || 0;
+      }
+      const resolved = resolveAtmWeeklyOption({
+        instruments: this.instruments,
+        kind: 'nifty',
+        direction: run.open.direction,
+        spot: spot || run.open.entry,
+        asOfDateTime: new Date().toISOString(),
+      });
+      const inst = resolved.instrument || {};
+      open = toLiveOpen({
+        ...run.open,
+        option: inst.instrumentToken ? inst : null,
+        premiumEstimated: resolved.source === 'synthetic' || !inst.instrumentToken,
+      });
+      if (open?.premiumEstimated) open = null;
+    }
+    await this.broker.syncInstrument({
+      authorization,
+      instrumentId: NIFTY_50_INSTRUMENT.id,
+      instrumentName: 'Nifty EE-wait',
+      open,
+      lots,
+    });
+    const sig = open
+      ? `IN TRADE — ${open.direction === 'BUY' ? 'Call' : 'Put'} ${niceOption(open.option?.tradingSymbol)}`
+      : `EE-wait watching (${spec.entry} wait ${spec.wait} hold ${spec.hold})`;
+    if (sig !== this.lastSignals.nifty) {
+      this.lastSignals.nifty = sig;
       this.pushEvent('SIGNAL', sig);
     }
   }

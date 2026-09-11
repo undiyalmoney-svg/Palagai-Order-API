@@ -485,4 +485,10 @@ module.exports = {
   fetchFoCpvRange,
   resetNseSessionForTests,
   INDEX_UNDERLYINGS,
+  warmNseSession,
+  nseGet,
+  ddmmyyyy,
+  addDaysIso,
+  delay,
+  NSE_ORIGIN,
 };

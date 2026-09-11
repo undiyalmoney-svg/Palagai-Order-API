@@ -60,7 +60,8 @@ assert.strictEqual(genie.DESK_STRATEGY_ID, 'align-combo-genie');
 
 const ctrl = fs.readFileSync(path.join(__dirname, 'live.controller.js'), 'utf8');
 assert.match(ctrl, /parseTradeBotWindow/);
-assert.match(ctrl, /getOptionOhlcAndPrice/);
+assert.match(ctrl, /findEntryExitWait/);
+assert.match(ctrl, /runEeWaitPaper/);
 assert.match(ctrl, /Kite session required for live price or ATM lookup/);
 assert.match(ctrl, /liveMoney/);
 assert.doesNotMatch(ctrl, /Auto Bot is removed/);

@@ -2,6 +2,7 @@ const store = require('./live.store');
 const { runBacktest } = require('./backtest');
 const { parseTradeBotWindow } = require('./trade-bot-dates');
 const { getOptionOhlcAndPrice } = require('./option-ohlc');
+const { findEntryExitWait, runEeWaitPaper, getLastFound } = require('./ee-wait-research');
 const {
   APP_BUILD,
   APP_VERSION,
@@ -133,7 +134,25 @@ async function kiteAuthorization(req) {
 async function start(req, res) {
   const body = req.body || {};
   const window = parseTradeBotWindow(body);
-  const config = { ...body, ...window, realOrders: window.liveMoney };
+  const engine = String(body.engine || (body.eeWait ? 'ee-wait' : '')).toLowerCase();
+  const config = { ...body, ...window, realOrders: window.liveMoney, engine };
+  if (engine === 'ee-wait' && !window.liveMoney) {
+    const out = await runEeWaitPaper({
+      fromDate: window.fromDate,
+      toDate: window.toDate,
+      lots: body.lots || body.niftyLots || 1,
+      spec: body.eeWait || body.spec,
+      indexType: body.indexType,
+    });
+    res.json({
+      ...out,
+      mode: 'paper',
+      liveMoney: false,
+      realOrders: false,
+      today: window.today,
+    });
+    return;
+  }
   if (!window.liveMoney) {
     const authorization = await kiteAuthorization(req);
     if (!authorization) {
@@ -225,4 +244,19 @@ async function optionOhlc(req, res) {
   res.json({ status: 'ok', today, ...out });
 }
 
-module.exports = { health, status, events, defaults, start, stop, putAuth, backtest, optionOhlc };
+async function findEeWait(req, res) {
+  const body = req.body || {};
+  const out = await findEntryExitWait({
+    fromDate: body.fromDate,
+    toDate: body.toDate,
+    lots: body.lots || body.niftyLots || 1,
+    indexType: body.indexType,
+  });
+  res.json({ status: 'ok', ...out });
+}
+
+async function lastEeWait(_req, res) {
+  res.json({ status: 'ok', found: getLastFound() });
+}
+
+module.exports = { health, status, events, defaults, start, stop, putAuth, backtest, optionOhlc, findEeWait, lastEeWait };

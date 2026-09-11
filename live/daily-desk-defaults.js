@@ -425,6 +425,10 @@ function normalizeStartConfig(config = {}) {
       config.deskHaltAfterRed != null
         ? !!config.deskHaltAfterRed
         : LIVE_GREEN_DNA.liveOps.deskHaltAfterRed === true,
+    engine: String(config.engine || '').toLowerCase() || '',
+    eeWait: config.eeWait || config.spec || null,
+    spec: config.spec || config.eeWait || null,
+    lots: niftyLots,
   };
 }
 
