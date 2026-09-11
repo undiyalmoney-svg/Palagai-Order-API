@@ -210,15 +210,26 @@ function historicalChunks(fromDate, toDate, maxDays = 90) {
   return out;
 }
 
-async function fetchHistorical5m(authorization, instrumentToken, fromDate, toDate, opts = {}) {
-  const chunks = historicalChunks(fromDate, toDate, 90);
+function maxDaysForInterval(interval) {
+  const iv = String(interval || '5minute').toLowerCase();
+  if (iv === 'minute') return 50;
+  if (iv === '3minute' || iv === '5minute' || iv === '10minute' || iv === '15minute') return 90;
+  if (iv === '30minute') return 180;
+  if (iv === '60minute') return 360;
+  if (iv === 'day') return 1800;
+  return 90;
+}
+
+async function fetchHistoricalInterval(authorization, instrumentToken, fromDate, toDate, interval = '5minute', opts = {}) {
+  const iv = interval || '5minute';
+  const chunks = historicalChunks(fromDate, toDate, maxDaysForInterval(iv));
   if (chunks.length <= 1) {
-    return fetchHistoricalCandles(authorization, instrumentToken, fromDate, toDate, '5minute', opts);
+    return fetchHistoricalCandles(authorization, instrumentToken, fromDate, toDate, iv, opts);
   }
   const all = [];
   const seen = new Set();
   for (const [from, to] of chunks) {
-    const rows = await fetchHistoricalCandles(authorization, instrumentToken, from, to, '5minute', opts);
+    const rows = await fetchHistoricalCandles(authorization, instrumentToken, from, to, iv, opts);
     for (const r of rows) {
       if (seen.has(r.date)) continue;
       seen.add(r.date);
@@ -226,6 +237,73 @@ async function fetchHistorical5m(authorization, instrumentToken, fromDate, toDat
     }
   }
   return all;
+}
+
+async function fetchHistorical5m(authorization, instrumentToken, fromDate, toDate, opts = {}) {
+  return fetchHistoricalInterval(authorization, instrumentToken, fromDate, toDate, '5minute', opts);
+}
+
+function rowFromInstrumentCols(cols) {
+  return {
+    instrumentToken: Number(cols[0]) || 0,
+    exchangeToken: Number(cols[1]) || 0,
+    tradingSymbol: (cols[2] || '').trim(),
+    name: (cols[3] || '').trim(),
+    lastPrice: Number(cols[4]) || 0,
+    expiry: (cols[5] || '').trim(),
+    strike: Number(cols[6]) || 0,
+    tickSize: Number(cols[7]) || 0.05,
+    lotSize: Number(cols[8]) || 1,
+    instrumentType: (cols[9] || '').trim().toUpperCase(),
+    segment: (cols[10] || '').trim(),
+    exchange: (cols[11] || '').trim().toUpperCase(),
+  };
+}
+
+/** Scan a Kite instruments CSV (any exchange) for one token or tradingsymbol. */
+function findInstrumentInCsv(csv, { tradingSymbol, instrumentToken } = {}) {
+  const token = Number(instrumentToken) || 0;
+  const want = String(tradingSymbol || '').trim().toUpperCase();
+  if (!token && !want) return null;
+  const lines = String(csv || '').split(/\r?\n/);
+  for (let i = 1; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (!line) continue;
+    const cols = splitCsvLine(line);
+    if (cols.length < 12) continue;
+    const rowToken = Number(cols[0]) || 0;
+    const rowSym = (cols[2] || '').trim().toUpperCase();
+    if (token && rowToken === token) return rowFromInstrumentCols(cols);
+    if (want && rowSym === want) return rowFromInstrumentCols(cols);
+  }
+  return null;
+}
+
+function inferInstrumentExchanges(exchange, tradingSymbol) {
+  const ex = String(exchange || '').trim().toUpperCase();
+  if (ex) return [ex];
+  const sym = String(tradingSymbol || '').toUpperCase();
+  if (/^(CRUDE|GOLD|SILVER|NATURALGAS|NATGAS|COPPER|ZINC|LEAD|NICKEL|ALUMINIUM)/.test(sym)) {
+    return ['MCX', 'NFO'];
+  }
+  if (/(USDINR|EURINR|GBPINR|JPYINR)/.test(sym)) return ['CDS', 'NFO'];
+  return ['NFO', 'MCX', 'CDS'];
+}
+
+/**
+ * Resolve any listed option/future (not only Nifty desk rows) from Kite master.
+ */
+async function lookupInstrument(authorization, { tradingSymbol, instrumentToken, exchange } = {}) {
+  const token = Number(instrumentToken) || 0;
+  const want = String(tradingSymbol || '').trim().toUpperCase();
+  if (!token && !want) return null;
+  const exchanges = inferInstrumentExchanges(exchange, want);
+  for (const ex of exchanges) {
+    const csv = await fetchInstrumentsCsv(authorization, ex);
+    const hit = findInstrumentInCsv(csv, { tradingSymbol: want, instrumentToken: token });
+    if (hit) return hit;
+  }
+  return null;
 }
 
 async function fetchQuotes(authorization, keys) {
@@ -307,9 +385,13 @@ module.exports = {
   fetchInstrumentsCsv,
   fetchHistorical5m,
   fetchHistoricalCandles,
+  fetchHistoricalInterval,
   historicalChunks,
   fetchQuotes,
   fetchQuoteOhlc,
   fetchQuoteLtp,
   parseInstrumentsCsv,
+  findInstrumentInCsv,
+  lookupInstrument,
+  inferInstrumentExchanges,
 };

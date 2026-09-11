@@ -5,6 +5,7 @@
  * Live: Kite /quote last_price + day's OHLC + bid/ask.
  */
 const defaultMarket = require('./kite-market');
+const { findInstrumentInCsv, inferInstrumentExchanges } = defaultMarket;
 const { resolveAtmWeeklyOption } = require('./strategy-core.cjs');
 const { archiveInstruments, instrumentsWithArchive } = require('./instrument-archive');
 
@@ -13,6 +14,51 @@ const BANK_SPOT_KEY = 'NSE:NIFTY BANK';
 
 function truthy(v) {
   return v === true || v === 'true' || v === 1 || v === '1';
+}
+
+function splitExchangeSymbol(raw, fallback = 'NFO') {
+  const s = String(raw || '').trim().toUpperCase();
+  const m = /^(NFO|MCX|CDS|BCD|NSE|BSE):(.+)$/.exec(s);
+  if (m) return { exchange: m[1], tradingSymbol: m[2] };
+  return { exchange: String(fallback || 'NFO').toUpperCase(), tradingSymbol: s };
+}
+
+function collectSymbols(opts = {}) {
+  const out = [];
+  const push = (raw, exchange, token) => {
+    const parsed = splitExchangeSymbol(raw, exchange || 'NFO');
+    const hasEx = /^(NFO|MCX|CDS|BCD|NSE|BSE):/i.test(String(raw || '').trim());
+    if (!parsed.tradingSymbol && !token) return;
+    out.push({
+      tradingSymbol: parsed.tradingSymbol,
+      exchange: hasEx || exchange ? parsed.exchange : '',
+      instrumentToken: Number(token) || 0,
+    });
+  };
+  if (Array.isArray(opts.symbols)) {
+    for (const row of opts.symbols) {
+      if (row && typeof row === 'object') {
+        push(row.tradingSymbol || row.symbol, row.exchange, row.instrumentToken || row.token);
+      } else {
+        push(row, opts.exchange, null);
+      }
+    }
+  }
+  const blob = [opts.tradingSymbol, opts.symbol].filter(Boolean).join(' ');
+  for (const part of String(blob).split(/[,;\n]+/)) {
+    const bit = part.trim();
+    if (bit) push(bit, opts.exchange, opts.instrumentToken || opts.token);
+  }
+  if (!out.length && (opts.instrumentToken || opts.token)) {
+    push('', opts.exchange, opts.instrumentToken || opts.token);
+  }
+  const seen = new Set();
+  return out.filter((row) => {
+    const k = `${row.exchange}:${row.tradingSymbol}:${row.instrumentToken}`;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
 }
 
 function quoteKey(exchange, tradingSymbol) {
@@ -59,39 +105,74 @@ function lookupQuote(map, key, token) {
   return null;
 }
 
-async function resolveListedOption(market, authorization, { tradingSymbol, instrumentToken, exchange }) {
-  const token = Number(instrumentToken) || 0;
-  const sym = String(tradingSymbol || '').trim().toUpperCase().replace(/^NFO:/, '');
-  if (!token && !sym) return null;
-  let instruments = await market.fetchInstruments(authorization);
-  await archiveInstruments(instruments).catch(() => {});
-  instruments = await instrumentsWithArchive(instruments);
-  const hit = instruments.find((row) => {
-    if (token && Number(row.instrumentToken) === token) return true;
-    if (sym && String(row.tradingSymbol || '').toUpperCase() === sym) return true;
-    return false;
-  });
-  if (!hit) {
+async function resolveAnyOption(market, authorization, spec, csvCache) {
+  const token = Number(spec.instrumentToken) || 0;
+  const parsed = splitExchangeSymbol(spec.tradingSymbol, spec.exchange);
+  const want = parsed.tradingSymbol;
+  if (!token && !want) return null;
+
+  if (typeof market.lookupInstrument === 'function') {
+    const hit = await market.lookupInstrument(authorization, {
+      tradingSymbol: want,
+      instrumentToken: token,
+      exchange: spec.exchange || undefined,
+    });
+    if (hit?.instrumentToken) {
+      return {
+        instrumentToken: hit.instrumentToken,
+        tradingSymbol: hit.tradingSymbol,
+        exchange: hit.exchange || parsed.exchange,
+        instrumentType: hit.instrumentType,
+        strike: hit.strike,
+        expiry: hit.expiry,
+        lotSize: hit.lotSize,
+        name: hit.name,
+        source: 'chain',
+      };
+    }
+  }
+
+  const exchanges = inferInstrumentExchanges(
+    spec.exchange || (parsed.exchange !== 'NFO' ? parsed.exchange : ''),
+    want,
+  );
+  if (typeof market.fetchInstrumentsCsv === 'function') {
+    for (const ex of exchanges) {
+      if (!csvCache.has(ex)) {
+        csvCache.set(ex, await market.fetchInstrumentsCsv(authorization, ex));
+      }
+      const hit = findInstrumentInCsv(csvCache.get(ex), {
+        tradingSymbol: want,
+        instrumentToken: token,
+      });
+      if (hit?.instrumentToken) {
+        return {
+          instrumentToken: hit.instrumentToken,
+          tradingSymbol: hit.tradingSymbol,
+          exchange: hit.exchange || ex,
+          instrumentType: hit.instrumentType,
+          strike: hit.strike,
+          expiry: hit.expiry,
+          lotSize: hit.lotSize,
+          name: hit.name,
+          source: 'chain',
+        };
+      }
+    }
+  }
+
+  if (token) {
     return {
-      instrumentToken: token || 0,
-      tradingSymbol: sym || String(tradingSymbol || ''),
-      exchange: String(exchange || 'NFO').toUpperCase(),
+      instrumentToken: token,
+      tradingSymbol: want,
+      exchange: parsed.exchange,
       instrumentType: '',
       strike: null,
       expiry: '',
-      source: 'request',
+      source: 'token',
     };
   }
-  return {
-    instrumentToken: hit.instrumentToken,
-    tradingSymbol: hit.tradingSymbol,
-    exchange: hit.exchange || 'NFO',
-    instrumentType: hit.instrumentType,
-    strike: hit.strike,
-    expiry: hit.expiry,
-    lotSize: hit.lotSize,
-    source: 'chain',
-  };
+  return null;
 }
 
 async function resolveAtmContracts(market, authorization, { kind, asOf, optionType }) {
@@ -138,10 +219,14 @@ async function resolveAtmContracts(market, authorization, { kind, asOf, optionTy
 async function fetchHistoricalFor(market, authorization, token, fromDate, toDate, interval, oi) {
   if (!token) return [];
   const iv = interval || '5minute';
-  if (iv === '5minute') {
-    return market.fetchHistorical5m(authorization, token, fromDate, toDate, { oi: oi !== false });
+  const opts = { oi: oi !== false };
+  if (typeof market.fetchHistoricalInterval === 'function') {
+    return market.fetchHistoricalInterval(authorization, token, fromDate, toDate, iv, opts);
   }
-  return market.fetchHistoricalCandles(authorization, token, fromDate, toDate, iv, { oi: oi !== false });
+  if (iv === '5minute' && typeof market.fetchHistorical5m === 'function') {
+    return market.fetchHistorical5m(authorization, token, fromDate, toDate, opts);
+  }
+  return market.fetchHistoricalCandles(authorization, token, fromDate, toDate, iv, opts);
 }
 
 /**
@@ -173,7 +258,8 @@ async function getOptionOhlcAndPrice(opts = {}, deps = {}) {
     throw err;
   }
   const interval = opts.interval || '5minute';
-  const atm = truthy(opts.atm) || (!opts.tradingSymbol && !opts.instrumentToken && !opts.symbol);
+  const requested = collectSymbols(opts);
+  const atm = truthy(opts.atm) && !requested.length;
   let meta = { atm: !!atm, kind: opts.kind || 'nifty', spot: null, spotKey: null };
   let listed = [];
   if (atm) {
@@ -186,36 +272,23 @@ async function getOptionOhlcAndPrice(opts = {}, deps = {}) {
     meta.spotKey = resolved.spotKey;
     meta.kind = resolved.kind;
     listed = resolved.contracts;
-  } else {
-    const token = Number(opts.instrumentToken || opts.token) || 0;
-    const rawSym = String(opts.tradingSymbol || opts.symbol || '').trim();
-    const sym = rawSym.replace(/^NFO:/i, '').toUpperCase();
-    const ex = String(opts.exchange || 'NFO').toUpperCase();
-    if (token && (!wantLive || sym)) {
-      listed = [
-        {
-          instrumentToken: token,
-          tradingSymbol: sym,
-          exchange: ex,
-          instrumentType: String(opts.optionType || '').toUpperCase(),
-          strike: opts.strike != null ? Number(opts.strike) : null,
-          expiry: opts.expiry || '',
-          source: 'request',
-        },
-      ];
-    } else {
-      const one = await resolveListedOption(market, authorization, {
-        tradingSymbol: rawSym,
-        instrumentToken: token,
-        exchange: ex,
-      });
-      if (!one) {
-        const err = new Error('Pass tradingSymbol, instrumentToken, or atm:true');
+  } else if (requested.length) {
+    const csvCache = new Map();
+    for (const spec of requested) {
+      const one = await resolveAnyOption(market, authorization, spec, csvCache);
+      if (!one?.instrumentToken) {
+        const err = new Error(
+          `Unknown option ${spec.tradingSymbol || spec.instrumentToken}. Use any listed NFO/MCX tradingsymbol (e.g. BANKNIFTY2591655000CE or RELIANCE259181400CE) or instrument token.`,
+        );
         err.status = 400;
         throw err;
       }
-      listed = [one];
+      listed.push(one);
     }
+  } else {
+    const err = new Error('Pass tradingSymbol (any listed option), instrumentToken, or atm:true');
+    err.status = 400;
+    throw err;
   }
 
   const keys = listed
@@ -273,5 +346,7 @@ module.exports = {
   getOptionOhlcAndPrice,
   liveFromQuote,
   quoteKey,
+  splitExchangeSymbol,
+  collectSymbols,
   NIFTY_SPOT_KEY,
 };
