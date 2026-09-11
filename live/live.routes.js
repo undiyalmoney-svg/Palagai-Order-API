@@ -15,7 +15,7 @@ function requireAutoModule(req, res, next) {
     next();
     return;
   }
-  res.status(403).json({ status: 'error', message: 'Auto Trader not enabled for this account' });
+  res.status(403).json({ status: 'error', message: 'Trade Bot not enabled for this account' });
 }
 
 router.get('/health', asyncHandler(ctrl.health));
@@ -27,6 +27,9 @@ router.get('/events', asyncHandler(ctrl.events));
 router.post('/start', asyncHandler(ctrl.start));
 router.post('/stop', asyncHandler(ctrl.stop));
 router.post('/backtest', asyncHandler(ctrl.backtest));
+router.post('/options/ohlc', asyncHandler(ctrl.optionOhlc));
+router.post('/research/ee-wait', asyncHandler(ctrl.findEeWait));
+router.get('/research/ee-wait', asyncHandler(ctrl.lastEeWait));
   router.post('/sr-breakout', asyncHandler(srCtrl.srBreakout));
   router.post('/sr-observe', asyncHandler(srCtrl.srObserve));
   router.post('/sr-breakout/debug', asyncHandler(srCtrl.srDebug));
@@ -40,8 +43,7 @@ router.post('/backtest', asyncHandler(ctrl.backtest));
   router.get('/sr-breakout/live/status', asyncHandler(srCtrl.srLiveStatus));
 router.put('/auth', asyncHandler(ctrl.putAuth));
 
-// Auto-start the read-only real-option collector at server boot (singleton-
-// guarded, market-hours gated). Additive; does not touch the live-order worker.
-try { require('./sr-collector').boot(); } catch (e) { console.error('[sr-collector] boot skipped:', e.message); }
+// S/R collector retired with the S/R Live desk.
+
 
 module.exports = router;

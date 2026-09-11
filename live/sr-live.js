@@ -11,8 +11,10 @@ const { archiveSrInstruments, instrumentsWithArchive } = require('./instrument-a
 const { connectMongo, getDb } = require('./live.mongo');
 const { runSrBreakout } = require('./sr-breakout');
 // Exit/entry rules come from the SHARED config so Live and Paper cannot drift.
-const { exitOptsFor, DEFAULT_LOTS, DAY_LOSS_STOP_RS, DAY_PROFIT_TARGET_RS, LOT_UNITS, OPTION_SL_MAX_RS } = require('./sr-strategy-config');
+const { exitOptsFor, DEFAULT_LOTS, DAY_LOSS_STOP_RS, DAY_PROFIT_TARGET_RS, LOT_UNITS, OPTION_SL_MAX_RS, STRATEGY_ID, STRATEGY_VERSION } = require('./sr-strategy-config');
 const { LiveBroker } = require('./live-broker');
+const { approveLiveStart, approveLiveEntry } = require('./engine/risk');
+const { confirmDirection, selectTradeExpiry, liveTransactionType } = require('./engine/pipeline');
 const { NIFTY_50_INSTRUMENT, BANK_NIFTY_INSTRUMENT, CRUDE_OIL_MINI_INSTRUMENT } = require('./strategy-core.cjs');
 
 const TICK_MS = Number(process.env.SR_LIVE_INTERVAL_MS || 60_000);
@@ -24,9 +26,10 @@ const SPEC = {
     bookId: NIFTY_50_INSTRUMENT.id, root: 'NIFTY', step: 50, spotKey: 'NSE:NIFTY 50',
     session: { entryStartHm: '09:45', entryEndHm: '14:30', squareOffHm: '15:15' },
     entryPts: 27, gapLo: 100, gapHi: 175, targetByScore: { 1: 20, 2: 25, 3: 30 },
-    // Cash Nifty 50 cannot be traded. Nearest NFO future: 1 pt = ₹65, same as
-    // the green Paper pts column. CE signal = BUY fut, PE = SELL fut.
-    vehicle: 'fut',
+    // Cash Nifty 50 cannot be traded. Live BUYS the ATM weekly option
+    // (CE on a bullish break, PE on a bearish break) — same as Bank/Crude.
+    // Do not sell futures or sell premium.
+    vehicle: 'option',
     opts: exitOptsFor('nifty'),
   },
   banknifty: {
@@ -88,7 +91,6 @@ function indexStopPrice(trade, spec) {
   const pts = stopDistancePts(trade, spec);
   return trade.side === 'BUY' ? trade.entryPrice - pts : trade.entryPrice + pts;
 }
-
 
 /**
  * Decide what Live should do for one engine trade.
@@ -198,6 +200,8 @@ function statusPayload(session) {
     lastError: session.lastError,
     config: session.config,
     entered: [...session.entered],
+    strategyId: STRATEGY_ID,
+    strategyVersion: STRATEGY_VERSION,
     openSignals: Object.fromEntries(session.openSignal),
     positions,
     kitePnl: session.broker && typeof session.broker.moneySnapshot === 'function'
@@ -237,8 +241,9 @@ async function start(userId, body = {}) {
     return statusPayload(session);
   }
   const auto = store.statusFor(userId);
-  if (auto && auto.status === 'running') {
-    const err = new Error('Auto Bot Live is already running. Stop Auto Bot before starting S/R Live.');
+  const startGate = approveLiveStart({ autoBotRunning: !!(auto && auto.status === 'running') });
+  if (!startGate.ok) {
+    const err = new Error(startGate.reason);
     err.status = 400;
     throw err;
   }
@@ -256,9 +261,13 @@ async function start(userId, body = {}) {
     err.status = 400;
     throw err;
   }
+  const lotsByInstrument = body.lotsByInstrument && typeof body.lotsByInstrument === 'object'
+    ? body.lotsByInstrument
+    : {};
   session.config = {
     instruments: keys,
-    lots: Math.max(1, numOr(body.lots, 1)),
+    lots: Math.max(1, numOr(lotsByInstrument[keys[0]], numOr(body.lots, 1))),
+    lotsByInstrument,
     maxTradesPerDay: Math.max(1, numOr(body.maxTradesPerDay, 3)),
     dayLossStopRs: numOr(body.dayLossStopRs, DAY_LOSS_STOP_RS),
     dayProfitTargetRs: numOr(body.dayProfitTargetRs, DAY_PROFIT_TARGET_RS),
@@ -275,9 +284,10 @@ async function start(userId, body = {}) {
   });
   session.broker.setMaxOpenLegs(0);
   for (const k of keys) {
-    session.broker.setLots(SPEC[k].bookId, session.config.lots);
+    const nLots = Math.max(1, numOr(lotsByInstrument[k], session.config.lots));
+    session.broker.setLots(SPEC[k].bookId, nLots);
     if (OPTION_SL_MAX_RS[k] != null) {
-      session.broker.setOptionMaxLossRs(SPEC[k].bookId, OPTION_SL_MAX_RS[k] * session.config.lots);
+      session.broker.setOptionMaxLossRs(SPEC[k].bookId, OPTION_SL_MAX_RS[k] * nLots);
     }
   }
   pushEvent(session, 'START', session.message);
@@ -367,7 +377,7 @@ function selectNearestFut(rows, root, today) {
     Number(r.instrumentToken) > 0,
   );
   const expiries = [...new Set(list.map((r) => r.expiry).filter(Boolean))].sort();
-  const expiry = expiries.find((e) => e > today) || expiries.find((e) => e >= today) || null;
+  const expiry = selectTradeExpiry(expiries, today);
   if (!expiry) return null;
   return list.find((r) => r.expiry === expiry) || null;
 }
@@ -394,8 +404,9 @@ async function pickIndexFuture(authorization, spec, session, today) {
 
 async function pickOption(authorization, spec, trade, session) {
   session = session || {};
-  const dir = trade.side === 'BUY' ? 1 : -1;
-  const type = dir > 0 ? 'CE' : 'PE';
+  const intent = confirmDirection(trade);
+  const dir = intent.side === 'BUY' ? 1 : -1;
+  const type = intent.optionType;
   const today = trade.date || todayIso();
   const spot = trade.entryPrice;
 
@@ -421,6 +432,8 @@ async function pickOption(authorization, spec, trade, session) {
         exchange: 'MCX',
         lotSize: Math.max(1, Number(pick.lotSize) || 1),
         optionEntryPremium: null,
+        expiry: fut.expiry,
+        expiryRolled: parseMcxCsv(fut.csv || '').some((r) => r.type === 'FUT' && r.expiry === today),
       };
     }
     const keys = candMeta.map((m) => 'MCX:' + m.sym);
@@ -483,8 +496,9 @@ async function pickOption(authorization, spec, trade, session) {
   const expiries = [...new Set(rows.map((r) => r.expiry).filter(Boolean))].sort();
   const expiry = session.paperPick
     ? optionStore.pickFrontExpiry(expiries, today, 14)
-    : (expiries.find((e) => e > today) || expiries.find((e) => e >= today) || null);
+    : selectTradeExpiry(expiries, today);
   if (!expiry) return null;
+  const expiryRolled = expiries.includes(today);
   const atm = Math.round(spot / spec.step) * spec.step;
   const candStrikes = dir > 0 ? [atm - spec.step, atm, atm + spec.step] : [atm + spec.step, atm, atm - spec.step];
   const candMeta = [];
@@ -505,6 +519,7 @@ async function pickOption(authorization, spec, trade, session) {
         expiry: pick.expiry,
         strike: pick.strike,
         instrumentType: type,
+        expiryRolled,
       };
   }
   const keys = candMeta.map((m) => 'NFO:' + m.tradingSymbol).concat([spec.spotKey]);
@@ -533,6 +548,7 @@ async function pickOption(authorization, spec, trade, session) {
     expiry: pick.expiry,
     strike: pick.strike,
     instrumentType: type,
+    expiryRolled,
   };
 }
 
@@ -555,8 +571,22 @@ async function pickFreshLiveEntry(session, authorization, spec, key, trades, hm,
       }
       continue;
     }
+    const auto = store.statusFor(session.userId);
+    const risk = approveLiveEntry({
+      sessionRunning: session.status === 'running',
+      autoBotRunning: !!(auto && auto.status === 'running'),
+      enteredCount: session.entered.size,
+      maxTradesPerDay: session.config && session.config.maxTradesPerDay,
+      emergencyStop: !!(session.config && session.config.emergencyStop),
+    });
+    if (!risk.ok) {
+      pushEvent(session, 'SKIP', `${t.entryTime} ${spec.name} risk: ${risk.reason}`);
+      continue;
+    }
     const fut = spec.vehicle === 'fut';
-    pushEvent(session, 'SIGNAL', `${t.entryTime} ${spec.name} ${fut ? 'FUT ' + t.side : t.option} — placing live ${fut && t.side === 'SELL' ? 'SELL' : 'BUY'}`);
+    const intent = confirmDirection(t);
+    const tx = liveTransactionType(spec, t);
+    pushEvent(session, 'DIRECTION', `${t.entryTime} ${spec.name} ${intent.side} → ${intent.optionType}`);
     const option = fut
       ? await pickIndexFuture(authorization, spec, session, t.date)
       : await pickOption(authorization, spec, t, session);
@@ -565,6 +595,15 @@ async function pickFreshLiveEntry(session, authorization, spec, key, trades, hm,
       session.entered.add(id);
       continue;
     }
+    const rolled = !!(option.expiryRolled);
+    pushEvent(
+      session,
+      'SELECT',
+      `${spec.name} ${option.tradingSymbol}` +
+        (option.expiry ? ` exp ${option.expiry}` : '') +
+        (rolled ? ' (next expiry — skipped today)' : ''),
+    );
+    pushEvent(session, 'SIGNAL', `${t.entryTime} ${spec.name} ${fut ? 'FUT ' + t.side : intent.optionType} — Kite ${tx} + SL`);
     session.entered.add(id);
     session.openSignal.set(spec.bookId, id);
     return {
@@ -574,9 +613,12 @@ async function pickFreshLiveEntry(session, authorization, spec, key, trades, hm,
       indexStop: indexStopPrice(t, spec),
       indexTarget: t.side === 'BUY' ? t.entryPrice + (t.target || 20) : t.entryPrice - (t.target || 20),
       entryTime: t.entryTime,
-      direction: t.side === 'SELL' ? 'SELL' : 'BUY',
+      direction: tx,
       vehicle: fut ? 'fut' : 'option',
-      skipChargeGate: !!fut,
+      skipChargeGate: true,
+      // Resting SL stays put. Engine leave → broker cancels SL then exits.
+      // Do not run Auto Bot peak-trail while S/R is holding.
+      protectOnly: true,
     };
   }
   return null;
@@ -594,11 +636,14 @@ async function onTick(session) {
     const today = todayIso();
     const hm = nowHm();
     const cfg = session.config;
-    const lots = cfg.lots;
 
     for (const key of cfg.instruments) {
       const spec = SPEC[key];
       if (!spec) continue;
+      const lots = Math.max(1, numOr(
+        cfg.lotsByInstrument && cfg.lotsByInstrument[key],
+        cfg.lots,
+      ));
       try {
         const warmupFrom = shiftDays(today, -12);
         let token = spec.token;
@@ -668,8 +713,9 @@ async function onTick(session) {
                 indexTarget: tracked.side === 'BUY' ? tracked.entryPrice + tracked.target : tracked.entryPrice - tracked.target,
                 entryTime: tracked.entryTime,
                 skipChargeGate: true,
-                direction: current.direction || (tracked.side === 'SELL' ? 'SELL' : 'BUY'),
-                vehicle: spec.vehicle || current.vehicle || 'option',
+                protectOnly: true,
+                direction: current.direction || liveTransactionType(spec, tracked),
+                vehicle: current.vehicle || spec.vehicle || 'option',
               };
             } else if (act === 'exit') {
               pushEvent(session, 'SIGNAL', `${spec.name} exit · ${tracked.exitReason} at ${tracked.exitTime}`);
@@ -687,6 +733,7 @@ async function onTick(session) {
               indexStop: current.indexStop,
               entryTime: current.entryTime,
               skipChargeGate: true,
+              protectOnly: true,
               direction: current.direction || 'BUY',
               vehicle: current.vehicle || spec.vehicle || 'option',
             };
@@ -732,5 +779,5 @@ function status(userId) {
 
 module.exports = {
   start, stop, status, decideLiveAction, applyDeskLimits, signalId, hmToMin,
-  engineTradeStillOpen, engineBookHasOpenTrade, mustExitHeldForNewLeg, matchHeldEngineTrade, pickOption, pickIndexFuture, selectNearestFut, SPEC, FRESH_MINUTES, _sessions: sessions,
+  engineTradeStillOpen, engineBookHasOpenTrade, mustExitHeldForNewLeg, matchHeldEngineTrade, pickOption, pickIndexFuture, selectNearestFut, liveTransactionType, SPEC, FRESH_MINUTES, _sessions: sessions,
 };

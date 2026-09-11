@@ -1,9 +1,8 @@
 'use strict';
 /**
- * S/R BREAKOUT strategy engine — RESEARCH / PAPER ONLY.
+ * S/R BREAKOUT strategy engine — shared Paper / Live / Observe.
  *
- * Pure function over candle data. Imports nothing from the broker order path and
- * cannot place, modify, or cancel an order.
+ * Pure function over candle data. Imports nothing from the broker order path.
  *
  * Rules (from scripts/p43–p57 on NIFTY / Bank Nifty / Crude Oil Mini):
  *   - S/R = last CONFIRMED pivot high/low (pivotLen 5) on 15-min candles (causal).
@@ -197,12 +196,31 @@ function runSrBreakout(bars5, opts) {
       // No look-ahead: we scan forward bar-by-bar and enter on the first touch; if
       // the retest never comes, no trade is taken.
       const hi = after.findIndex(x => (dir > 0 ? x.low <= level : x.high >= level));
-      if (hi < 0 || hi + 1 >= after.length) continue;      // retest never confirmed → skip
+      if (hi < 0) continue;      // retest never came
       // Entry meter: the pullback took too long — the setup has gone stale.
       // Causal: at fill time we know how many bars have elapsed since the break.
       if (maxRetestBars > 0 && hi + 1 > maxRetestBars) continue;
-      entry = level; entryTime = hhmm(after[hi].date); retestTime = entryTime;
+      const fillBar = after[hi];
+      entry = level; entryTime = hhmm(fillBar.date); retestTime = entryTime;
       after = after.slice(hi + 1);
+      // LIVE/PAPER SAME CODE: the retest bar is enough to be IN the trade.
+      // Requiring a *following* 5m bar meant Live only saw the signal after that
+      // bar could already wick TARGET — Kite got no order (9 Sep 11:50).
+      if (!after.length) {
+        const px = Number(fillBar.close) || entry;
+        const ptsOpen = dir * (px - entry);
+        st.trades++; st.pnl += ptsOpen;
+        trades.push({
+          date: b.d, side: dir > 0 ? 'BUY' : 'SELL', option: dir > 0 ? 'CE' : 'PE',
+          confidence: score, entryTime, entryPrice: round2(entry), level: round2(level),
+          breakoutTime, breakoutPrice: round2(breakoutPrice), retestTime,
+          bodyPts: round2(body), target, exitTime: entryTime, exitPrice: round2(px),
+          exitReason: 'CLOSE', points: round2(ptsOpen), openAtFill: true,
+        });
+        if (dayLossStop > 0 && st.pnl <= -dayLossStop) st.stopped = true;
+        if (dayProfitTarget > 0 && st.pnl >= dayProfitTarget) st.stopped = true;
+        continue;
+      }
     }
     let exit = after[after.length - 1].close, exitTime = hhmm(after[after.length - 1].date), reason = 'CLOSE';
     let locked = false, bestFav = -Infinity;   // profit-lock / give-up state

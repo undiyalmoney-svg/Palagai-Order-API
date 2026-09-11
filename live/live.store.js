@@ -165,6 +165,8 @@ function statusPayload(session) {
     tradeCounts: money.tradeCounts || { nifty: 0, bank: 0, crude: 0, other: 0, total: 0 },
     mongo: !!mongoDb,
     userId: session.userId,
+    liveMoney: !!(cfg.liveMoney || cfg.realOrders),
+    realOrders: !!cfg.realOrders,
   };
 }
 

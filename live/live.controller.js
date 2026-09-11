@@ -1,5 +1,8 @@
 const store = require('./live.store');
 const { runBacktest } = require('./backtest');
+const { parseTradeBotWindow } = require('./trade-bot-dates');
+const { getOptionOhlcAndPrice } = require('./option-ohlc');
+const { findEntryExitWait, runEeWaitPaper, getLastFound, parseUniverse } = require('./ee-wait-research');
 const {
   APP_BUILD,
   APP_VERSION,
@@ -19,7 +22,7 @@ async function health(_req, res) {
   res.json({
     status: 'ok',
     service: 'palagai-live-control',
-    note: 'Server Live — Nifty 50 only · Pivot S/R trap · lots from UI · Paper≡Live',
+    note: 'Trade Bot: paper and live share one engine. Live money checkbox places Kite orders.',
     version: APP_VERSION,
     appBuild: APP_BUILD,
     dnaId: LIVE_GREEN_DNA.id,
@@ -116,9 +119,85 @@ async function defaults(_req, res) {
   });
 }
 
+async function kiteAuthorization(req) {
+  return (
+    req.headers['x-kite-authorization'] ||
+    req.headers['x-kite-authorisation'] ||
+    (await store.getAuthorizationFor(userId(req)))
+  );
+}
+
+/**
+ * One Trade Bot run. Paper and live are the same engine.
+ * `liveMoney` (or `realOrders`) is the only switch that places Kite orders.
+ */
 async function start(req, res) {
-  const out = await store.start(userId(req), req.body || {});
-  res.json(out);
+  const body = req.body || {};
+  const window = parseTradeBotWindow(body);
+  const engine = String(body.engine || (body.eeWait ? 'ee-wait' : '')).toLowerCase();
+  const universe = parseUniverse(body.universe || body.indexType);
+  const config = { ...body, ...window, realOrders: window.liveMoney, engine, universe };
+  if (engine === 'ee-wait' && window.liveMoney && universe === 'nifty-100-stocks') {
+    res.status(400).json({
+      status: 'error',
+      message:
+        'Nifty 100 stocks is paper/research (cash OHLC). Live money still uses Nifty 50 ATM options — switch universe or uncheck Live money.',
+    });
+    return;
+  }
+  if (engine === 'ee-wait' && !window.liveMoney) {
+    const out = await runEeWaitPaper({
+      fromDate: window.fromDate,
+      toDate: window.toDate,
+      lots: body.lots || body.niftyLots || 1,
+      spec: body.eeWait || body.spec,
+      indexType: body.indexType,
+      universe,
+      symbol: body.symbol,
+    });
+    res.json({
+      ...out,
+      mode: 'paper',
+      liveMoney: false,
+      realOrders: false,
+      today: window.today,
+    });
+    return;
+  }
+  if (!window.liveMoney) {
+    const authorization = await kiteAuthorization(req);
+    if (!authorization) {
+      res.status(400).json({
+        status: 'error',
+        message: 'Kite session required — Get Token, then Run (or push the token).',
+      });
+      return;
+    }
+    const out = await runBacktest({
+      authorization,
+      fromDate: window.fromDate,
+      toDate: window.toDate,
+      config,
+    });
+    res.json({
+      ...out,
+      mode: 'paper',
+      liveMoney: false,
+      realOrders: false,
+      today: window.today,
+    });
+    return;
+  }
+  const out = await store.start(userId(req), config);
+  res.json({
+    ...out,
+    mode: 'live',
+    liveMoney: true,
+    realOrders: true,
+    fromDate: window.fromDate,
+    toDate: window.toDate,
+    today: window.today,
+  });
 }
 
 async function stop(req, res) {
@@ -137,27 +216,61 @@ async function putAuth(req, res) {
  * historical data only — no orders are placed).
  */
 async function backtest(req, res) {
-  // Prefer the browser's Kite session header; fall back to the server-stored
-  // token (pushed via Push Kite token) so Paper works like Live.
-  const authorization =
-    req.headers['x-kite-authorization'] ||
-    req.headers['x-kite-authorisation'] ||
-    (await store.getAuthorizationFor(userId(req)));
-  if (!authorization) {
+  req.body = { ...(req.body || {}), liveMoney: false, realOrders: false };
+  return start(req, res);
+}
+
+/**
+ * Option OHLC (historical candles) and/or live price.
+ * Body: tradingSymbol | instrumentToken | atm:true, fromDate, toDate,
+ * today, historical, live, interval, optionType (CE|PE|BOTH).
+ */
+async function optionOhlc(req, res) {
+  const authorization = await kiteAuthorization(req);
+  const body = req.body || {};
+  const wantLive = body.live === undefined ? !!authorization : body.live === true || body.live === 'true';
+  const atm = body.atm === true || body.atm === 'true';
+  if ((wantLive || atm) && !authorization) {
     res.status(400).json({
       status: 'error',
-      message: 'Kite session required — Get Token (or Push Kite token to server), then retry Paper.',
+      message: 'Kite session required for live price or ATM lookup — Get Token, then retry.',
     });
     return;
   }
-  const body = req.body || {};
-  const out = await runBacktest({
+  let fromDate = body.fromDate;
+  let toDate = body.toDate;
+  let today = false;
+  if (body.today === true || body.today === 'true') {
+    const w = parseTradeBotWindow({ today: true, liveMoney: false });
+    fromDate = w.fromDate;
+    toDate = w.toDate;
+    today = true;
+  }
+  const out = await getOptionOhlcAndPrice({
     authorization,
-    fromDate: body.fromDate,
-    toDate: body.toDate,
-    config: body,
+    ...body,
+    fromDate,
+    toDate,
   });
-  res.json(out);
+  res.json({ status: 'ok', today, ...out });
 }
 
-module.exports = { health, status, events, defaults, start, stop, putAuth, backtest };
+async function findEeWait(req, res) {
+  const body = req.body || {};
+  const out = await findEntryExitWait({
+    fromDate: body.fromDate,
+    toDate: body.toDate,
+    lots: body.lots || body.niftyLots || 1,
+    indexType: body.indexType,
+    universe: body.universe,
+    symbol: body.symbol,
+    maxSymbols: body.maxSymbols,
+  });
+  res.json({ status: 'ok', ...out });
+}
+
+async function lastEeWait(_req, res) {
+  res.json({ status: 'ok', found: getLastFound() });
+}
+
+module.exports = { health, status, events, defaults, start, stop, putAuth, backtest, optionOhlc, findEeWait, lastEeWait };

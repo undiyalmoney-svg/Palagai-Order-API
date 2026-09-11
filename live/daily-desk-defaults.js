@@ -384,6 +384,7 @@ function normalizeStartConfig(config = {}) {
     enableKutty: !!config.enableKutty,
     kuttyAlone: !!config.kuttyAlone,
     realOrders: !!config.realOrders,
+    liveMoney: !!(config.liveMoney || config.realOrders),
     dnaId: config.dnaId || preset.dnaId,
     maxOpenLegs:
       config.maxOpenLegs != null
@@ -424,6 +425,10 @@ function normalizeStartConfig(config = {}) {
       config.deskHaltAfterRed != null
         ? !!config.deskHaltAfterRed
         : LIVE_GREEN_DNA.liveOps.deskHaltAfterRed === true,
+    engine: String(config.engine || '').toLowerCase() || '',
+    eeWait: config.eeWait || config.spec || null,
+    spec: config.spec || config.eeWait || null,
+    lots: niftyLots,
   };
 }
 

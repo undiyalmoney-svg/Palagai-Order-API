@@ -11,9 +11,6 @@ const {
   NIFTY_50_INSTRUMENT,
   BANK_NIFTY_INSTRUMENT,
   CRUDE_OIL_MINI_INSTRUMENT,
-  createTrapStrategy,
-  createTrapStrategyV2,
-  createGenieStrategy,
   replayPaperOnIndex,
   replayPaperOnCrude,
   resolveCrudeStrategyProfile,
@@ -23,12 +20,12 @@ const {
 const defaultMarket = require('./kite-market');
 const {
   normalizeStartConfig,
-  indexDayRiskOverrides,
   riskStatusLabels,
   DAY_PROFIT_LOCK_RS,
   STRICT_DAY_STOP_RS,
 } = require('./daily-desk-defaults');
-const { LIVE_GREEN_DNA, liveGreenTrapExtras, clampMaxTradesToDna } = require('./dna-live-green');
+const { LIVE_GREEN_DNA } = require('./dna-live-green');
+const { makeGenieStrategy } = require('./genie-desk');
 const {
   filterTradesLivePath,
   livePathReplayOpts,
@@ -144,31 +141,6 @@ function bookSummary(label, replay) {
     instrumentId: replay.instrumentId,
     strategy: replay.strategyName,
     ...summarize(replay.trades || []),
-  };
-}
-
-function trapInitOverrides(cfg, instrumentId) {
-  const risk =
-    indexDayRiskOverrides({
-      instrumentId,
-      enableNifty: !!cfg.enableNifty,
-      enableBank: !!cfg.enableBank,
-      dayProfitLock: !!cfg.dayProfitLock,
-      strictDayStop: !!cfg.strictDayStop,
-    }) || {};
-  const extras = liveGreenTrapExtras();
-  if (cfg.optionStandDownRs != null) {
-    extras.optionStandDownRs = Number(cfg.optionStandDownRs);
-  }
-  const bank = /bank/i.test(String(instrumentId || ''));
-  const fromUi = bank ? cfg.bankMaxTradesDay : cfg.niftyMaxTradesDay;
-  // Same ceiling as live (clampMaxTradesToDna) so backtests can never model a
-  // looser trade budget than the desk will actually permit.
-  return {
-    ...risk,
-    maxTradesPerDay: clampMaxTradesToDna(fromUi),
-    targetRMultiple: LIVE_GREEN_DNA.trap.targetRMultiple,
-    extras,
   };
 }
 
@@ -289,18 +261,13 @@ async function runBacktest({ authorization, fromDate, toDate, config }, deps = {
       kind: 'nifty',
       lots: cfg.niftyLots || 1,
       livePath,
-      makeStrategy: () => {
-        const s = createTrapStrategyV2();
-        s.initialize(trapInitOverrides(cfg, NIFTY_50_INSTRUMENT.id));
-        return s;
-      },
+      makeStrategy: () => makeGenieStrategy(cfg, NIFTY_50_INSTRUMENT.id),
     });
     rawTrades.push(...(replay.trades || []));
-    books.push(bookSummary('Nifty Trap V2', replay));
+    books.push(bookSummary('Nifty Genie', replay));
   }
 
   if (cfg.enableBank) {
-    const genie = cfg.bankStrategy === 'genie';
     const replay = await replayIndexBook({
       market,
       authorization,
@@ -312,15 +279,10 @@ async function runBacktest({ authorization, fromDate, toDate, config }, deps = {
       kind: 'banknifty',
       lots: cfg.bankLots || 1,
       livePath,
-      makeStrategy: () => {
-        const s = genie ? createGenieStrategy() : createTrapStrategy();
-        if (genie) s.initialize();
-        else s.initialize(trapInitOverrides(cfg, BANK_NIFTY_INSTRUMENT.id));
-        return s;
-      },
+      makeStrategy: () => makeGenieStrategy(cfg, BANK_NIFTY_INSTRUMENT.id),
     });
     rawTrades.push(...(replay.trades || []));
-    books.push(bookSummary(`Bank ${genie ? 'Genie' : 'Trap'}`, replay));
+    books.push(bookSummary('Bank Genie', replay));
   }
 
   if (cfg.enableCrude) {

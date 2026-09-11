@@ -160,12 +160,14 @@ async function fetchInstruments(authorization) {
 }
 
 /** interval: 'minute' | '5minute' | '60minute' | 'day' etc (Kite Connect intervals). */
-async function fetchHistoricalCandles(authorization, instrumentToken, fromDate, toDate, interval = '5minute') {
+async function fetchHistoricalCandles(authorization, instrumentToken, fromDate, toDate, interval = '5minute', opts = {}) {
+  const params = { from: fromDate, to: toDate };
+  if (opts.oi) params.oi = 1;
   const res = await getWithRetry(
     `/instruments/historical/${instrumentToken}/${interval}`,
     {
       headers: headers(authorization),
-      params: { from: fromDate, to: toDate },
+      params,
     },
     'historical',
   );
@@ -175,14 +177,18 @@ async function fetchHistoricalCandles(authorization, instrumentToken, fromDate, 
     );
   }
   const rows = res.data?.data?.candles || [];
-  return rows.map((r) => ({
-    date: String(r[0]),
-    open: Number(r[1]),
-    high: Number(r[2]),
-    low: Number(r[3]),
-    close: Number(r[4]),
-    volume: Number(r[5]) || 0,
-  }));
+  return rows.map((r) => {
+    const bar = {
+      date: String(r[0]),
+      open: Number(r[1]),
+      high: Number(r[2]),
+      low: Number(r[3]),
+      close: Number(r[4]),
+      volume: Number(r[5]) || 0,
+    };
+    if (r.length > 6 && r[6] != null) bar.oi = Number(r[6]) || 0;
+    return bar;
+  });
 }
 
 /** Kite 5-minute history allows at most 100 days per call. */
@@ -204,15 +210,26 @@ function historicalChunks(fromDate, toDate, maxDays = 90) {
   return out;
 }
 
-async function fetchHistorical5m(authorization, instrumentToken, fromDate, toDate) {
-  const chunks = historicalChunks(fromDate, toDate, 90);
+function maxDaysForInterval(interval) {
+  const iv = String(interval || '5minute').toLowerCase();
+  if (iv === 'minute') return 50;
+  if (iv === '3minute' || iv === '5minute' || iv === '10minute' || iv === '15minute') return 90;
+  if (iv === '30minute') return 180;
+  if (iv === '60minute') return 360;
+  if (iv === 'day') return 1800;
+  return 90;
+}
+
+async function fetchHistoricalInterval(authorization, instrumentToken, fromDate, toDate, interval = '5minute', opts = {}) {
+  const iv = interval || '5minute';
+  const chunks = historicalChunks(fromDate, toDate, maxDaysForInterval(iv));
   if (chunks.length <= 1) {
-    return fetchHistoricalCandles(authorization, instrumentToken, fromDate, toDate, '5minute');
+    return fetchHistoricalCandles(authorization, instrumentToken, fromDate, toDate, iv, opts);
   }
   const all = [];
   const seen = new Set();
   for (const [from, to] of chunks) {
-    const rows = await fetchHistoricalCandles(authorization, instrumentToken, from, to, '5minute');
+    const rows = await fetchHistoricalCandles(authorization, instrumentToken, from, to, iv, opts);
     for (const r of rows) {
       if (seen.has(r.date)) continue;
       seen.add(r.date);
@@ -220,6 +237,73 @@ async function fetchHistorical5m(authorization, instrumentToken, fromDate, toDat
     }
   }
   return all;
+}
+
+async function fetchHistorical5m(authorization, instrumentToken, fromDate, toDate, opts = {}) {
+  return fetchHistoricalInterval(authorization, instrumentToken, fromDate, toDate, '5minute', opts);
+}
+
+function rowFromInstrumentCols(cols) {
+  return {
+    instrumentToken: Number(cols[0]) || 0,
+    exchangeToken: Number(cols[1]) || 0,
+    tradingSymbol: (cols[2] || '').trim(),
+    name: (cols[3] || '').trim(),
+    lastPrice: Number(cols[4]) || 0,
+    expiry: (cols[5] || '').trim(),
+    strike: Number(cols[6]) || 0,
+    tickSize: Number(cols[7]) || 0.05,
+    lotSize: Number(cols[8]) || 1,
+    instrumentType: (cols[9] || '').trim().toUpperCase(),
+    segment: (cols[10] || '').trim(),
+    exchange: (cols[11] || '').trim().toUpperCase(),
+  };
+}
+
+/** Scan a Kite instruments CSV (any exchange) for one token or tradingsymbol. */
+function findInstrumentInCsv(csv, { tradingSymbol, instrumentToken } = {}) {
+  const token = Number(instrumentToken) || 0;
+  const want = String(tradingSymbol || '').trim().toUpperCase();
+  if (!token && !want) return null;
+  const lines = String(csv || '').split(/\r?\n/);
+  for (let i = 1; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (!line) continue;
+    const cols = splitCsvLine(line);
+    if (cols.length < 12) continue;
+    const rowToken = Number(cols[0]) || 0;
+    const rowSym = (cols[2] || '').trim().toUpperCase();
+    if (token && rowToken === token) return rowFromInstrumentCols(cols);
+    if (want && rowSym === want) return rowFromInstrumentCols(cols);
+  }
+  return null;
+}
+
+function inferInstrumentExchanges(exchange, tradingSymbol) {
+  const ex = String(exchange || '').trim().toUpperCase();
+  if (ex) return [ex];
+  const sym = String(tradingSymbol || '').toUpperCase();
+  if (/^(CRUDE|GOLD|SILVER|NATURALGAS|NATGAS|COPPER|ZINC|LEAD|NICKEL|ALUMINIUM)/.test(sym)) {
+    return ['MCX', 'NFO'];
+  }
+  if (/(USDINR|EURINR|GBPINR|JPYINR)/.test(sym)) return ['CDS', 'NFO'];
+  return ['NFO', 'MCX', 'CDS'];
+}
+
+/**
+ * Resolve any listed option/future (not only Nifty desk rows) from Kite master.
+ */
+async function lookupInstrument(authorization, { tradingSymbol, instrumentToken, exchange } = {}) {
+  const token = Number(instrumentToken) || 0;
+  const want = String(tradingSymbol || '').trim().toUpperCase();
+  if (!token && !want) return null;
+  const exchanges = inferInstrumentExchanges(exchange, want);
+  for (const ex of exchanges) {
+    const csv = await fetchInstrumentsCsv(authorization, ex);
+    const hit = findInstrumentInCsv(csv, { tradingSymbol: want, instrumentToken: token });
+    if (hit) return hit;
+  }
+  return null;
 }
 
 async function fetchQuotes(authorization, keys) {
@@ -236,6 +320,44 @@ async function fetchQuotes(authorization, keys) {
   );
   if (res.status >= 400 || res.data?.status === 'error') {
     throw new Error(res.data?.message || `quote HTTP ${res.status}`);
+  }
+  return res.data?.data || {};
+}
+
+/** Day OHLC + last price (lighter than /quote). Keys like NFO:SYMBOL. */
+async function fetchQuoteOhlc(authorization, keys) {
+  if (!keys.length) return {};
+  const res = await getWithRetry(
+    '/quote/ohlc',
+    {
+      headers: headers(authorization),
+      params: { i: keys },
+      paramsSerializer: (params) =>
+        (params.i || []).map((k) => `i=${encodeURIComponent(k)}`).join('&'),
+    },
+    'quote-ohlc',
+  );
+  if (res.status >= 400 || res.data?.status === 'error') {
+    throw new Error(res.data?.message || `quote/ohlc HTTP ${res.status}`);
+  }
+  return res.data?.data || {};
+}
+
+/** Last traded price only. */
+async function fetchQuoteLtp(authorization, keys) {
+  if (!keys.length) return {};
+  const res = await getWithRetry(
+    '/quote/ltp',
+    {
+      headers: headers(authorization),
+      params: { i: keys },
+      paramsSerializer: (params) =>
+        (params.i || []).map((k) => `i=${encodeURIComponent(k)}`).join('&'),
+    },
+    'quote-ltp',
+  );
+  if (res.status >= 400 || res.data?.status === 'error') {
+    throw new Error(res.data?.message || `quote/ltp HTTP ${res.status}`);
   }
   return res.data?.data || {};
 }
@@ -263,7 +385,13 @@ module.exports = {
   fetchInstrumentsCsv,
   fetchHistorical5m,
   fetchHistoricalCandles,
+  fetchHistoricalInterval,
   historicalChunks,
   fetchQuotes,
+  fetchQuoteOhlc,
+  fetchQuoteLtp,
   parseInstrumentsCsv,
+  findInstrumentInCsv,
+  lookupInstrument,
+  inferInstrumentExchanges,
 };

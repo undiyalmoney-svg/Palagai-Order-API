@@ -717,6 +717,7 @@ class LiveBroker {
   }
 
   async syncProtectiveSl(authorization, pos, open, instrumentName) {
+    if (open && open.protectOnly) return;
     if (pos.vehicle === 'fut' || isFutSymbol(pos.tradingSymbol) || open?.vehicle === 'fut') return;
     if (!pos.slOrderId || !(pos.entryPremium > 0)) return;
     const ltp = await this.resolveOptionLtp(authorization, pos.tradingSymbol, pos.exchange);
