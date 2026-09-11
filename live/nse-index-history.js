@@ -16,6 +16,9 @@ const {
 const INDEX_REPORT = `${NSE_ORIGIN}/reports-indices-historical-index-data`;
 const INDEX_API = `${NSE_ORIGIN}/api/historicalOR/indicesHistory`;
 
+const indexBarCache = new Map();
+const INDEX_CACHE_MS = 30 * 60 * 1000;
+
 function mapIndexRow(row) {
   if (!row || typeof row !== 'object') return null;
   const parsed = parseNseOrIsoDate(row.EOD_TIMESTAMP || row.TIMESTAMP);
@@ -87,6 +90,11 @@ async function fetchIndexDaily(opts = {}) {
     err.status = 400;
     throw err;
   }
+  const cacheKey = `${indexType}|${fromDate}|${toDate}`;
+  const cached = indexBarCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < INDEX_CACHE_MS && !opts.fetchChunk) {
+    return cached.data;
+  }
   const fetchChunk = opts.fetchChunk || fetchIndexChunk;
   const bars = [];
   const seen = new Set();
@@ -103,7 +111,9 @@ async function fetchIndexDaily(opts = {}) {
     if (cursor <= toDate) await delay(200);
   }
   bars.sort((a, b) => String(a.date).localeCompare(String(b.date)));
-  return { indexType, fromDate, toDate, source: 'nse', interval: 'day', historical: bars };
+  const data = { indexType, fromDate, toDate, source: 'nse', interval: 'day', historical: bars };
+  if (!opts.fetchChunk) indexBarCache.set(cacheKey, { at: Date.now(), data });
+  return data;
 }
 
 module.exports = { fetchIndexDaily, mapIndexRow };

@@ -265,8 +265,52 @@ function paperEeWait({
       (size === 1
         ? `${resolvedEngine}: stock P&L = rupee move × lots (share qty). Not option premium.`
         : `${resolvedEngine}: index-point P&L marked as rupees via Nifty lot size × 65. Not option premium.`) +
-      (usedFindWindow ? ' Today is for live only — paper used the Find date window.' : ''),
+      (usedFindWindow ? ' Dates were a single day, so paper used the last 1 year ending that day.' : ''),
   };
+}
+
+const FAST_PAPER_SPECS = [
+  {
+    engine: 'ee-wait',
+    entry: 'range_break',
+    lookback: 2,
+    wait: 1,
+    hold: 2,
+    stopPct: 0.5,
+    targetPct: 2.5,
+    killFailures: true,
+  },
+  {
+    engine: 'order-flow',
+    entry: 'confluence',
+    lookback: 20,
+    hold: 5,
+    stopPct: 0.4,
+    targetPct: 2,
+    levelPct: 0.6,
+    wallMult: 1.6,
+    killFailures: true,
+  },
+];
+
+function chooseFastPaper({ bars, fromDate, toDate, lots, lotSize, symbol, universe, usedFindWindow }) {
+  let best = null;
+  for (const spec of FAST_PAPER_SPECS) {
+    const row = paperEeWait({
+      bars,
+      spec,
+      fromDate,
+      toDate,
+      lots,
+      lotSize,
+      symbol,
+      universe,
+      engine: spec.engine,
+      usedFindWindow,
+    });
+    if (!best || (row.totals.optionNetRs || 0) > (best.totals.optionNetRs || 0)) best = row;
+  }
+  return best;
 }
 
 async function runEeWaitPaper(opts = {}, deps = {}) {
@@ -281,23 +325,8 @@ async function runEeWaitPaper(opts = {}, deps = {}) {
   const expanded = paperPnlWindow(rawWindow, lastFound);
   const fromDate = expanded.fromDate;
   const toDate = expanded.toDate;
-  let spec = opts.spec || lastFound?.best?.spec || lastFound?.full?.spec;
-  let engine = String(opts.engine || spec?.engine || lastFound?.engine || '').toLowerCase();
-  if (!spec) {
-    lastFound = await findEntryExitWait(
-      { fromDate, toDate, lots, universe, symbol: opts.symbol, folds: opts.folds },
-      deps,
-    );
-    spec = lastFound?.best?.spec || lastFound?.full?.spec;
-    engine = lastFound?.engine || engine;
-  }
-  if (!spec) {
-    const err = new Error(
-      'No profitable entry/wait/exit or order-flow spec in this window (out-of-sample net ≤ 0). Widen From/To or pick another universe.',
-    );
-    err.status = 400;
-    throw err;
-  }
+  const spec = opts.spec || lastFound?.best?.spec || lastFound?.full?.spec;
+  const engine = String(opts.engine || spec?.engine || lastFound?.engine || '').toLowerCase();
   const usedFindWindow = !!expanded.usedFindWindow;
   if (universe === 'nifty-100-stocks') {
     const symbol = String(opts.symbol || lastFound?.symbol || '').toUpperCase();
@@ -312,8 +341,21 @@ async function runEeWaitPaper(opts = {}, deps = {}) {
       fromDate: addDaysIso(fromDate, -40),
       toDate,
     });
+    const bars = series.historical || [];
+    if (!spec) {
+      return chooseFastPaper({
+        bars,
+        fromDate,
+        toDate,
+        lots,
+        lotSize: 1,
+        symbol,
+        universe,
+        usedFindWindow,
+      });
+    }
     return paperEeWait({
-      bars: series.historical || [],
+      bars,
       spec,
       fromDate,
       toDate,
@@ -332,8 +374,21 @@ async function runEeWaitPaper(opts = {}, deps = {}) {
     fromDate: addDaysIso(fromDate, -40),
     toDate,
   });
+  const bars = series.historical || [];
+  if (!spec) {
+    return chooseFastPaper({
+      bars,
+      fromDate,
+      toDate,
+      lots,
+      lotSize: NIFTY_LOT_SIZE,
+      symbol: indexType,
+      universe,
+      usedFindWindow,
+    });
+  }
   return paperEeWait({
-    bars: series.historical || [],
+    bars,
     spec,
     fromDate,
     toDate,
