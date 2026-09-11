@@ -32,6 +32,20 @@ const run = simulate(bars, {
 });
 assert.ok(run.trades.length > 5);
 
+const failBars = upTrend(20).concat([
+  { date: '2021-01-22', open: 125, high: 125.2, low: 110, close: 111 },
+]);
+const killed = simulate(failBars, {
+  entry: 'breakout',
+  lookback: 3,
+  wait: 1,
+  hold: 8,
+  stopPct: 20,
+  targetPct: 20,
+  killFailures: true,
+});
+assert.ok(killed.trades.some((t) => t.exitReason === 'fail_kill'));
+
 const found = searchSpecs(bars, { lots: 1 });
 assert.ok(found.best.spec.entry);
 assert.ok(found.best.oos);

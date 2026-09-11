@@ -104,6 +104,7 @@ function simulate(bars, spec, opts = {}) {
   const hold = Math.max(1, Number(spec.hold) || 2);
   const stopPct = Number(spec.stopPct) || 0.8;
   const targetPct = Number(spec.targetPct) || 1.2;
+  const killFailures = spec.killFailures !== false;
   const fromDate = opts.fromDate || '';
   const toDate = opts.toDate || '9999-12-31';
   const trades = [];
@@ -121,27 +122,38 @@ function simulate(bars, spec, opts = {}) {
       if (pos.dir === 1) {
         const stopPx = pos.entry * (1 - stopPct / 100);
         const tgtPx = pos.entry * (1 + targetPct / 100);
-        if (bar.low <= stopPx) {
+        if (held >= 1 && bar.low <= stopPx) {
           exitPx = stopPx;
           reason = 'stop';
         } else if (bar.high >= tgtPx) {
           exitPx = tgtPx;
           reason = 'target';
+        } else if (killFailures && held >= 1 && bar.close < pos.entry) {
+          exitPx = bar.close;
+          reason = 'fail_kill';
         }
       } else {
         const stopPx = pos.entry * (1 + stopPct / 100);
         const tgtPx = pos.entry * (1 - targetPct / 100);
-        if (bar.high >= stopPx) {
+        if (held >= 1 && bar.high >= stopPx) {
           exitPx = stopPx;
           reason = 'stop';
         } else if (bar.low <= tgtPx) {
           exitPx = tgtPx;
           reason = 'target';
+        } else if (killFailures && held >= 1 && bar.close > pos.entry) {
+          exitPx = bar.close;
+          reason = 'fail_kill';
         }
       }
       if (!exitPx && held >= hold) {
-        exitPx = bar.close;
-        reason = 'time';
+        if (killFailures && (bar.close - pos.entry) * pos.dir <= 0) {
+          exitPx = bar.close;
+          reason = 'fail_kill';
+        } else {
+          exitPx = bar.close;
+          reason = 'time';
+        }
       }
       if (exitPx != null) {
         const points = (exitPx - pos.entry) * pos.dir;
@@ -172,7 +184,7 @@ function simulate(bars, spec, opts = {}) {
   }
 
   return {
-    spec: { entry, lookback, wait, hold, stopPct, targetPct },
+    spec: { entry, lookback, wait, hold, stopPct, targetPct, killFailures },
     trades,
     open: pos
       ? {
@@ -193,7 +205,7 @@ function specGrid() {
         for (const hold of [1, 2, 3, 5]) {
           for (const stopPct of [0.5, 0.8, 1.2]) {
             for (const targetPct of [0.8, 1.2, 1.8, 2.5]) {
-              out.push({ entry, lookback, wait, hold, stopPct, targetPct });
+              out.push({ entry, lookback, wait, hold, stopPct, targetPct, killFailures: true });
             }
           }
         }
@@ -241,6 +253,7 @@ function rankGrid(bars, grid, lots, lotSize, folds) {
     }
     if (!trainFolds || !oosTrades.length) continue;
     const oos = summarizeTrades(oosTrades, lots, lotSize);
+    if (oos.points <= 0) continue;
     const row = {
       spec,
       trainPoints: Math.round((trainPoints / trainFolds) * 100) / 100,
@@ -291,7 +304,7 @@ function searchSpecs(bars, opts = {}) {
     lots,
     lotSize,
     note:
-      'Walk-forward on NSE Nifty 50 daily OHLC. Rupees = index points × lot size × lots (futures-equivalent). Option live buys ATM CE (long) or PE (short). BTST check = reject swing high, buy PE, exit next day. Not a guaranteed daily profit.',
+      'Walk-forward on NSE Nifty 50 daily OHLC. Losers are killed on the first close against the entry (fail_kill); winners may run to target or hold. Specs with OOS net ≤ 0 are discarded. Rupees = index points × lot size × lots. Not a guaranteed daily profit.',
   };
 }
 
