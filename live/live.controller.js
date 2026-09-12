@@ -3,7 +3,7 @@ const srLive = require('./sr-live');
 const { runSrDesk } = require('./sr-desk');
 const { preflightLive, firstFail } = require('./live-preflight');
 const { parseTradeBotWindow } = require('./trade-bot-dates');
-const { deskLotsFromCapitalRs } = require('./daily-desk-defaults');
+const { lotsFromAvailableFunds } = require('./daily-desk-defaults');
 const { getOptionOhlcAndPrice } = require('./option-ohlc');
 const { findEntryExitWait, getLastFound, parseUniverse } = require('./ee-wait-research');
 const {
@@ -208,7 +208,13 @@ async function start(req, res) {
         return;
       }
       const cash = Number((assistant.checks || []).find((c) => c.id === 'funds')?.capitalRs) || 0;
-      const lots = deskLotsFromCapitalRs(cash) || 1;
+      const lots = lotsFromAvailableFunds(cash);
+      assistant.checks.push({
+        id: 'lots',
+        ok: true,
+        detail: `Lots ${lots} from Kite funds (₹40,000 per lot).`,
+        lots,
+      });
       await store.stop(uid);
       const live = await srLive.start(uid, {
         instruments: ['nifty', 'banknifty'],
@@ -265,7 +271,6 @@ async function start(req, res) {
     authorization,
     fromDate: window.fromDate,
     toDate: window.toDate,
-    lots: body.lots || body.niftyLots || 1,
     capitalRs: body.capitalRs || body.capital,
     capitalSource: body.capitalSource || body.fundSource,
     liveMoney: false,

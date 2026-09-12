@@ -55,7 +55,7 @@ const CRUDE_RS_PER_POINT = 10;
 
 /** Hard cap — one-leg desk; raise only with intentional risk review. */
 const MAX_DESK_LOTS = 10;
-/** UI lots are used as-is when provided; otherwise capital maps ~1 Nifty lot per ₹40k. */
+/** One Nifty/Bank lot per ₹40,000 of available funds. Paper and live both use this. */
 const CAPITAL_RS_PER_LOT = 40000;
 const BANK_BASE_LOTS = 1;
 
@@ -110,6 +110,11 @@ function capLotsToCapital(lots, capitalRs, instrumentId = 'nifty-50') {
 function deskLotsFromCapitalRs(capitalRs) {
   const books = bookLotsFromCapitalRs(capitalRs);
   return books ? books.niftyLots : null;
+}
+
+/** Always an integer lot count. Paper and live size from funds, not the UI box. */
+function lotsFromAvailableFunds(capitalRs) {
+  return deskLotsFromCapitalRs(capitalRs) || 1;
 }
 
 function lotsFromCapitalRs(capitalRs) {
@@ -438,6 +443,7 @@ module.exports = {
   bookLotsFromCapitalRs,
   capLotsToCapital,
   deskLotsFromCapitalRs,
+  lotsFromAvailableFunds,
   resolveBookLots,
   resolveDeskLots,
   resolveTradeCounts,

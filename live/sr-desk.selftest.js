@@ -260,10 +260,26 @@ Promise.resolve()
     assert.strictEqual(out.totals.netRs, 0);
     assert.ok(out.capitalSource === 'actual' || out.capitalSource === 'mine');
     assert.strictEqual(out.maxLots, 1);
-    assert.ok(out.coreBooks.length === 3);
-    assert.ok(out.books.some((b) => b.id === 'nifty'));
-    assert.ok(out.books.find((b) => b.id === 'crude').sitOut);
-    console.log('sr-desk.selftest: ok', out.engine, out.strategyVersion || out.strategy);
+    return runSrDesk(
+      {
+        authorization: 'token x',
+        fromDate: '2026-09-11',
+        toDate: '2026-09-11',
+        lots: 9,
+        capitalRs: 120000,
+        capitalSource: 'mine',
+      },
+      { candlesByKey: { nifty: [], banknifty: [] } },
+    );
+  })
+  .then((sized) => {
+    assert.strictEqual(sized.capitalSource, 'mine');
+    assert.strictEqual(sized.capitalRs, 120000);
+    assert.strictEqual(sized.maxLots, 3);
+    assert.ok(sized.coreBooks.length === 3);
+    assert.ok(sized.books.some((b) => b.id === 'nifty'));
+    assert.ok(sized.books.find((b) => b.id === 'crude').sitOut);
+    console.log('sr-desk.selftest: ok', sized.engine, sized.strategyVersion || sized.strategy);
   })
   .catch((err) => {
     console.error(err);

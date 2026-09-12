@@ -69,10 +69,15 @@ assert.strictEqual(expanded.usedFindWindow, false);
 assert.strictEqual(typeof genie.makeGenieStrategy, 'function');
 assert.strictEqual(genie.DESK_STRATEGY_ID, 'align-combo-genie');
 
-const { deskLotsFromCapitalRs } = require('./daily-desk-defaults');
-assert.strictEqual(deskLotsFromCapitalRs(40000), 1);
-assert.strictEqual(deskLotsFromCapitalRs(80000), 2);
-assert.strictEqual(deskLotsFromCapitalRs(200000), 5);
+const { lotsFromAvailableFunds } = require('./daily-desk-defaults');
+assert.strictEqual(lotsFromAvailableFunds(0), 1);
+assert.strictEqual(lotsFromAvailableFunds(39999), 1);
+assert.strictEqual(lotsFromAvailableFunds(40000), 1);
+assert.strictEqual(lotsFromAvailableFunds(79999), 1);
+assert.strictEqual(lotsFromAvailableFunds(80000), 2);
+assert.strictEqual(lotsFromAvailableFunds(120000), 3);
+assert.strictEqual(lotsFromAvailableFunds(200000), 5);
+assert.strictEqual(lotsFromAvailableFunds(999999), 10);
 
 const ctrl = fs.readFileSync(path.join(__dirname, 'live.controller.js'), 'utf8');
 assert.match(ctrl, /runSrDesk/);
@@ -81,7 +86,7 @@ assert.match(ctrl, /sr-desk|sr-breakout|S\/R/);
 assert.match(ctrl, /preflightLive/);
 assert.match(ctrl, /parseTradeBotWindow/);
 assert.match(ctrl, /require\('\.\/trade-bot-dates'\)/);
-assert.match(ctrl, /deskLotsFromCapitalRs/);
+assert.match(ctrl, /lotsFromAvailableFunds/);
 assert.match(ctrl, /body\.liveMoney === true/);
 assert.doesNotMatch(ctrl, /runSrDesk\(\{[\s\S]*liveMoney: window\.liveMoney/);
 assert.doesNotMatch(ctrl, /engine: 'paper-desk'/);
