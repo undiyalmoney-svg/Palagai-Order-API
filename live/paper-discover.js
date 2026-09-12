@@ -1444,24 +1444,44 @@ function compareStocks(series, { fromDate, toDate, lots } = {}) {
 
 function compareAll(payload) {
   const books = payload.books || [];
-  const scored = books
-    .flatMap((b) => (b.rows || []).map((r) => ({ book: b.label, bookId: b.bookId, ...r })))
-    .filter((r) => (r.totals?.trades || 0) > 0);
-  const overall = pickVictory(scored);
+  const votes = {};
+  for (const b of books) {
+    if (!b.winnerId) continue;
+    votes[b.winnerId] = (votes[b.winnerId] || 0) + 1;
+  }
+  let overallId = null;
+  let overallVotes = 0;
+  for (const [id, n] of Object.entries(votes)) {
+    if (n > overallVotes) {
+      overallId = id;
+      overallVotes = n;
+    }
+  }
+  const label = {
+    orb: 'ORB',
+    'straddle-long': 'Long straddle',
+    'straddle-short': 'Short straddle',
+  }[overallId] || overallId;
+  const perBook = books.map((b) => ({
+    book: b.label,
+    bookId: b.bookId,
+    winner: b.winnerLabel,
+    winnerId: b.winnerId,
+    totals: (b.rows || []).find((r) => r.id === b.winnerId)?.totals,
+  }));
   return {
     fromDate: payload.fromDate,
     toDate: payload.toDate,
     books,
-    overall: overall
+    overall: overallId
       ? {
-          book: overall.book,
-          bookId: overall.bookId,
-          strategy: overall.label,
-          strategyId: overall.id,
-          totals: overall.totals,
+          strategy: label,
+          strategyId: overallId,
+          booksWon: overallVotes,
+          books: perBook,
         }
       : null,
-    rule: 'Victory = more wins than losses first, then higher net ₹, then win rate. Index straddle uses ATM CE+PE premium proxy (not a live option chain). Stocks straddle is a daily |open−close| vs 0.8% premium proxy.',
+    rule: 'Victory = more wins than losses first, then higher net ₹, then win rate. Overall winner is the strategy that wins the most books (Nifty, Bank, stocks). Index straddle uses ATM CE+PE premium proxy (not a live option chain). Stocks straddle is daily |open−close| vs 0.8% premium on 1 share.',
   };
 }
 
