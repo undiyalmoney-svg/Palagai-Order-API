@@ -169,6 +169,20 @@ assert.ok(pureOrb.length === 1, 'classic ORB takes the breakout close');
 assert.strictEqual(pureOrb[0].direction, 'CE');
 assert.ok(pureOrb[0].netOptionPnlRs > 0);
 
+function rangeInsideDay(date) {
+  const out = [];
+  let minutes = 9 * 60 + 15;
+  const end = 15 * 60 + 30;
+  while (minutes <= end) {
+    const hm = Math.floor(minutes / 60) * 100 + (minutes % 60);
+    const nudge = hm < 930 ? 0 : ((minutes / 5) % 3) - 1;
+    const close = 25000 + nudge;
+    out.push(bar(date, hm, 25000, 25012, 24988, close));
+    minutes += 5;
+  }
+  return out;
+}
+
 const longStraddleSpec = { mode: 'straddle', straddle: 'long', orMinutes: 15, family: 'straddle', stopPts: 20 };
 const shortStraddleSpec = { mode: 'straddle', straddle: 'short', orMinutes: 15, family: 'straddle', stopPts: 20 };
 const longTrend = simulateDay(trendHoldDay('2026-09-11'), longStraddleSpec, 1, BOOKS.nifty);
@@ -176,6 +190,50 @@ const shortTrend = simulateDay(trendHoldDay('2026-09-11'), shortStraddleSpec, 1,
 assert.strictEqual(longTrend.length, 1);
 assert.strictEqual(shortTrend.length, 1);
 assert.ok(longTrend[0].netOptionPnlRs > shortTrend[0].netOptionPnlRs, 'trending day favors long straddle over short');
+
+const deskShort = executableSpec(BOOKS.nifty);
+assert.strictEqual(deskShort.straddle, 'short');
+assert.ok(deskShort.skipBreakout);
+assert.strictEqual(
+  simulateDay(trendHoldDay('2026-09-11'), deskShort, 1, BOOKS.nifty).length,
+  0,
+  'desk short straddle sits out a 15m breakout instead of paying the trend',
+);
+const rangeShort = simulateDay(rangeInsideDay('2026-09-11'), deskShort, 1, BOOKS.nifty);
+assert.strictEqual(rangeShort.length, 1, 'desk shorts when price is still inside the 15m range at 10:00');
+assert.strictEqual(rangeShort[0].direction, 'SHORT-STRADDLE');
+assert.ok(rangeShort[0].netOptionPnlRs > 0, 'quiet inside-range day keeps the short premium');
+assert.ok(/theta lock|square-off|session end/i.test(String(rangeShort[0].exitReason)));
+
+const mixedBatch = [];
+for (let d = 3; d <= 28; d += 1) {
+  const iso = `2026-08-${String(d).padStart(2, '0')}`;
+  mixedBatch.push(...(d % 3 === 0 ? trendHoldDay(iso) : rangeInsideDay(iso)));
+}
+const sellEveryDay = summarize(
+  simulate(mixedBatch, shortStraddleSpec, {
+    fromDate: '2026-08-03',
+    toDate: '2026-08-28',
+    lots: 1,
+    book: BOOKS.nifty,
+  }),
+);
+const deskBatch = summarize(
+  simulate(mixedBatch, executableSpec(BOOKS.nifty), {
+    fromDate: '2026-08-03',
+    toDate: '2026-08-28',
+    lots: 1,
+    book: BOOKS.nifty,
+  }),
+);
+assert.ok(deskBatch.trades >= 1, '2-month-style batch still books range shorts');
+assert.ok(
+  deskBatch.netRs > sellEveryDay.netRs,
+  `sitting out breakouts is more profitable than selling every day (${deskBatch.netRs} vs ${sellEveryDay.netRs})`,
+);
+
+const { historicalChunks } = require('./kite-market');
+assert.ok(historicalChunks('2026-07-14', '2026-09-12', 60).length >= 2, '2 months of 5m history splits into 60-day chunks');
 
 const cmp = compareIndexBook(trendHoldDay('2026-09-11'), BOOKS.nifty, {
   fromDate: '2026-09-11',
@@ -194,7 +252,7 @@ const stockLong = simulateStockStraddle(
 );
 assert.ok(stockLong[0].netOptionPnlRs > 0, 'wide stock day pays long straddle');
 
-const morningOnly = trendHoldDay('2026-09-11').filter((b) => String(b.date).includes('T09:') || String(b.date).includes('T10:00'));
+const morningOnly = rangeInsideDay('2026-09-11').filter((b) => String(b.date).includes('T09:') || String(b.date).includes('T10:00'));
 const livePaper = simulate(morningOnly, executableSpec(BOOKS.nifty), {
   fromDate: '2026-09-11',
   toDate: '2026-09-11',
@@ -606,6 +664,12 @@ const skippedScan = instrumentLedger({
 assert.strictEqual(skippedScan.find((r) => r.id === 'nifty').netRs, 0);
 assert.ok(/Not taken/.test(skippedScan.find((r) => r.id === 'nifty').why));
 
+const deskRangeCandles = [];
+for (let d = 1; d <= 10; d += 1) {
+  deskRangeCandles.push(...rangeInsideDay(`2026-09-${String(d).padStart(2, '0')}`));
+}
+deskRangeCandles.push(...rangeInsideDay('2026-09-11'));
+
 const deskBook = bookDeskStraddles(
   [
     {
@@ -641,7 +705,7 @@ runDiscover(
     capitalRs: 40000,
   },
   {
-    candlesByBook: { nifty: candles, bank: [], crude: [] },
+    candlesByBook: { nifty: deskRangeCandles, bank: [], crude: [] },
     stockSeries: [{ symbol: 'RELIANCE', historical: daily }],
     fetchUserMargins: async () => ({ capitalRs: 0 }),
   },
@@ -678,7 +742,7 @@ runDiscover(
         capitalRs: 40000,
       },
       {
-        candlesByBook: { nifty: candles, bank: [], crude: [] },
+        candlesByBook: { nifty: deskRangeCandles, bank: [], crude: [] },
         stockSeries: [{ symbol: 'RELIANCE', historical: daily }],
         fetchUserMargins: async () => ({ capitalRs: 61200, source: 'kite' }),
       },
@@ -687,7 +751,7 @@ runDiscover(
   .then((out) => {
     assert.strictEqual(out.capitalRs, 61200);
     assert.strictEqual(out.kiteFunds.source, 'kite');
-    const morningCandles = candles.filter((c) => {
+    const morningCandles = deskRangeCandles.filter((c) => {
       if (!String(c.date).startsWith('2026-09-11')) return true;
       const m = /T(\d{2}):(\d{2})/.exec(String(c.date));
       if (!m) return false;
