@@ -5,14 +5,9 @@
  * Books: Nifty 50 + Bank Nifty 5m (Kite), Crude Oil Mini 5m (Kite MCX),
  * and liquid Nifty-100 cash (free NSE daily).
  *
- * Intraday: one play per book per session after the opening range
- * (how discretionary desks actually take daily P&L — not check-all):
- *   1) VWAP-aligned opening-range breakout (trend window ~9:45–10:30)
- *   2) fade a failed OR break
- *   3) VWAP pullback if the range never breaks
- * Skip tiny OR, skip >1% gaps for ORB, skip Tuesday for the regime play.
- * Walk-forward still sits a book out when that play has no edge.
- * Stocks: inside-day on NSE daily.
+ * Intraday: ORB (close beyond 15/30m opening range) plus a long/short ATM
+ * straddle check (index × lot proxy vs estimated premium). Regime fade/hold
+ * stays in the walk-forward grid. Stocks: inside-day vs daily straddle.
  * Capital: 2% per trade, 6% day stop.
  */
 
@@ -21,7 +16,7 @@ const { fetchEquityDaily, fetchNifty100Symbols, mapPool } = require('./nse-equit
 const { monthStartIso, monthKey, roundMtd, nextDayCap } = require('./month-guard');
 
 const ENGINE = 'paper-desk';
-const STRATEGY_FAMILY = 'or-regime-plus-inside-day';
+const STRATEGY_FAMILY = 'orb-vs-straddle';
 const RETIRED_FAMILIES = ['session-vwap-impulse', 'vwap-impulse'];
 const GAP_SKIP_PCT = 1;
 const REGIME_LAST_ENTRY_CASH = 1030;
@@ -152,6 +147,26 @@ function uniqueDates(bars, book) {
 
 function specGrid(book = BOOKS.nifty) {
   const grid = [];
+  for (const orMinutes of [15, 30]) {
+    for (const minOrWidth of book.minOrWidth) {
+      for (const stopPts of book.stopPts) {
+        for (const targetR of [1.5, 2]) {
+          grid.push({
+            engine: ENGINE,
+            family: 'orb',
+            mode: 'orb',
+            orMinutes,
+            bufferPts: 0,
+            minOrWidth,
+            stopPts,
+            targetR,
+            holdBars: 24,
+            beR: BE_R,
+          });
+        }
+      }
+    }
+  }
   for (const minOrWidth of book.minOrWidth) {
     for (const stopPts of book.stopPts) {
       grid.push({
@@ -212,8 +227,17 @@ function openingRange(bars, spec, book) {
 
 function entryCutoffHm(spec, book) {
   if (spec?.mode === 'regime') return book.sessionStart >= 1600 ? 1800 : REGIME_LAST_ENTRY_CASH;
+  if (spec?.mode === 'orb') return book.sessionStart >= 1600 ? 2000 : 1430;
   if (spec?.mode !== 'fade') return book.lastEntry;
   return book.sessionStart >= 1600 ? 1800 : 1130;
+}
+
+function atmPremiumPts(book, spot, orWidth) {
+  const s = Number(spot) || 0;
+  const w = Number(orWidth) || 0;
+  if (book.id === 'bank') return Math.max(120, Math.round(s * 0.004), Math.round(w * 0.55));
+  if (book.id === 'crude') return Math.max(8, Math.round(s * 0.004), Math.round(w * 0.55));
+  return Math.max(60, Math.round(s * 0.0035), Math.round(w * 0.55));
 }
 
 function isoWeekday(iso) {
@@ -377,9 +401,137 @@ function simulateRegimeDay(bars, spec, lots, book, opts = {}) {
   return trades;
 }
 
+function closeStraddleTrade(open, exitBar, reason, lots, book) {
+  const L = Math.max(1, Math.floor(Number(lots)) || 1);
+  const move = Math.abs(Number(exitBar.close) - open.entryClose);
+  const premBoth = (Number(open.premiumPts) || 0) * 2;
+  const pts = open.straddle === 'short' ? premBoth - move : move - premBoth;
+  const optionPnlRs = pts * book.lotSize * L;
+  const chargesRs = CHARGE_RS * 2 * L;
+  const long = open.straddle !== 'short';
+  return {
+    instrumentName: book.name,
+    instrumentId: book.id,
+    side: long ? 'BUY' : 'SELL',
+    direction: long ? 'LONG-STRADDLE' : 'SHORT-STRADDLE',
+    optionSymbol: `${book.name} ATM CE+PE`,
+    entryTime: open.entryTime,
+    exitTime: exitBar.date,
+    exitReason: reason,
+    indexEntry: open.entryClose,
+    indexExit: Number(exitBar.close),
+    indexPoints: Math.round(pts * 100) / 100,
+    optionPnlRs,
+    netOptionPnlRs: optionPnlRs - chargesRs,
+    chargesRs,
+    liveWouldTake: true,
+    pnlSource: 'index_x_lot_straddle',
+    spec: open.spec,
+    lots: L,
+    premiumPts: open.premiumPts,
+    riskRs1: premBoth * book.lotSize,
+  };
+}
+
+function simulateOrbDay(bars, spec, lots, book, opts = {}) {
+  const empty = opts.withOpen ? { trades: [], open: null } : [];
+  const or = openingRange(bars, spec, book);
+  if (!or || !(or.width >= spec.minOrWidth)) return empty;
+  const lastEntry = entryCutoffHm(spec, book);
+  const stopPts = Math.max(1, Math.min(spec.stopPts, Math.round(Math.max(spec.stopPts, or.width * 0.5))));
+  const liveSpec = { ...spec, stopPts };
+  let open = null;
+  const trades = [];
+  for (let i = 0; i < bars.length; i += 1) {
+    const bar = bars[i];
+    const hm = barHm(bar);
+    if (open) {
+      const step = manageOpen(open, bar, i, liveSpec, lots, book);
+      open = step.open;
+      if (step.trade) {
+        trades.push(step.trade);
+        break;
+      }
+      continue;
+    }
+    if (hm < or.endHm || hm > lastEntry) continue;
+    const close = Number(bar.close);
+    if (close > or.high + spec.bufferPts) {
+      open = { dir: 1, spec: liveSpec, entryClose: close, entryTime: bar.date, entryIndex: i, beArmed: false, play: 'orb' };
+    } else if (close < or.low - spec.bufferPts) {
+      open = { dir: -1, spec: liveSpec, entryClose: close, entryTime: bar.date, entryIndex: i, beArmed: false, play: 'orb' };
+    }
+  }
+  if (open && bars.length) {
+    const last = bars[bars.length - 1];
+    const flatten = opts.flattenOpen !== false || barHm(last) >= book.squareOff;
+    if (flatten) {
+      trades.push(closeTrade(open, last, 'session end', lots, book));
+      open = null;
+    }
+  }
+  if (opts.withOpen) return { trades, open };
+  return trades;
+}
+
+function simulateStraddleDay(bars, spec, lots, book, opts = {}) {
+  const empty = opts.withOpen ? { trades: [], open: null } : [];
+  if (!(bars || []).length) return empty;
+  const or = openingRange(bars, spec, book);
+  const endHm = or ? or.endHm : hmPlus(book.orAnchor, spec.orMinutes || 15);
+  let entryIdx = -1;
+  for (let i = 0; i < bars.length; i += 1) {
+    if (barHm(bars[i]) >= endHm) {
+      entryIdx = i;
+      break;
+    }
+  }
+  if (entryIdx < 0) return empty;
+  const entryBar = bars[entryIdx];
+  const premium = atmPremiumPts(book, Number(entryBar.close), or ? or.width : 0);
+  const side = spec.straddle === 'short' ? 'short' : 'long';
+  const liveSpec = { ...spec, premiumPts: premium, mode: 'straddle', straddle: side };
+  let open = {
+    dir: 0,
+    straddle: side,
+    spec: liveSpec,
+    entryClose: Number(entryBar.close),
+    entryTime: entryBar.date,
+    entryIndex: entryIdx,
+    premiumPts: premium,
+  };
+  const trades = [];
+  const shortStop = premium * 2 + Math.max(Number(spec.stopPts) || 0, Math.round(premium * 0.5));
+  for (let i = entryIdx + 1; i < bars.length; i += 1) {
+    const bar = bars[i];
+    const hm = barHm(bar);
+    const move = Math.abs(Number(bar.close) - open.entryClose);
+    let reason = null;
+    if (side === 'short' && move >= shortStop) reason = 'straddle stop';
+    else if (hm >= book.squareOff) reason = `square-off ${book.squareOff}`;
+    if (reason) {
+      trades.push(closeStraddleTrade(open, bar, reason, lots, book));
+      open = null;
+      break;
+    }
+  }
+  if (open && bars.length) {
+    const last = bars[bars.length - 1];
+    const flatten = opts.flattenOpen !== false || barHm(last) >= book.squareOff;
+    if (flatten) {
+      trades.push(closeStraddleTrade(open, last, 'session end', lots, book));
+      open = null;
+    }
+  }
+  if (opts.withOpen) return { trades, open };
+  return trades;
+}
+
 function simulateDay(dayBars, spec, lots, book, opts = {}) {
   const bars = dayBars || [];
   const empty = opts.withOpen ? { trades: [], open: null } : [];
+  if (spec?.mode === 'straddle') return simulateStraddleDay(bars, spec, lots, book, opts);
+  if (spec?.mode === 'orb') return simulateOrbDay(bars, spec, lots, book, opts);
   if (spec?.mode === 'regime') return simulateRegimeDay(bars, spec, lots, book, opts);
   const or = openingRange(bars, spec, book);
   if (!or || !(or.width >= spec.minOrWidth)) return empty;
@@ -1048,6 +1200,12 @@ function stampCoreBooks(books, allocation) {
 
 function describeSpec(spec, book) {
   if (!spec) return `${book?.name || 'book'} sit-out (no walk-forward edge)`;
+  if (spec.mode === 'orb') {
+    return `${book?.name || ''} ORB · ${spec.orMinutes}m range, stop ${spec.stopPts}pt, ${spec.targetR}R`.trim();
+  }
+  if (spec.mode === 'straddle') {
+    return `${book?.name || ''} ${spec.straddle === 'short' ? 'short' : 'long'} ATM straddle · after ${spec.orMinutes || 15}m OR`.trim();
+  }
   if (spec.mode === 'regime') {
     return (
       `${book?.name || ''} regime · OR ${spec.orMinutes}m then one play ` +
@@ -1150,6 +1308,161 @@ function searchInsideDay(bars, { trainFrom, trainTo, lots, symbol } = {}) {
   }
   if (!best || !Number.isFinite(best.score)) return { spec: null, sitOut: true, totals: summarize([]), symbol };
   return { ...best, sitOut: false };
+}
+
+function simulateStockStraddle(bars, { fromDate, toDate, lots, symbol, side } = {}) {
+  const L = Math.max(1, Math.floor(Number(lots)) || 1);
+  const rows = (bars || []).slice().sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  const trades = [];
+  const short = side === 'short';
+  for (const day of rows) {
+    const d = String(day.date).slice(0, 10);
+    if (fromDate && d < fromDate) continue;
+    if (toDate && d > toDate) continue;
+    const open = Number(day.open);
+    const close = Number(day.close);
+    if (!(open > 0)) continue;
+    const premium = Math.max(2, open * 0.008);
+    const move = Math.abs(close - open);
+    const pts = short ? premium * 2 - move : move - premium * 2;
+    const optionPnlRs = pts * L;
+    const chargesRs = Math.max(1, Math.round(open * L * 0.001 * 2));
+    trades.push({
+      instrumentName: symbol || 'STOCK',
+      instrumentId: 'stock',
+      side: short ? 'SELL' : 'BUY',
+      direction: short ? 'SHORT-STRADDLE' : 'LONG-STRADDLE',
+      optionSymbol: `${symbol} ATM CE+PE`,
+      entryTime: `${d}T09:15:00+0530`,
+      exitTime: `${d}T15:30:00+0530`,
+      exitReason: 'close',
+      indexEntry: open,
+      indexExit: close,
+      indexPoints: Math.round(pts * 100) / 100,
+      optionPnlRs,
+      netOptionPnlRs: optionPnlRs - chargesRs,
+      chargesRs,
+      liveWouldTake: true,
+      pnlSource: 'cash_straddle_proxy',
+      lots: L,
+      premiumPts: premium,
+    });
+  }
+  return trades;
+}
+
+function pickVictory(rows) {
+  const list = (rows || []).filter(Boolean);
+  if (!list.length) return null;
+  return list.slice().sort((a, b) => {
+    const aEdge = (a.totals?.wins || 0) - (a.totals?.losses || 0);
+    const bEdge = (b.totals?.wins || 0) - (b.totals?.losses || 0);
+    if (bEdge !== aEdge) return bEdge - aEdge;
+    const aNet = a.totals?.optionNetAfterChargesRs || 0;
+    const bNet = b.totals?.optionNetAfterChargesRs || 0;
+    if (bNet !== aNet) return bNet - aNet;
+    return (b.totals?.winRate || 0) - (a.totals?.winRate || 0);
+  })[0];
+}
+
+function compareIndexBook(candles, book, { fromDate, toDate, lots } = {}) {
+  const L = Math.max(1, Math.floor(Number(lots)) || 1);
+  const orbSpecs = [
+    {
+      engine: ENGINE,
+      family: 'orb',
+      mode: 'orb',
+      orMinutes: 15,
+      bufferPts: 0,
+      minOrWidth: book.minOrWidth[0],
+      stopPts: book.stopPts[0],
+      targetR: 1.5,
+      holdBars: 24,
+      beR: BE_R,
+    },
+    {
+      engine: ENGINE,
+      family: 'orb',
+      mode: 'orb',
+      orMinutes: 30,
+      bufferPts: 0,
+      minOrWidth: book.minOrWidth[0],
+      stopPts: book.stopPts[1] || book.stopPts[0],
+      targetR: 2,
+      holdBars: 24,
+      beR: BE_R,
+    },
+  ];
+  const orbTried = orbSpecs.map((spec) => {
+    const trades = simulate(candles, spec, { fromDate, toDate, lots: L, book });
+    return { id: `orb-${spec.orMinutes}`, label: `ORB ${spec.orMinutes}m`, spec, trades, totals: summarize(trades) };
+  });
+  const bestOrb = pickVictory(orbTried) || orbTried[0];
+  const longSpec = { engine: ENGINE, family: 'straddle', mode: 'straddle', straddle: 'long', orMinutes: 15, stopPts: book.stopPts[0] };
+  const shortSpec = { engine: ENGINE, family: 'straddle', mode: 'straddle', straddle: 'short', orMinutes: 15, stopPts: book.stopPts[0] };
+  const longTrades = simulate(candles, longSpec, { fromDate, toDate, lots: L, book });
+  const shortTrades = simulate(candles, shortSpec, { fromDate, toDate, lots: L, book });
+  const rows = [
+    { id: 'orb', label: bestOrb.label, spec: bestOrb.spec, trades: bestOrb.trades, totals: bestOrb.totals },
+    { id: 'straddle-long', label: 'Long straddle', spec: longSpec, trades: longTrades, totals: summarize(longTrades) },
+    { id: 'straddle-short', label: 'Short straddle', spec: shortSpec, trades: shortTrades, totals: summarize(shortTrades) },
+  ];
+  const winner = pickVictory(rows);
+  return { bookId: book.id, label: book.name, rows, winnerId: winner?.id, winnerLabel: winner?.label, variants: orbTried };
+}
+
+function compareStocks(series, { fromDate, toDate, lots } = {}) {
+  const L = Math.max(1, Math.floor(Number(lots)) || 1);
+  const inside = [];
+  const long = [];
+  const short = [];
+  for (const row of series || []) {
+    if (!row.historical || row.historical.length < 5) continue;
+    inside.push(
+      ...simulateInsideDay(row.historical, { engine: ENGINE, family: 'inside-day', targetR: 1.5, minRisk: 2 }, {
+        fromDate,
+        toDate,
+        lots: L,
+        symbol: row.symbol,
+      }),
+    );
+    long.push(
+      ...simulateStockStraddle(row.historical, { fromDate, toDate, lots: L, symbol: row.symbol, side: 'long' }),
+    );
+    short.push(
+      ...simulateStockStraddle(row.historical, { fromDate, toDate, lots: L, symbol: row.symbol, side: 'short' }),
+    );
+  }
+  const rows = [
+    { id: 'orb', label: 'Inside-day (stock ORB analog)', trades: inside, totals: summarize(inside) },
+    { id: 'straddle-long', label: 'Long straddle', trades: long, totals: summarize(long) },
+    { id: 'straddle-short', label: 'Short straddle', trades: short, totals: summarize(short) },
+  ];
+  const winner = pickVictory(rows);
+  return { bookId: 'stocks', label: 'Nifty-100 stocks', rows, winnerId: winner?.id, winnerLabel: winner?.label };
+}
+
+function compareAll(payload) {
+  const books = payload.books || [];
+  const scored = books
+    .flatMap((b) => (b.rows || []).map((r) => ({ book: b.label, bookId: b.bookId, ...r })))
+    .filter((r) => (r.totals?.trades || 0) > 0);
+  const overall = pickVictory(scored);
+  return {
+    fromDate: payload.fromDate,
+    toDate: payload.toDate,
+    books,
+    overall: overall
+      ? {
+          book: overall.book,
+          bookId: overall.bookId,
+          strategy: overall.label,
+          strategyId: overall.id,
+          totals: overall.totals,
+        }
+      : null,
+    rule: 'Victory = more wins than losses first, then higher net ₹, then win rate. Index straddle uses ATM CE+PE premium proxy (not a live option chain). Stocks straddle is a daily |open−close| vs 0.8% premium proxy.',
+  };
 }
 
 function pickCrudeMiniFromCsv(csv) {
@@ -1260,6 +1573,7 @@ async function runDiscover({ authorization, fromDate, toDate, lots, capitalRs },
   const bookIds = ['nifty', 'bank', 'crude'];
   const books = [];
   const allTrades = [];
+  const compareBooks = [];
   let stockPayload = { source: 'nse-daily', universe: 'nifty-100', scanned: 0, taken: [], rows: [] };
 
   for (const id of bookIds) {
@@ -1268,6 +1582,9 @@ async function runDiscover({ authorization, fromDate, toDate, lots, capitalRs },
       const loaded = await loadBookCandles(market, authorization, book, warmFrom, toDate, deps);
       const candles = loaded.candles || loaded;
       const found = searchSpecs(candles, { trainFrom: warmFrom, trainTo, lots: L, book });
+      if (id === 'nifty' || id === 'bank') {
+        compareBooks.push(compareIndexBook(candles, book, { fromDate, toDate, lots: L }));
+      }
       const monthTrades = found.sitOut
         ? []
         : simulate(candles, found.spec, { fromDate: monthFrom, toDate, lots: L, book });
@@ -1314,6 +1631,7 @@ async function runDiscover({ authorization, fromDate, toDate, lots, capitalRs },
   let stockNote = '';
   try {
     const series = await loadStocks(stockFrom, toDate, L, deps);
+    compareBooks.push(compareStocks(series, { fromDate, toDate, lots: L }));
     const ranked = [];
     for (const row of series) {
       if (!row.historical || row.historical.length < 30) continue;
@@ -1407,6 +1725,7 @@ async function runDiscover({ authorization, fromDate, toDate, lots, capitalRs },
 
   allTrades.sort((a, b) => String(a.entryTime).localeCompare(String(b.entryTime)));
   const allocation = allocateMonth({ books, capitalRs: capital, maxLots, fromDate, toDate });
+  const compare = compareAll({ fromDate, toDate, books: compareBooks });
   stampCoreBooks(books, allocation);
   const totals = allocation.totals;
   const takenTrades = allocation.trades;
@@ -1423,6 +1742,7 @@ async function runDiscover({ authorization, fromDate, toDate, lots, capitalRs },
     kiteFunds,
     allocation,
     month: allocation.month,
+    compare,
     specText: allocation.taken.length
       ? allocation.taken.map((t) => `${t.instrumentName} ×${t.lots}`).join(' · ')
       : 'Capital sat out (scan had setups the 2%/6% stop budget would not fund)',
@@ -1435,7 +1755,7 @@ async function runDiscover({ authorization, fromDate, toDate, lots, capitalRs },
       totals: summarize(books.flatMap((b) => b.trainTrades || [])),
     },
     note:
-      'Red days allowed; a red month is not. After the month is green, today cannot risk more than month P&L. If the month is red, only a small recovery trade. Flat after green locks. One OR play (VWAP ORB / fade / pullback). Crude evening-only. Live is the same engine plus Kite orders.',
+      'ORB vs long/short ATM straddle on Nifty 50, Bank Nifty, and stocks. Victory = more wins than losses, then net ₹. Straddle P&L is an ATM premium proxy (index × lot), not a live option chain fill.',
     scanTotals: summarize(allTrades),
     totals,
     liveTotals: totals,
@@ -1464,6 +1784,14 @@ module.exports = {
   simulate,
   simulateDay,
   simulateInsideDay,
+  simulateOrbDay,
+  simulateStraddleDay,
+  simulateStockStraddle,
+  compareIndexBook,
+  compareStocks,
+  compareAll,
+  pickVictory,
+  atmPremiumPts,
   sessionBars,
   summarize,
   searchSpecs,

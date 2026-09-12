@@ -16,6 +16,8 @@ const {
   STRATEGY_FAMILY,
   RETIRED_FAMILIES,
   BOOKS,
+  compareIndexBook,
+  simulateStockStraddle,
 } = require('./paper-discover');
 const { parseKiteFunds } = require('./kite-market');
 
@@ -31,6 +33,7 @@ assert.strictEqual(kitePocket.equityCash, 61200);
 assert.strictEqual(kitePocket.equityNet, 81235);
 assert.strictEqual(kitePocket.commodityCash, 1500);
 
+assert.ok(specGrid().some((s) => s.mode === 'orb' && s.family === 'orb'));
 assert.ok(specGrid().some((s) => s.mode === 'regime' && s.family === 'or-regime'));
 assert.ok(specGrid().length > 8);
 assert.strictEqual(ENGINE, 'paper-desk');
@@ -156,6 +159,37 @@ assert.strictEqual(orbTrades[0].direction, 'CE');
 assert.ok(orbTrades[0].netOptionPnlRs > 0);
 assert.strictEqual(simulateDay(trendHoldDay('2026-09-08'), regimeSpec, 1, BOOKS.nifty).length, 0, 'regime skips Tuesday');
 
+const orbSpec = specGrid().find((s) => s.mode === 'orb' && s.orMinutes === 30);
+const pureOrb = simulateDay(trendHoldDay('2026-09-11'), orbSpec, 1, BOOKS.nifty);
+assert.ok(pureOrb.length === 1, 'classic ORB takes the breakout close');
+assert.strictEqual(pureOrb[0].direction, 'CE');
+assert.ok(pureOrb[0].netOptionPnlRs > 0);
+
+const longStraddleSpec = { mode: 'straddle', straddle: 'long', orMinutes: 15, family: 'straddle', stopPts: 20 };
+const shortStraddleSpec = { mode: 'straddle', straddle: 'short', orMinutes: 15, family: 'straddle', stopPts: 20 };
+const longTrend = simulateDay(trendHoldDay('2026-09-11'), longStraddleSpec, 1, BOOKS.nifty);
+const shortTrend = simulateDay(trendHoldDay('2026-09-11'), shortStraddleSpec, 1, BOOKS.nifty);
+assert.strictEqual(longTrend.length, 1);
+assert.strictEqual(shortTrend.length, 1);
+assert.ok(longTrend[0].netOptionPnlRs > shortTrend[0].netOptionPnlRs, 'trending day favors long straddle over short');
+
+const cmp = compareIndexBook(trendHoldDay('2026-09-11'), BOOKS.nifty, {
+  fromDate: '2026-09-11',
+  toDate: '2026-09-11',
+  lots: 1,
+});
+assert.ok(cmp.rows.length === 3);
+assert.ok(cmp.winnerId);
+
+const stockLong = simulateStockStraddle(
+  [
+    { date: '2026-09-10', open: 100, high: 101, low: 99, close: 100.2 },
+    { date: '2026-09-11', open: 100, high: 108, low: 99, close: 107 },
+  ],
+  { fromDate: '2026-09-11', toDate: '2026-09-11', lots: 1, symbol: 'RELIANCE', side: 'long' },
+);
+assert.ok(stockLong[0].netOptionPnlRs > 0, 'wide stock day pays long straddle');
+
 function failThenRun(date) {
   const out = [];
   let minutes = 9 * 60 + 15;
@@ -196,10 +230,11 @@ function failThenRun(date) {
 }
 
 const blown = [...train, ...failThenRun('2026-09-12')];
-const stopTrades = simulate(blown, found.spec, { fromDate: '2026-09-12', toDate: '2026-09-12', lots: 1 });
+const fadeSpec = specGrid().find((s) => s.mode === 'fade');
+const stopTrades = simulate(blown, fadeSpec, { fromDate: '2026-09-12', toDate: '2026-09-12', lots: 1 });
 assert.ok(stopTrades.length >= 1);
 assert.strictEqual(stopTrades[0].exitReason, 'stop');
-assert.ok(Math.abs(stopTrades[0].indexPoints) <= (found.spec.stopPts || 20) + 0.01);
+assert.ok(Math.abs(stopTrades[0].indexPoints) <= (fadeSpec.stopPts || 20) + 0.01);
 
 const daily = [];
 let px = 100;
@@ -372,8 +407,8 @@ const oneStopTrain = [
   ...failThenRun('2026-09-10'),
 ];
 assert.ok(
-  found.spec &&
-    !specStillAlive(oneStopTrain, found.spec, {
+  fadeSpec &&
+    !specStillAlive(oneStopTrain, fadeSpec, {
       trainFrom: '2026-08-01',
       trainTo: '2026-09-10',
       lots: 1,
