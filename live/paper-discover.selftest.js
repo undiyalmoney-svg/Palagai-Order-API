@@ -140,6 +140,8 @@ runDiscover(
     assert.ok(out.books.some((b) => b.id === 'bank'));
     assert.ok(out.books.some((b) => b.id === 'crude'));
     assert.ok(out.books.some((b) => b.id === 'stocks'));
+    assert.ok(out.stocks && Array.isArray(out.stocks.rows));
+    assert.ok(out.stocks.scanned >= 1);
     assert.ok(out.totals.trades >= 1);
     console.log(
       'paper-discover.selftest: ok',

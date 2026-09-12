@@ -11,7 +11,7 @@
  */
 
 const defaultMarket = require('./kite-market');
-const { fetchEquityDaily, mapPool } = require('./nse-equity-history');
+const { fetchEquityDaily, fetchNifty100Symbols, mapPool } = require('./nse-equity-history');
 
 const ENGINE = 'paper-desk';
 const STRATEGY_FAMILY = 'or-desk-plus-inside-day';
@@ -22,7 +22,8 @@ const BANK_TOKEN = 260105;
 const LOOKBACK_CAL_DAYS = 25;
 const STOCK_LOOKBACK_CAL_DAYS = 90;
 const CHARGE_RS = 20;
-const MAX_STOCK_TRADES = 3;
+const MAX_STOCK_TRADES = 8;
+const MAX_STOCK_SCAN = 30;
 const LIQUID_STOCKS = [
   'RELIANCE',
   'HDFCBANK',
@@ -479,10 +480,29 @@ async function loadBookCandles(market, authorization, book, warmFrom, toDate, de
   return { candles, token, symbol };
 }
 
+async function resolveStockSymbols(deps) {
+  if (Array.isArray(deps.stockSymbols) && deps.stockSymbols.length) return deps.stockSymbols;
+  try {
+    const listed = await fetchNifty100Symbols();
+    const seen = new Set();
+    const out = [];
+    for (const raw of [...LIQUID_STOCKS, ...(listed || [])]) {
+      const s = String(raw || '').trim().toUpperCase();
+      if (!s || seen.has(s)) continue;
+      seen.add(s);
+      out.push(s);
+      if (out.length >= MAX_STOCK_SCAN) break;
+    }
+    return out.length ? out : LIQUID_STOCKS;
+  } catch {
+    return LIQUID_STOCKS;
+  }
+}
+
 async function loadStocks(fromDate, toDate, lots, deps) {
   if (deps.stockSeries) return deps.stockSeries;
-  const symbols = LIQUID_STOCKS;
-  const series = await mapPool(symbols, 3, async (symbol) => {
+  const symbols = await resolveStockSymbols(deps);
+  const series = await mapPool(symbols, 4, async (symbol) => {
     try {
       const out = await fetchEquityDaily({ symbol, fromDate, toDate });
       return { symbol, historical: out.historical || [], error: null };
@@ -509,6 +529,7 @@ async function runDiscover({ authorization, fromDate, toDate, lots }, deps = {})
   const bookIds = ['nifty', 'bank', 'crude'];
   const books = [];
   const allTrades = [];
+  let stockPayload = { source: 'nse-daily', universe: 'nifty-100', scanned: 0, taken: [], rows: [] };
 
   for (const id of bookIds) {
     const book = BOOKS[id];
@@ -575,13 +596,21 @@ async function runDiscover({ authorization, fromDate, toDate, lots }, deps = {})
     const taken = ranked.filter((r) => r.trades.length).slice(0, MAX_STOCK_TRADES);
     const stockTrades = [];
     for (const row of taken) stockTrades.push(...row.trades);
+    const stockRows = ranked.slice(0, 15).map((r) => ({
+      symbol: r.symbol,
+      sitOut: !!r.sitOut,
+      spec: r.spec,
+      train: summarize(r.trainTrades || []),
+      day: r.totals,
+      trades: (r.trades || []).length,
+    }));
     books.push({
       id: 'stocks',
-      label: 'Nifty 100 cash (liquid)',
+      label: 'Nifty 100 stocks (NSE daily)',
       sitOut: taken.length === 0,
       specText: taken.length
         ? taken.map((r) => `${r.symbol} inside-day ${r.spec.targetR}R`).join(', ')
-        : 'sit-out (no walk-forward edge on liquid names)',
+        : 'sit-out (no walk-forward edge on scanned names)',
       train: summarize(ranked.flatMap((r) => r.trainTrades || [])),
       trainTrades: ranked.flatMap((r) => r.trainTrades || []),
       totals: summarize(stockTrades),
@@ -590,16 +619,24 @@ async function runDiscover({ authorization, fromDate, toDate, lots }, deps = {})
       scanned: series.length,
     });
     allTrades.push(...stockTrades);
+    stockPayload = {
+      source: 'nse-daily',
+      universe: 'nifty-100',
+      scanned: series.length,
+      taken: taken.map((r) => r.symbol),
+      rows: stockRows,
+    };
   } catch (err) {
     stockNote = err.message || String(err);
     books.push({
       id: 'stocks',
-      label: 'Nifty 100 cash (liquid)',
+      label: 'Nifty 100 stocks (NSE daily)',
       sitOut: true,
       error: stockNote,
       totals: summarize([]),
       trades: [],
     });
+    stockPayload = { source: 'nse-daily', universe: 'nifty-100', scanned: 0, taken: [], rows: [], error: stockNote };
   }
 
   allTrades.sort((a, b) => String(a.entryTime).localeCompare(String(b.entryTime)));
@@ -614,6 +651,7 @@ async function runDiscover({ authorization, fromDate, toDate, lots }, deps = {})
     skipped: RETIRED_FAMILIES,
     specText: active.map((b) => b.specText).filter(Boolean).join(' · ') || 'Desk sat out',
     books,
+    stocks: stockPayload,
     train: {
       fromDate: warmFrom,
       toDate: trainTo,
