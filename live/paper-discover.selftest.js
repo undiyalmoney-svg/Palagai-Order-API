@@ -79,12 +79,57 @@ const candles = [...train, ...test];
 const found = searchSpecs(candles, { trainFrom: '2026-08-01', trainTo: '2026-08-10', lots: 1 });
 assert.ok(found && found.spec && !found.sitOut);
 assert.ok(found.totals.trades >= 5);
-assert.ok(found.totals.profitFactor >= 1.2);
+assert.ok(found.totals.profitFactor >= 1.5);
 
 const testTrades = simulate(candles, found.spec, { fromDate: '2026-09-11', toDate: '2026-09-11', lots: 1 });
 assert.ok(testTrades.length >= 1);
 assert.ok(testTrades.length <= 1);
 assert.strictEqual(testTrades[0].direction, 'PE');
+
+function failThenRun(date) {
+  const out = [];
+  let minutes = 9 * 60 + 15;
+  const end = 15 * 60 + 30;
+  let px = 25000;
+  while (minutes <= end) {
+    const hm = Math.floor(minutes / 60) * 100 + (minutes % 60);
+    let open = px;
+    let close = px;
+    let high = px + 6;
+    let low = px - 6;
+    if (hm < 930) {
+      close = 25005;
+      high = 25012;
+      low = 24988;
+      open = 25000;
+    } else if (hm === 935) {
+      open = 25010;
+      close = 25040;
+      high = 25042;
+      low = 25008;
+    } else if (hm === 940) {
+      open = 25038;
+      close = 25008;
+      high = 25040;
+      low = 25005;
+    } else {
+      close = px + 40;
+      open = px;
+      high = close + 2;
+      low = px - 1;
+    }
+    out.push(bar(date, hm, open, high, low, close));
+    px = close;
+    minutes += 5;
+  }
+  return out;
+}
+
+const blown = [...train, ...failThenRun('2026-09-12')];
+const stopTrades = simulate(blown, found.spec, { fromDate: '2026-09-12', toDate: '2026-09-12', lots: 1 });
+assert.ok(stopTrades.length >= 1);
+assert.strictEqual(stopTrades[0].exitReason, 'stop');
+assert.ok(Math.abs(stopTrades[0].indexPoints) <= (found.spec.stopPts || 20) + 0.01);
 
 const daily = [];
 let px = 100;
@@ -201,6 +246,19 @@ const bigCap = allocateDesk({
   ],
 });
 assert.ok(bigCap.taken.some((t) => t.bookId === 'nifty' && t.lots >= 1));
+assert.ok(bigCap.skipped.some((s) => s.bookId === 'crude' && s.reason === 'weak-train'));
+
+const crowded = allocateDesk({
+  capitalRs: 400000,
+  maxLots: 2,
+  books: [
+    { id: 'nifty', label: 'NIFTY 50', train: { optionNetAfterChargesRs: 20000, profitFactor: 2.5 }, trades: [wideNifty] },
+    { id: 'crude', label: 'Crude Oil Mini', train: { optionNetAfterChargesRs: 9000, profitFactor: 2 }, trades: [cheapCrude] },
+    { id: 'stocks', label: 'stocks', train: { optionNetAfterChargesRs: 1500, profitFactor: 1.4 }, trades: [cheapStock] },
+  ],
+});
+assert.strictEqual(crowded.taken.length, 2);
+assert.ok(crowded.skipped.some((s) => s.reason === 'not-top-edge'));
 
 const correlated = allocateDesk({
   capitalRs: 400000,

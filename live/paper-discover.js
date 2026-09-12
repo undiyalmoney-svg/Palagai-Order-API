@@ -8,8 +8,8 @@
  * Intraday family: opening-range fade OR hold (walk-forward picks per book).
  * Stocks: inside-day breakout on NSE daily.
  * A book that cannot show a walk-forward edge sits out (no forced trades).
- * After the scan, capital allocates: 2% stop per trade, 4% day stop. Wide
- * 1-lot index stops are skipped so crude/stocks can take the risk budget.
+ * After the scan, capital allocates: 2% stop per trade, 4% day stop, max two
+ * books. Stops cap at 1R, fade skips wide ORs, stale 5-session edges sit out.
  */
 
 const defaultMarket = require('./kite-market');
@@ -24,12 +24,19 @@ const BANK_TOKEN = 260105;
 const LOOKBACK_CAL_DAYS = 25;
 const STOCK_LOOKBACK_CAL_DAYS = 90;
 const CHARGE_RS = 20;
-const MAX_STOCK_TRADES = 8;
+const MAX_STOCK_TRADES = 2;
 const MAX_STOCK_SCAN = 30;
+const MAX_FUNDED_TRADES = 2;
 const DEFAULT_CAPITAL_RS = 40000;
 const RISK_PER_TRADE_PCT = 0.02;
 const DAY_RISK_PCT = 0.04;
 const STOCK_NAME_CAPITAL_FRAC = 0.25;
+const MIN_INDEX_TRAIN_PF = 1.5;
+const MIN_STOCK_TRAIN_PF = 1.2;
+const MIN_WIN_RATE = 0.4;
+const RECENT_SESSIONS = 5;
+const BE_R = 0.75;
+const FADE_OR_STOP_MULT = 2.2;
 const LIQUID_STOCKS = [
   'RELIANCE',
   'HDFCBANK',
@@ -143,7 +150,7 @@ function specGrid(book = BOOKS.nifty) {
       for (const bufferPts of [0, 5]) {
         for (const minOrWidth of book.minOrWidth) {
           for (const stopPts of book.stopPts) {
-            for (const targetR of [1.5, 2]) {
+            for (const targetR of [2, 2.5]) {
               grid.push({
                 engine: ENGINE,
                 family: mode === 'fade' ? 'opening-range-failure' : 'opening-range-hold',
@@ -153,7 +160,8 @@ function specGrid(book = BOOKS.nifty) {
                 minOrWidth,
                 stopPts,
                 targetR,
-                holdBars: 12,
+                holdBars: 8,
+                beR: BE_R,
               });
             }
           }
@@ -177,9 +185,27 @@ function openingRange(bars, spec, book) {
   return { high, low, endHm, width: high - low };
 }
 
+function entryCutoffHm(spec, book) {
+  if (spec?.mode !== 'fade') return book.lastEntry;
+  return book.sessionStart >= 1600 ? 1800 : 1130;
+}
+
+function exitPrice(open, exitBar, reason) {
+  const spec = open.spec || {};
+  const stop = Number(spec.stopPts) || 0;
+  const dir = open.dir;
+  if (reason === 'stop' && stop > 0) return open.entryClose - dir * stop;
+  if (reason === 'breakeven') return open.entryClose;
+  if (String(reason).includes('target') && stop > 0) {
+    return open.entryClose + dir * stop * (Number(spec.targetR) || 2);
+  }
+  return Number(exitBar.close);
+}
+
 function closeTrade(open, exitBar, reason, lots, book) {
   const L = Math.max(1, Math.floor(Number(lots)) || 1);
-  const points = (Number(exitBar.close) - open.entryClose) * open.dir;
+  const px = exitPrice(open, exitBar, reason);
+  const points = (px - open.entryClose) * open.dir;
   const optionPnlRs = points * book.lotSize * L;
   const chargesRs = CHARGE_RS * L;
   const cepe = open.dir > 0 ? 'CE' : 'PE';
@@ -193,7 +219,7 @@ function closeTrade(open, exitBar, reason, lots, book) {
     exitTime: exitBar.date,
     exitReason: reason,
     indexEntry: open.entryClose,
-    indexExit: Number(exitBar.close),
+    indexExit: px,
     indexPoints: Math.round(points * 100) / 100,
     optionPnlRs,
     netOptionPnlRs: optionPnlRs - chargesRs,
@@ -210,6 +236,8 @@ function simulateDay(dayBars, spec, lots, book) {
   const bars = dayBars || [];
   const or = openingRange(bars, spec, book);
   if (!or || !(or.width >= spec.minOrWidth)) return [];
+  if (spec.mode === 'fade' && or.width > spec.stopPts * FADE_OR_STOP_MULT) return [];
+  const lastEntry = entryCutoffHm(spec, book);
   let broke = 0;
   let open = null;
   const trades = [];
@@ -220,8 +248,10 @@ function simulateDay(dayBars, spec, lots, book) {
       const held = i - open.entryIndex;
       const adverse = (open.entryClose - Number(bar.close)) * open.dir;
       const favor = (Number(bar.close) - open.entryClose) * open.dir;
+      if (!open.beArmed && favor >= spec.stopPts * (spec.beR || BE_R)) open.beArmed = true;
       let reason = null;
       if (adverse >= spec.stopPts) reason = 'stop';
+      else if (open.beArmed && adverse >= 0) reason = 'breakeven';
       else if (favor >= spec.stopPts * spec.targetR) reason = `${spec.targetR}R target`;
       else if (held >= spec.holdBars) reason = 'time stop';
       else if (hm >= book.squareOff) reason = `square-off ${book.squareOff}`;
@@ -232,7 +262,7 @@ function simulateDay(dayBars, spec, lots, book) {
       }
       continue;
     }
-    if (hm < or.endHm || hm > book.lastEntry) continue;
+    if (hm < or.endHm || hm > lastEntry) continue;
     if (spec.mode === 'hold') {
       if (!broke) {
         if (Number(bar.close) > or.high + spec.bufferPts) broke = 1;
@@ -251,6 +281,7 @@ function simulateDay(dayBars, spec, lots, book) {
         entryClose: Number(bar.close),
         entryTime: bar.date,
         entryIndex: i,
+        beArmed: false,
       };
       continue;
     }
@@ -268,6 +299,7 @@ function simulateDay(dayBars, spec, lots, book) {
       entryClose: Number(bar.close),
       entryTime: bar.date,
       entryIndex: i,
+      beArmed: false,
     };
   }
   if (open && bars.length) {
@@ -313,28 +345,33 @@ function summarize(trades) {
     }
   }
   const pf = lossRs > 0 ? winRs / lossRs : wins ? 99 : 0;
+  const n = (trades || []).length;
   return {
-    trades: (trades || []).length,
+    trades: n,
     wins,
     losses,
     optionNetRs: Math.round(optionNetRs),
     optionNetAfterChargesRs: Math.round(optionNetAfterChargesRs),
     underlyingPoints: Math.round(underlyingPoints * 100) / 100,
     profitFactor: Math.round(pf * 100) / 100,
+    winRate: n ? Math.round((wins / n) * 100) / 100 : 0,
+    expectancyRs: n ? Math.round(optionNetAfterChargesRs / n) : 0,
   };
 }
 
 function scoreTrades(trades) {
   const s = summarize(trades);
   if (s.trades < 5) return Number.NEGATIVE_INFINITY;
-  if (s.profitFactor < 1.2) return Number.NEGATIVE_INFINITY;
+  if (s.profitFactor < MIN_INDEX_TRAIN_PF) return Number.NEGATIVE_INFINITY;
+  if (s.winRate < MIN_WIN_RATE) return Number.NEGATIVE_INFINITY;
   if (s.optionNetAfterChargesRs <= 0) return Number.NEGATIVE_INFINITY;
-  return s.optionNetAfterChargesRs * Math.min(3, s.profitFactor) + s.wins * 15;
+  return s.optionNetAfterChargesRs * Math.min(3, s.profitFactor) + s.wins * 15 + s.expectancyRs;
 }
 
 function scoreStockTrades(trades) {
   const s = summarize(trades);
   if (s.trades < 3) return Number.NEGATIVE_INFINITY;
+  if (s.profitFactor < MIN_STOCK_TRAIN_PF && s.profitFactor !== 99) return Number.NEGATIVE_INFINITY;
   if (s.optionNetAfterChargesRs <= 0) return Number.NEGATIVE_INFINITY;
   return s.optionNetAfterChargesRs + s.wins * 10;
 }
@@ -448,10 +485,27 @@ function allocateDesk({
     fundable.push({ ...c, lots, risk1 });
   }
 
+  const quality = [];
+  for (const c of fundable) {
+    const minPf = c.bookId === 'stocks' ? MIN_STOCK_TRAIN_PF : MIN_INDEX_TRAIN_PF;
+    if (c.trainPf > 0 && c.trainPf < minPf) {
+      skipped.push({
+        instrumentName: c.trade.instrumentName,
+        bookId: c.bookId,
+        direction: c.trade.direction,
+        riskRs1: Math.round(c.risk1),
+        reason: 'weak-train',
+        detail: `Walk-forward PF ${c.trainPf} below ${minPf} — sit out`,
+      });
+      continue;
+    }
+    quality.push(c);
+  }
+
   const indexIds = new Set(['nifty', 'bank']);
   const winners = new Map();
   const dropped = new Set();
-  for (const c of fundable) {
+  for (const c of quality) {
     if (!indexIds.has(c.bookId)) continue;
     const key = `${String(c.trade.entryTime || '').slice(0, 10)}|${c.trade.direction || ''}`;
     const prev = winners.get(key);
@@ -477,10 +531,11 @@ function allocateDesk({
     });
   }
 
-  const pool = fundable.filter((c) => !dropped.has(c));
+  const pool = quality.filter((c) => !dropped.has(c));
   pool.sort((a, b) => {
-    const d = edgePerRisk(b) - edgePerRisk(a);
-    if (d) return d;
+    const ea = (Number(a.trainScore) || 0) * Math.max(1, a.lots || 1);
+    const eb = (Number(b.trainScore) || 0) * Math.max(1, b.lots || 1);
+    if (eb !== ea) return eb - ea;
     return (b.trainPf || 0) - (a.trainPf || 0);
   });
 
@@ -516,6 +571,22 @@ function allocateDesk({
         trainScore: Math.round(c.trainScore),
       },
     });
+    if (taken.length >= MAX_FUNDED_TRADES) break;
+  }
+
+  const takenKeys = new Set(taken.map((t) => `${t.allocation?.bookId}|${t.entryTime}`));
+  const alreadySkip = new Set(skipped.map((s) => `${s.bookId}|${s.instrumentName}`));
+  for (const c of pool) {
+    if (takenKeys.has(`${c.bookId}|${c.trade.entryTime}`)) continue;
+    if (alreadySkip.has(`${c.bookId}|${c.trade.instrumentName}`)) continue;
+    skipped.push({
+      instrumentName: c.trade.instrumentName,
+      bookId: c.bookId,
+      direction: c.trade.direction,
+      riskRs1: Math.round(c.risk1),
+      reason: 'not-top-edge',
+      detail: `Only the top ${MAX_FUNDED_TRADES} walk-forward books are funded`,
+    });
   }
 
   taken.sort((a, b) => String(a.entryTime).localeCompare(String(b.entryTime)));
@@ -540,6 +611,21 @@ function allocateDesk({
   };
 }
 
+function specStillAlive(bars, spec, { trainFrom, trainTo, lots, book }) {
+  const dates = uniqueDates(bars, book).filter((d) => {
+    if (trainFrom && d < trainFrom) return false;
+    if (trainTo && d > trainTo) return false;
+    return true;
+  }).slice(-RECENT_SESSIONS);
+  if (dates.length < 3) return true;
+  const trades = [];
+  for (const d of dates) {
+    trades.push(...simulateDay(sessionBars(bars, d, book), spec, lots, book));
+  }
+  const s = summarize(trades);
+  return s.trades > 0 && s.optionNetAfterChargesRs > 0;
+}
+
 function searchSpecs(bars, { trainFrom, trainTo, lots, book } = {}) {
   const profile = book || BOOKS.nifty;
   const grid = specGrid(profile);
@@ -547,7 +633,10 @@ function searchSpecs(bars, { trainFrom, trainTo, lots, book } = {}) {
   for (const spec of grid) {
     if (RETIRED_FAMILIES.includes(spec.family) || RETIRED_FAMILIES.includes(spec.engine)) continue;
     const trades = simulate(bars, spec, { fromDate: trainFrom, toDate: trainTo, lots, book: profile });
-    const row = { spec, trades, totals: summarize(trades), score: scoreTrades(trades) };
+    const score = scoreTrades(trades);
+    if (!Number.isFinite(score)) continue;
+    if (!specStillAlive(bars, spec, { trainFrom, trainTo, lots, book: profile })) continue;
+    const row = { spec, trades, totals: summarize(trades), score };
     if (!best || row.score > best.score) best = row;
   }
   if (!best || !Number.isFinite(best.score)) return { spec: null, totals: summarize([]), sitOut: true };
@@ -877,7 +966,7 @@ async function runDiscover({ authorization, fromDate, toDate, lots, capitalRs },
       totals: summarize(books.flatMap((b) => b.trainTrades || [])),
     },
     note:
-      'Scan every book (Nifty, Bank, Crude Mini, Nifty-100 stocks). Capital then funds the stop: 2% of capital per trade, 4% for the day. A 1-lot index stop that does not fit is skipped — crude or stocks can take the slot when cheaper. Same-day Nifty+Bank same CE/PE keeps one book. This is risk allocation, not a profit guarantee. Live money is not attached yet.',
+      'Scan every book, then fund at most two highest walk-forward edges. Stops are capped at 1R, winners arm breakeven at 0.75R, fades skip wide opening ranges, and a spec that went red in the last 5 sessions sits out. 2%/4% capital rails still apply. This cuts losers; it is not a profit guarantee. Live money is not attached yet.',
     scanTotals: summarize(allTrades),
     totals,
     liveTotals: totals,
