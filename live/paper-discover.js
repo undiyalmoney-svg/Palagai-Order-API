@@ -680,39 +680,20 @@ function simulate(bars, spec, { fromDate, toDate, lots, book, asOfDate } = {}) {
 }
 
 function instrumentLedger({ books = [], trades = [] } = {}) {
-  const rows = new Map();
-  for (const b of books || []) {
-    const s = b.totals || summarize(b.trades || []);
-    rows.set(b.id || b.label, {
-      id: b.id || b.label,
-      instrumentName: b.label || b.vehicle || b.id,
-      sitOut: !!b.sitOut,
-      status: b.status,
-      trades: s.trades || 0,
-      wins: s.wins || 0,
-      losses: s.losses || 0,
-      grossProfitRs: s.grossProfitRs || 0,
-      grossLossRs: s.grossLossRs || 0,
-      netRs: s.netRs ?? s.optionNetAfterChargesRs ?? 0,
-      source: 'scan',
-      riskRs: 0,
-    });
-  }
-  const byName = new Map();
+  const fundedMap = new Map();
   for (const t of trades || []) {
-    const key = t.instrumentId || t.allocation?.bookId || t.instrumentName || 'book';
-    if (!byName.has(key)) byName.set(key, []);
-    byName.get(key).push(t);
+    const key = t.allocation?.bookId || t.instrumentId || t.instrumentName || 'book';
+    if (!fundedMap.has(key)) fundedMap.set(key, []);
+    fundedMap.get(key).push(t);
   }
-  for (const [key, list] of byName) {
+  const funded = [];
+  for (const [key, list] of fundedMap) {
     const s = summarize(list);
-    const riskRs = Math.round(list.reduce((n, t) => n + (Number(t.allocation?.riskRs) || 0), 0));
-    const prev = rows.get(key);
-    rows.set(key, {
+    funded.push({
       id: key,
-      instrumentName: list[0]?.instrumentName || prev?.instrumentName || key,
+      instrumentName: list[0]?.instrumentName || key,
       sitOut: false,
-      status: 'funded',
+      status: 'taken',
       trades: s.trades,
       wins: s.wins,
       losses: s.losses,
@@ -720,10 +701,42 @@ function instrumentLedger({ books = [], trades = [] } = {}) {
       grossLossRs: s.grossLossRs,
       netRs: s.netRs,
       source: 'funded',
-      riskRs,
+      riskRs: Math.round(list.reduce((n, t) => n + (Number(t.allocation?.riskRs) || 0), 0)),
+      why: 'Taken — this P&L is what capital actually booked',
     });
   }
-  return [...rows.values()];
+  const out = [];
+  const seen = new Set();
+  for (const id of ['nifty', 'bank']) {
+    const b = (books || []).find((row) => row.id === id);
+    const f = funded.find((row) => row.id === id);
+    seen.add(id);
+    if (f) {
+      out.push({ ...f, why: b?.why || f.why });
+      continue;
+    }
+    out.push({
+      id,
+      instrumentName: b?.label || (id === 'nifty' ? 'NIFTY 50' : 'Bank Nifty'),
+      sitOut: !!b?.sitOut,
+      status: b?.status === 'skipped' ? 'not-taken' : b?.status || 'not-taken',
+      trades: 0,
+      wins: 0,
+      losses: 0,
+      grossProfitRs: 0,
+      grossLossRs: 0,
+      netRs: 0,
+      source: 'desk',
+      riskRs: 0,
+      why: b?.why || 'Not taken',
+    });
+  }
+  for (const row of funded) {
+    if (seen.has(row.id) || row.id === 'crude') continue;
+    seen.add(row.id);
+    out.push(row);
+  }
+  return out;
 }
 
 function capitalProtection({ capitalRs, kiteFunds, allocation, month } = {}) {
@@ -1317,32 +1330,56 @@ function explainIndexBook(book, { candles, found, trades, error } = {}) {
   return `${book.name} printed a setup — capital may still skip a 1-lot stop that is wider than 2%.`;
 }
 
+function lastSkipForBook(allocation, bookId) {
+  const skips = (allocation?.skipped || []).filter((s) => s.bookId === bookId);
+  return skips.length ? skips[skips.length - 1] : null;
+}
+
+function deskSkipWhy(book, skip, month) {
+  const mtd = Math.round(Number(month?.mtdRs) || 0);
+  const mode = month?.mode;
+  if (mode === 'month-locked' || skip?.reason === 'month-locked') {
+    return `Not taken. Month is flat after a green stretch — capital stays fully protected.`;
+  }
+  if (mode === 'protect-green' || skip?.reason === 'month-floor') {
+    return `Not taken. Month profit is ₹${mtd}. A 1-lot ${book.name || book.label} stop is larger, so the desk keeps that profit protected.`;
+  }
+  if (skip?.reason === 'stop-too-wide') {
+    return `Not taken. 1-lot stop (₹${Math.round(Number(skip.riskRs1) || 0)}) is wider than the 2% trade budget.`;
+  }
+  if (skip?.reason === 'day-risk-full') {
+    return `Not taken. Day stop budget is already spoken for.`;
+  }
+  if (skip?.detail) return `Not taken. ${skip.detail}`;
+  if (skip?.reason) return `Not taken. ${skip.reason}`;
+  return `Not taken.`;
+}
+
 function stampCoreBooks(books, allocation) {
   const core = new Set(['nifty', 'bank', 'crude']);
+  const month = allocation?.month || {};
   for (const b of books || []) {
     if (!core.has(b.id)) continue;
     const taken = (allocation.taken || []).filter((t) => t.bookId === b.id);
-    const skip = (allocation.skipped || []).find((s) => s.bookId === b.id);
+    const skip = lastSkipForBook(allocation, b.id);
     if (taken.length) {
-      b.status = 'funded';
-      b.why = `Funded ${taken.map((t) => `${t.instrumentName} ×${t.lots}`).join(', ')}`;
+      b.status = 'taken';
+      b.why = `Taken ×${taken.reduce((n, t) => n + (Number(t.lots) || 1), 0)}`;
+    } else if (b.id === 'crude') {
+      b.status = 'off';
+      b.why = 'Crude is off this desk.';
     } else if (skip) {
-      b.status = 'skipped';
-      b.why = skip.detail || skip.reason;
-      if (skip.reason === 'stop-too-wide' && b.id === 'bank') {
-        b.why +=
-          ' Bank 1-lot stop is typically ₹1,500–₹2,700 (50–90 pts × ₹30). 2% of ~₹30k is ~₹600, so Bank is listed here as skipped, not missing.';
-      }
-      if (skip.reason === 'stop-too-wide' && b.id === 'nifty') {
-        b.why +=
-          ' Nifty 1-lot stop is typically ₹1,300–₹2,275 (20–35 pts × ₹65). Raise capital if you want the index 1-lot.';
-      }
+      b.status = 'not-taken';
+      b.why = deskSkipWhy(b, skip, month);
     } else if (b.sitOut) {
-      b.status = 'sit-out';
+      b.status = 'off';
+      b.why = b.why || `${b.label} is off.`;
     } else if (!(b.trades || []).length) {
-      b.status = 'no-signal';
+      b.status = 'waiting';
+      b.why = `No ${b.label} print yet — after 09:30 the short straddle is the trade.`;
     } else {
-      b.status = 'scanned';
+      b.status = 'not-taken';
+      b.why = deskSkipWhy(b, skip, month);
     }
   }
   return books;

@@ -588,7 +588,22 @@ const led = instrumentLedger({
 assert.strictEqual(led[0].grossProfitRs, 400);
 assert.strictEqual(led[0].grossLossRs, 100);
 assert.strictEqual(led[0].netRs, 300);
-assert.strictEqual(led[0].status, 'funded');
+assert.strictEqual(led[0].status, 'taken');
+const skippedScan = instrumentLedger({
+  books: [
+    {
+      id: 'nifty',
+      label: 'NIFTY 50',
+      status: 'skipped',
+      why: 'Not taken. Month profit is ₹9.',
+      totals: { trades: 9, wins: 9, losses: 0, grossProfitRs: 55273, grossLossRs: 0, netRs: 55273 },
+    },
+    { id: 'bank', label: 'Bank Nifty', status: 'skipped', why: 'Not taken.' },
+  ],
+  trades: [],
+});
+assert.strictEqual(skippedScan.find((r) => r.id === 'nifty').netRs, 0);
+assert.ok(/Not taken/.test(skippedScan.find((r) => r.id === 'nifty').why));
 
 runDiscover(
   {
