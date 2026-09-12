@@ -119,7 +119,7 @@ class PaperDeskWorker {
     const books = plan.books || [];
     const out = [];
     for (const t of taken) {
-      if (t.bookId === 'stocks') continue;
+      if (t.bookId === 'stocks' || String(t.bookId || '').startsWith('stock:')) continue;
       const book = books.find((b) => b.id === t.bookId);
       if (!book || book.sitOut || !book.spec) continue;
       out.push({ taken: t, book });

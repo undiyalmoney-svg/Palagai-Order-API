@@ -15,11 +15,13 @@ const worker = new PaperDeskWorker({
         taken: [
           { bookId: 'nifty', lots: 1 },
           { bookId: 'stocks', lots: 4 },
+          { bookId: 'stock:RELIANCE', lots: 6 },
         ],
       },
       books: [
         { id: 'nifty', spec: { mode: 'fade', stopPts: 20 }, sitOut: false, token: 256265 },
         { id: 'stocks', spec: { family: 'inside-day' }, sitOut: false },
+        { id: 'stock:RELIANCE', spec: { family: 'inside-day' }, sitOut: false },
       ],
     },
   }),

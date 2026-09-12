@@ -90,8 +90,8 @@ const candles = [...train, ...test];
 
 const found = searchSpecs(candles, { trainFrom: '2026-08-01', trainTo: '2026-08-10', lots: 1 });
 assert.ok(found && found.spec && !found.sitOut);
-assert.ok(found.totals.trades >= 5);
-assert.ok(found.totals.profitFactor >= 1.5);
+assert.ok(found.totals.trades >= 4);
+assert.ok(found.totals.profitFactor >= 1.25);
 
 const testTrades = simulate(candles, found.spec, { fromDate: '2026-09-11', toDate: '2026-09-11', lots: 1 });
 assert.ok(testTrades.length >= 1);
@@ -265,7 +265,7 @@ const bigCap = allocateDesk({
   maxLots: 2,
   books: [
     { id: 'nifty', label: 'NIFTY 50', train: { optionNetAfterChargesRs: 12000, profitFactor: 2.3 }, trades: [wideNifty] },
-    { id: 'crude', label: 'Crude Oil Mini', train: { optionNetAfterChargesRs: 400, profitFactor: 1.3 }, trades: [cheapCrude] },
+    { id: 'crude', label: 'Crude Oil Mini', train: { optionNetAfterChargesRs: 400, profitFactor: 1.05 }, trades: [cheapCrude] },
   ],
 });
 assert.ok(bigCap.taken.some((t) => t.bookId === 'nifty' && t.lots >= 1));
@@ -297,6 +297,35 @@ assert.strictEqual(correlated.taken.length, 1);
 assert.strictEqual(correlated.taken[0].bookId, 'nifty');
 assert.ok(correlated.skipped.some((s) => s.reason === 'correlated-index' && s.bookId === 'bank'));
 
+const fourNames = [];
+for (const name of ['AAA', 'BBB', 'CCC', 'DDD']) {
+  fourNames.push({
+    ...cheapStock,
+    instrumentName: name,
+    entryTime: `2026-09-11T15:15:0${fourNames.length}+0530`,
+  });
+}
+const several = allocateDesk({
+  capitalRs: 40000,
+  maxLots: 2,
+  books: [
+    { id: 'stock:AAA', label: 'AAA', train: { optionNetAfterChargesRs: 2000, profitFactor: 1.4 }, trades: [fourNames[0]] },
+    { id: 'stock:BBB', label: 'BBB', train: { optionNetAfterChargesRs: 1800, profitFactor: 1.3 }, trades: [fourNames[1]] },
+    { id: 'stock:CCC', label: 'CCC', train: { optionNetAfterChargesRs: 1600, profitFactor: 1.5 }, trades: [fourNames[2]] },
+    { id: 'stock:DDD', label: 'DDD', train: { optionNetAfterChargesRs: 1400, profitFactor: 1.2 }, trades: [fourNames[3]] },
+    { id: 'crude', label: 'Crude Oil Mini', train: { optionNetAfterChargesRs: 4000, profitFactor: 2 }, trades: [cheapCrude] },
+  ],
+});
+assert.ok(several.taken.length >= 4, `expected several funded names, got ${several.taken.length}`);
+assert.ok(several.taken.some((t) => t.bookId === 'crude'));
+
+const oneStopTrain = [
+  ...train.filter((c) => !String(c.date).startsWith('2026-09-10')),
+  ...failThenRun('2026-09-10'),
+];
+const afterScratch = searchSpecs(oneStopTrain, { trainFrom: '2026-08-01', trainTo: '2026-09-10', lots: 1 });
+assert.ok(afterScratch && !afterScratch.sitOut, 'one recent red must not empty the index book');
+
 runDiscover(
   {
     authorization: 'token x',
@@ -317,7 +346,7 @@ runDiscover(
     assert.ok(out.books.some((b) => b.id === 'nifty' && b.totals.trades >= 1));
     assert.ok(out.books.some((b) => b.id === 'bank'));
     assert.ok(out.books.some((b) => b.id === 'crude'));
-    assert.ok(out.books.some((b) => b.id === 'stocks'));
+    assert.ok(out.books.some((b) => b.id === 'stocks' || String(b.id).startsWith('stock:')));
     assert.ok(out.stocks && Array.isArray(out.stocks.rows));
     assert.ok(out.stocks.scanned >= 1);
     assert.ok(out.allocation);
