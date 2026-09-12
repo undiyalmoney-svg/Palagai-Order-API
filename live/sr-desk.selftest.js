@@ -34,6 +34,12 @@ assert.strictEqual(mapped.entryHm, '10:15:00');
 assert.strictEqual(mapped.exitHm, '10:45:00');
 assert.strictEqual(mapped.entryClock, '10:15:00 AM');
 assert.strictEqual(mapped.exitClock, '10:45:00 AM');
+assert.strictEqual(mapped.indexEntry, 25000);
+assert.strictEqual(mapped.indexExit, 25020);
+assert.ok(mapped.entryPrice > 20 && mapped.entryPrice < 800, `nifty premium ${mapped.entryPrice}`);
+assert.ok(mapped.exitPrice > 20 && mapped.exitPrice < 900, `nifty exit prem ${mapped.exitPrice}`);
+assert.notStrictEqual(mapped.entryPrice, 25000);
+assert.strictEqual(mapped.premiumSource, 'bs_atm_weekly');
 
 const withSeconds = mapTrade(
   {
@@ -58,10 +64,6 @@ assert.strictEqual(withSeconds.entryClock, '10:15:37 AM');
 assert.strictEqual(withSeconds.exitClock, '10:45:08 AM');
 assert.strictEqual(withSeconds.entryTime, '2026-09-11T10:15:37+0530');
 assert.strictEqual(withSeconds.exitTime, '2026-09-11T10:45:08+0530');
-assert.strictEqual(mapped.entryPrice, 25000);
-assert.strictEqual(mapped.exitPrice, 25020);
-assert.strictEqual(mapped.indexEntry, 25000);
-assert.strictEqual(mapped.indexExit, 25020);
 assert.strictEqual(mapped.optionPnlRs, 1300);
 assert.strictEqual(mapped.netOptionPnlRs, 1280);
 assert.ok(!/straddle/i.test(mapped.optionSymbol));
@@ -109,6 +111,28 @@ assert.strictEqual(bankMapped.entryClock, '12:05:00 PM');
 assert.strictEqual(bankMapped.exitClock, '12:20:00 PM');
 assert.strictEqual(bankMapped.entryHm, '12:05:00');
 assert.strictEqual(bankMapped.exitHm, '12:20:00');
+assert.ok(bankMapped.entryPrice < 5000, `bank premium must not be index, got ${bankMapped.entryPrice}`);
+assert.strictEqual(bankMapped.indexEntry, 51234.5);
+
+const bankHigh = mapTrade(
+  {
+    date: '2026-09-11',
+    option: 'CE',
+    entryTime: '12:05',
+    exitTime: '12:20',
+    exitReason: 'TARGET',
+    entryPrice: 56142,
+    exitPrice: 56180,
+    points: 20,
+  },
+  BOOKS.banknifty,
+  1,
+  30,
+);
+assert.strictEqual(bankHigh.optionStrike, 56100);
+assert.ok(bankHigh.entryPrice !== 56142);
+assert.ok(bankHigh.entryPrice > 50 && bankHigh.entryPrice < 2500, `bank 56142 premium ${bankHigh.entryPrice}`);
+assert.strictEqual(bankHigh.indexEntry, 56142);
 
 runSrDesk(
   { authorization: 'token x', fromDate: '2026-09-11', toDate: '2026-09-11', lots: 1, capitalRs: 40000 },
@@ -119,7 +143,7 @@ runSrDesk(
     assert.strictEqual(out.strategy, STRATEGY_ID);
     assert.ok(/wall-break|S\/R/i.test(out.note));
     assert.ok(/only Nifty 50 and Bank Nifty/i.test(out.note));
-    assert.ok(!/sell ATM/i.test(out.note));
+    assert.ok(/option premium/i.test(out.note));
     assert.ok(out.instruments.every((r) => r.id === 'nifty' || r.id === 'bank'));
     assert.ok(!out.instruments.some((r) => r.id === 'crude'));
     assert.strictEqual(out.totals.netRs, 0);

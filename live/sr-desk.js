@@ -4,6 +4,7 @@
  * Not the straddle desk. Paper ₹ is index points × lot (same unit as the
  * measured OOS window). Live still buys one ATM CE or PE.
  */
+const { blackScholesPrice, realizedVolAnnualized } = require('./bs-option-pricer');
 const defaultMarket = require('./kite-market');
 const { runSrBreakout } = require('./sr-breakout');
 const {
@@ -26,6 +27,7 @@ const BOOKS = {
     token: '256265',
     unitsPerLot: LOT_UNITS.nifty,
     strikeStep: 50,
+    iv: 0.14,
     session: { entryStartHm: '09:45', entryEndHm: '14:30', squareOffHm: '15:15' },
     entryPts: 27,
     gapLo: 100,
@@ -39,6 +41,7 @@ const BOOKS = {
     token: '260105',
     unitsPerLot: LOT_UNITS.banknifty,
     strikeStep: 100,
+    iv: 0.18,
     session: { entryStartHm: '09:45', entryEndHm: '14:30', squareOffHm: '15:15' },
     entryPts: 60,
     gapLo: 275,
@@ -141,18 +144,74 @@ function asIstIso(stamp, date, hm) {
   return toIstIso(date, hm);
 }
 
-function mapTrade(t, book, lots, perPoint) {
+/** Next Tuesday after `iso` (skip same-day expiry, matching live). */
+function nextWeeklyExpiry(iso) {
+  const [y, mo, d] = String(iso || '').slice(0, 10).split('-').map(Number);
+  if (!y || !mo || !d) return null;
+  const dt = new Date(Date.UTC(y, mo - 1, d));
+  let add = (2 - dt.getUTCDay() + 7) % 7;
+  if (add === 0) add = 7;
+  dt.setUTCDate(dt.getUTCDate() + add);
+  return dt.toISOString().slice(0, 10);
+}
+
+function yearFracRemaining(dateIso, hm, expiryIso) {
+  const clock = padClock(hm) || '09:45:00';
+  const start = Date.parse(`${dateIso}T${clock}+05:30`);
+  const end = Date.parse(`${expiryIso}T15:30:00+05:30`);
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return 3 / 365.25;
+  const days = Math.max(0.02, (end - start) / 86400000);
+  return days / 365.25;
+}
+
+function dailyCloses(candles) {
+  const byDay = new Map();
+  for (const c of candles || []) {
+    const day = String(c.date || '').slice(0, 10);
+    const px = Number(c.close);
+    if (day && px > 0) byDay.set(day, px);
+  }
+  return [...byDay.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map((row) => row[1]);
+}
+
+function mapTrade(t, book, lots, perPoint, vol) {
   const pts = Number(t.points) || 0;
   const optionPnlRs = Math.round(pts * perPoint);
   const chargesRs = CHARGE_RS * Math.max(1, lots);
   const direction = t.option || (t.side === 'BUY' ? 'CE' : 'PE');
-  const entryPrice = t.entryPrice == null ? null : Number(t.entryPrice);
-  const exitPrice = t.exitPrice == null ? null : Number(t.exitPrice);
-  const optionStrike = atmStrike(entryPrice, book.strikeStep || (book.id === 'bank' ? 100 : 50));
+  const indexEntry = t.entryPrice == null ? null : Number(t.entryPrice);
+  const indexExit = t.exitPrice == null ? null : Number(t.exitPrice);
+  const optionStrike = atmStrike(indexEntry, book.strikeStep || (book.id === 'bank' ? 100 : 50));
   const selectedInstrument =
     optionStrike != null ? `${book.name} ${optionStrike} ${direction}` : `${book.name} ATM ${direction}`;
   const entryHm = clockFromStamp(t.entryAt, t.entryHm || t.entryTime || '09:45');
   const exitHm = t.exitAt || t.exitTime || t.exitHm ? clockFromStamp(t.exitAt, t.exitHm || t.exitTime) : '';
+  const expiry = nextWeeklyExpiry(t.date);
+  const iv = Number(vol) > 0 ? Number(vol) : Number(book.iv) || 0.14;
+  let optionEntryPremium = null;
+  let optionExitPremium = null;
+  if (indexEntry != null && optionStrike != null && expiry) {
+    optionEntryPremium = blackScholesPrice(
+      indexEntry,
+      optionStrike,
+      yearFracRemaining(t.date, entryHm, expiry),
+      iv,
+      0.065,
+      direction,
+    );
+    if (indexExit != null && exitHm) {
+      optionExitPremium = blackScholesPrice(
+        indexExit,
+        optionStrike,
+        yearFracRemaining(t.date, exitHm, expiry),
+        iv,
+        0.065,
+        direction,
+      );
+    }
+  }
   return {
     instrumentName: book.name,
     instrumentId: book.id,
@@ -170,10 +229,14 @@ function mapTrade(t, book, lots, perPoint) {
     exitTime: exitHm ? asIstIso(t.exitAt, t.date, exitHm) : null,
     exitReason: t.exitReason,
     open: t.exitReason === 'CLOSE' && !!t.openAtFill,
-    entryPrice,
-    exitPrice,
-    indexEntry: entryPrice,
-    indexExit: exitPrice,
+    entryPrice: optionEntryPremium,
+    exitPrice: optionExitPremium,
+    optionEntryPremium,
+    optionExitPremium,
+    indexEntry,
+    indexExit,
+    expiry,
+    premiumSource: optionEntryPremium != null ? 'bs_atm_weekly' : null,
     indexPoints: pts,
     optionPnlRs,
     netOptionPnlRs: optionPnlRs - chargesRs,
@@ -262,7 +325,9 @@ async function runSrDesk({ authorization, fromDate, toDate, lots, capitalRs }, d
         ...book.session,
         ...exitOptsFor(book.key, L),
       });
-      const mapped = (trades || []).map((t) => mapTrade(t, book, L, perPoint));
+      const closes = dailyCloses(candles);
+      const iv = realizedVolAnnualized(closes, closes.length - 1, 20);
+      const mapped = (trades || []).map((t) => mapTrade(t, book, L, perPoint, iv));
       allTrades.push(...mapped);
       booksOut.push({
         id: book.id,
@@ -330,7 +395,7 @@ async function runSrDesk({ authorization, fromDate, toDate, lots, capitalRs }, d
     books: booksOut,
     coreBooks: booksOut.filter((b) => b.id === 'nifty' || b.id === 'bank' || b.id === 'crude'),
     note:
-      'This desk trades only Nifty 50 and Bank Nifty (S/R wall-break, with-trend). No Crude, no stocks. Paper ₹ is index points × lot. Day brake ±₹3,500. Live buys one ATM CE or PE. Crude stays off.',
+      'This desk trades only Nifty 50 and Bank Nifty (S/R wall-break, with-trend). No Crude, no stocks. Paper ₹ is index points × lot. Entry/exit prices are the ATM weekly option premium (modeled), not the index. Day brake ±₹3,500. Live buys one ATM CE or PE. Crude stays off.',
     instruments: booksOut
       .filter((b) => b.id === 'nifty' || b.id === 'bank')
       .map((b) => instrumentRow({ id: b.id, name: b.label }, b.trades || [])),
@@ -359,6 +424,7 @@ module.exports = {
   runSrDesk,
   mapTrade,
   atmStrike,
+  nextWeeklyExpiry,
   formatClock12,
   summarize,
 };
