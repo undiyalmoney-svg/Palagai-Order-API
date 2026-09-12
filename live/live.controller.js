@@ -84,7 +84,7 @@ async function funds(req, res) {
   const { fetchUserMargins } = require('./kite-market');
   try {
     const out = await fetchUserMargins(authorization);
-    res.json({ status: 'ok', ...out });
+    res.json({ status: 'ok', fetchedAt: new Date().toISOString(), ...out });
   } catch (err) {
     res.status(400).json({ status: 'error', message: err.message || String(err) });
   }

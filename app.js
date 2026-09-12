@@ -29,6 +29,14 @@ app.use(
       callback(new Error(`CORS blocked for origin: ${origin}`));
     },
     credentials: true,
+    allowedHeaders: [
+      'Accept',
+      'Authorization',
+      'Content-Type',
+      'X-Kite-Authorization',
+      'X-Kite-Authorisation',
+      'X-Vault-Password',
+    ],
   }),
 );
 app.use(morgan('combined'));

@@ -71,6 +71,7 @@ assert.match(ctrl, /paper-desk|or-failure|opening-range|Nifty, Bank/);
 assert.match(ctrl, /capitalRs: body\.capitalRs/);
 assert.match(ctrl, /engine: 'paper-desk'/);
 assert.match(ctrl, /async function funds/);
+assert.match(ctrl, /fetchedAt/);
 assert.doesNotMatch(ctrl, /not wired to the paper desk/);
 
 const store = fs.readFileSync(path.join(__dirname, 'live.store.js'), 'utf8');
