@@ -100,6 +100,7 @@ function mapTrade(t, book, lots, perPoint) {
     instrumentId: book.id,
     selectedInstrument,
     side: 'BUY',
+    sideLabel: `${direction} BUY`,
     direction,
     optionSymbol: `${selectedInstrument} (index×lot)`,
     entryTime: `${t.date}T${t.entryTime || '09:45'}:00+0530`,

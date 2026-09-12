@@ -26,6 +26,7 @@ const mapped = mapTrade(
 );
 assert.strictEqual(mapped.direction, 'CE');
 assert.strictEqual(mapped.selectedInstrument, 'Nifty 50 ATM CE');
+assert.strictEqual(mapped.sideLabel, 'CE BUY');
 assert.strictEqual(mapped.entryTime, '2026-09-11T10:15:00+0530');
 assert.strictEqual(mapped.exitTime, '2026-09-11T10:45:00+0530');
 assert.strictEqual(mapped.entryPrice, 25000);
