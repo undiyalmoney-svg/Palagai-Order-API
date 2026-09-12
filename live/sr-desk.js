@@ -91,18 +91,25 @@ function mapTrade(t, book, lots, perPoint) {
   const pts = Number(t.points) || 0;
   const optionPnlRs = Math.round(pts * perPoint);
   const chargesRs = CHARGE_RS * Math.max(1, lots);
+  const direction = t.option || (t.side === 'BUY' ? 'CE' : 'PE');
+  const selectedInstrument = `${book.name} ATM ${direction}`;
+  const entryPrice = t.entryPrice == null ? null : Number(t.entryPrice);
+  const exitPrice = t.exitPrice == null ? null : Number(t.exitPrice);
   return {
     instrumentName: book.name,
     instrumentId: book.id,
+    selectedInstrument,
     side: 'BUY',
-    direction: t.option || (t.side === 'BUY' ? 'CE' : 'PE'),
-    optionSymbol: `${book.name} ATM ${t.option || 'CE'} (index×lot)`,
+    direction,
+    optionSymbol: `${selectedInstrument} (index×lot)`,
     entryTime: `${t.date}T${t.entryTime || '09:45'}:00+0530`,
     exitTime: t.exitTime ? `${t.date}T${t.exitTime}:00+0530` : null,
     exitReason: t.exitReason,
     open: t.exitReason === 'CLOSE' && !!t.openAtFill,
-    indexEntry: t.entryPrice,
-    indexExit: t.exitPrice,
+    entryPrice,
+    exitPrice,
+    indexEntry: entryPrice,
+    indexExit: exitPrice,
     indexPoints: pts,
     optionPnlRs,
     netOptionPnlRs: optionPnlRs - chargesRs,
@@ -259,7 +266,7 @@ async function runSrDesk({ authorization, fromDate, toDate, lots, capitalRs }, d
     books: booksOut,
     coreBooks: booksOut.filter((b) => b.id === 'nifty' || b.id === 'bank' || b.id === 'crude'),
     note:
-      'New desk: Nifty + Bank S/R wall-break (with-trend). Paper ₹ is index points × lot — the same unit as the walk-forward test (Nifty OOS about ₹4.3L / PF 17 on 2025-07..2026-09). Day brake ±₹3,500. Live buys one ATM CE or PE. Crude stays off.',
+      'This desk trades only Nifty 50 and Bank Nifty (S/R wall-break, with-trend). No Crude, no stocks. Paper ₹ is index points × lot. Day brake ±₹3,500. Live buys one ATM CE or PE. Crude stays off.',
     instruments: booksOut
       .filter((b) => b.id === 'nifty' || b.id === 'bank')
       .map((b) => instrumentRow({ id: b.id, name: b.label }, b.trades || [])),

@@ -603,7 +603,12 @@ async function pickFreshLiveEntry(session, authorization, spec, key, trades, hm,
         (option.expiry ? ` exp ${option.expiry}` : '') +
         (rolled ? ' (next expiry — skipped today)' : ''),
     );
-    pushEvent(session, 'SIGNAL', `${t.entryTime} ${spec.name} ${fut ? 'FUT ' + t.side : intent.optionType} — Kite ${tx} + SL`);
+    pushEvent(
+      session,
+      'SIGNAL',
+      `${t.entryTime} ${spec.name} enter ${option.tradingSymbol || spec.name}` +
+        ` @ ${t.entryPrice} — Kite ${tx} + SL`,
+    );
     session.entered.add(id);
     session.openSignal.set(spec.bookId, id);
     return {
@@ -718,7 +723,12 @@ async function onTick(session) {
                 vehicle: current.vehicle || spec.vehicle || 'option',
               };
             } else if (act === 'exit') {
-              pushEvent(session, 'SIGNAL', `${spec.name} exit · ${tracked.exitReason} at ${tracked.exitTime}`);
+              pushEvent(
+                session,
+                'SIGNAL',
+                `${spec.name} exit · ${tracked.exitReason} at ${tracked.exitTime}` +
+                  ` ${current.tradingSymbol || ''} ${tracked.entryPrice} → ${tracked.exitPrice}`,
+              );
               session.openSignal.delete(bookId);
             }
           } else if (hm >= spec.session.squareOffHm || (trades.length > 0 && !engineBookHasOpenTrade(trades, hm))) {
