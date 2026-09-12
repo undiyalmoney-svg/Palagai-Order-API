@@ -68,6 +68,7 @@ const ctrl = fs.readFileSync(path.join(__dirname, 'live.controller.js'), 'utf8')
 assert.match(ctrl, /runDiscover/);
 assert.doesNotMatch(ctrl, /runBacktest/);
 assert.match(ctrl, /paper-desk|or-failure|opening-range|Nifty, Bank/);
+assert.match(ctrl, /capitalRs: body\.capitalRs/);
 
 const store = fs.readFileSync(path.join(__dirname, 'live.store.js'), 'utf8');
 assert.doesNotMatch(store, /Auto Bot retired/);

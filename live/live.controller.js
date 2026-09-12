@@ -171,6 +171,7 @@ async function start(req, res) {
     fromDate: window.fromDate,
     toDate: window.toDate,
     lots: body.lots || body.niftyLots || 1,
+    capitalRs: body.capitalRs || body.capital,
   });
   res.json({
     ...out,

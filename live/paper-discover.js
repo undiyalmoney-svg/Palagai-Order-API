@@ -8,6 +8,8 @@
  * Intraday family: opening-range fade OR hold (walk-forward picks per book).
  * Stocks: inside-day breakout on NSE daily.
  * A book that cannot show a walk-forward edge sits out (no forced trades).
+ * After the scan, capital allocates: 2% stop per trade, 4% day stop. Wide
+ * 1-lot index stops are skipped so crude/stocks can take the risk budget.
  */
 
 const defaultMarket = require('./kite-market');
@@ -24,6 +26,10 @@ const STOCK_LOOKBACK_CAL_DAYS = 90;
 const CHARGE_RS = 20;
 const MAX_STOCK_TRADES = 8;
 const MAX_STOCK_SCAN = 30;
+const DEFAULT_CAPITAL_RS = 40000;
+const RISK_PER_TRADE_PCT = 0.02;
+const DAY_RISK_PCT = 0.04;
+const STOCK_NAME_CAPITAL_FRAC = 0.25;
 const LIQUID_STOCKS = [
   'RELIANCE',
   'HDFCBANK',
@@ -195,6 +201,8 @@ function closeTrade(open, exitBar, reason, lots, book) {
     liveWouldTake: true,
     pnlSource: 'index_x_lot',
     spec: open.spec,
+    lots: L,
+    riskRs1: Math.max(0, Number(open.spec?.stopPts) || 0) * book.lotSize,
   };
 }
 
@@ -331,6 +339,207 @@ function scoreStockTrades(trades) {
   return s.optionNetAfterChargesRs + s.wins * 10;
 }
 
+function scaleClosedTrade(t, lots) {
+  const from = Math.max(1, Number(t.lots) || 1);
+  const to = Math.max(1, Math.floor(Number(lots)) || 1);
+  const r = to / from;
+  const optionPnlRs = (Number(t.optionPnlRs) || 0) * r;
+  const chargesRs = (Number(t.chargesRs) || 0) * r;
+  return {
+    ...t,
+    lots: to,
+    optionPnlRs,
+    chargesRs,
+    netOptionPnlRs: optionPnlRs - chargesRs,
+    allocated: true,
+    liveWouldTake: true,
+  };
+}
+
+function tradeRiskRs1(t) {
+  const tagged = Number(t?.riskRs1);
+  if (tagged > 0) return tagged;
+  const lots = Math.max(1, Number(t?.lots) || 1);
+  const stopPts = Math.abs(Number(t?.spec?.stopPts) || 0);
+  if (stopPts > 0 && t?.pnlSource === 'index_x_lot') {
+    const units = Math.abs(Number(t.optionPnlRs) || 0) / Math.max(0.0001, Math.abs(Number(t.indexPoints) || 0) * lots);
+    return stopPts * units;
+  }
+  if (t?.pnlSource === 'cash_shares') {
+    return Math.abs((Number(t.indexEntry) || 0) - (Number(t.indexExit) || 0)) || 1;
+  }
+  return 0;
+}
+
+function edgePerRisk(c) {
+  return (Number(c.trainScore) || 0) / Math.max(1, Number(c.riskRs1) || 1);
+}
+
+/**
+ * Scan is 1-lot. Capital then picks vehicles: 2% stop budget per trade,
+ * 4% stop budget for the day. Index 1-lot stops that do not fit are skipped
+ * (no forced Nifty/Bank). Stocks/crude size up when the stop is cheap.
+ * Same-day Nifty + Bank in the same CE/PE keep the stronger walk-forward book.
+ */
+function allocateDesk({
+  books = [],
+  capitalRs = DEFAULT_CAPITAL_RS,
+  maxLots = 1,
+  riskPerTradePct = RISK_PER_TRADE_PCT,
+  dayRiskPct = DAY_RISK_PCT,
+} = {}) {
+  const capital = Math.max(10_000, Math.floor(Number(capitalRs) || DEFAULT_CAPITAL_RS));
+  const lotCap = Math.max(1, Math.floor(Number(maxLots) || 1));
+  const perTrade = capital * riskPerTradePct;
+  const dayBudget = capital * dayRiskPct;
+  const raw = [];
+  for (const book of books || []) {
+    const trainScore = Number(book.train?.optionNetAfterChargesRs) || 0;
+    const trainPf = Number(book.train?.profitFactor) || 0;
+    for (const t of book.trades || []) {
+      raw.push({
+        trade: t,
+        bookId: book.id,
+        bookLabel: book.label || book.id,
+        trainScore,
+        trainPf,
+        riskRs1: tradeRiskRs1(t),
+      });
+    }
+  }
+
+  const fundable = [];
+  const skipped = [];
+
+  for (const c of raw) {
+    const risk1 = Number(c.riskRs1) || 0;
+    if (!(risk1 > 0)) {
+      skipped.push({
+        instrumentName: c.trade.instrumentName,
+        bookId: c.bookId,
+        direction: c.trade.direction,
+        riskRs1: 0,
+        reason: 'no-stop',
+        detail: 'No measurable stop — skipped',
+      });
+      continue;
+    }
+    let lots = Math.floor(perTrade / risk1);
+    if (c.bookId === 'stocks' || c.trade.pnlSource === 'cash_shares') {
+      const entry = Math.abs(Number(c.trade.indexEntry) || 0);
+      if (entry > 0) {
+        const maxShares = Math.floor((capital * STOCK_NAME_CAPITAL_FRAC) / entry);
+        lots = Math.min(lots, Math.max(0, maxShares));
+      }
+    } else {
+      lots = Math.min(lots, lotCap);
+    }
+    if (lots < 1) {
+      skipped.push({
+        instrumentName: c.trade.instrumentName,
+        bookId: c.bookId,
+        direction: c.trade.direction,
+        riskRs1: Math.round(risk1),
+        reason: 'stop-too-wide',
+        detail: `1-lot stop ₹${Math.round(risk1)} > 2% of capital ₹${Math.round(perTrade)}`,
+      });
+      continue;
+    }
+    fundable.push({ ...c, lots, risk1 });
+  }
+
+  const indexIds = new Set(['nifty', 'bank']);
+  const winners = new Map();
+  const dropped = new Set();
+  for (const c of fundable) {
+    if (!indexIds.has(c.bookId)) continue;
+    const key = `${String(c.trade.entryTime || '').slice(0, 10)}|${c.trade.direction || ''}`;
+    const prev = winners.get(key);
+    if (!prev) {
+      winners.set(key, c);
+      continue;
+    }
+    if (edgePerRisk(c) > edgePerRisk(prev) || (edgePerRisk(c) === edgePerRisk(prev) && c.trainScore > prev.trainScore)) {
+      dropped.add(prev);
+      winners.set(key, c);
+    } else {
+      dropped.add(c);
+    }
+  }
+  for (const c of dropped) {
+    skipped.push({
+      instrumentName: c.trade.instrumentName,
+      bookId: c.bookId,
+      direction: c.trade.direction,
+      riskRs1: Math.round(c.riskRs1),
+      reason: 'correlated-index',
+      detail: 'Same-day Nifty and Bank same CE/PE — kept the stronger walk-forward book',
+    });
+  }
+
+  const pool = fundable.filter((c) => !dropped.has(c));
+  pool.sort((a, b) => {
+    const d = edgePerRisk(b) - edgePerRisk(a);
+    if (d) return d;
+    return (b.trainPf || 0) - (a.trainPf || 0);
+  });
+
+  const taken = [];
+  let dayRiskUsed = 0;
+
+  for (const c of pool) {
+    let lots = c.lots;
+    let risk = lots * c.risk1;
+    while (lots >= 1 && dayRiskUsed + risk > dayBudget + 1e-6) {
+      lots -= 1;
+      risk = lots * c.risk1;
+    }
+    if (lots < 1) {
+      skipped.push({
+        instrumentName: c.trade.instrumentName,
+        bookId: c.bookId,
+        direction: c.trade.direction,
+        riskRs1: Math.round(c.risk1),
+        reason: 'day-risk-full',
+        detail: `Day stop budget ₹${Math.round(dayBudget)} already used ₹${Math.round(dayRiskUsed)}`,
+      });
+      continue;
+    }
+    dayRiskUsed += risk;
+    taken.push({
+      ...scaleClosedTrade(c.trade, lots),
+      skipReason: undefined,
+      allocation: {
+        bookId: c.bookId,
+        lots,
+        riskRs: Math.round(risk),
+        trainScore: Math.round(c.trainScore),
+      },
+    });
+  }
+
+  taken.sort((a, b) => String(a.entryTime).localeCompare(String(b.entryTime)));
+  return {
+    capitalRs: capital,
+    maxLots: lotCap,
+    riskPerTradePct,
+    dayRiskPct,
+    riskPerTradeRs: Math.round(perTrade),
+    dayRiskRs: Math.round(dayBudget),
+    dayRiskUsedRs: Math.round(dayRiskUsed),
+    taken: taken.map((t) => ({
+      instrumentName: t.instrumentName,
+      bookId: t.allocation?.bookId,
+      direction: t.direction,
+      lots: t.lots,
+      riskRs: t.allocation?.riskRs,
+    })),
+    skipped,
+    trades: taken,
+    totals: summarize(taken),
+  };
+}
+
 function searchSpecs(bars, { trainFrom, trainTo, lots, book } = {}) {
   const profile = book || BOOKS.nifty;
   const grid = specGrid(profile);
@@ -415,6 +624,8 @@ function simulateInsideDay(bars, spec, { fromDate, toDate, lots, symbol } = {}) 
       liveWouldTake: true,
       pnlSource: 'cash_shares',
       spec,
+      lots: L,
+      riskRs1: Math.abs(entry - stop),
     });
   }
   return trades;
@@ -514,14 +725,16 @@ async function loadStocks(fromDate, toDate, lots, deps) {
 }
 
 
-async function runDiscover({ authorization, fromDate, toDate, lots }, deps = {}) {
+async function runDiscover({ authorization, fromDate, toDate, lots, capitalRs }, deps = {}) {
   if (!fromDate || !toDate || fromDate > toDate) {
     const err = new Error('Valid fromDate ≤ toDate (YYYY-MM-DD) required');
     err.status = 400;
     throw err;
   }
   const market = deps.market || defaultMarket;
-  const L = Math.max(1, Math.floor(Number(lots)) || 1);
+  const maxLots = Math.max(1, Math.floor(Number(lots)) || 1);
+  const capital = Math.max(10_000, Math.floor(Number(capitalRs) || DEFAULT_CAPITAL_RS));
+  const L = 1;
   const warmFrom = addDaysIso(fromDate, -LOOKBACK_CAL_DAYS);
   const trainTo = addDaysIso(fromDate, -1);
   const stockFrom = addDaysIso(fromDate, -STOCK_LOOKBACK_CAL_DAYS);
@@ -640,8 +853,9 @@ async function runDiscover({ authorization, fromDate, toDate, lots }, deps = {})
   }
 
   allTrades.sort((a, b) => String(a.entryTime).localeCompare(String(b.entryTime)));
-  const totals = summarize(allTrades);
-  const active = books.filter((b) => !b.sitOut && (b.totals?.trades || 0) > 0);
+  const allocation = allocateDesk({ books, capitalRs: capital, maxLots });
+  const totals = allocation.totals;
+  const takenTrades = allocation.trades;
 
   return {
     fromDate,
@@ -649,7 +863,12 @@ async function runDiscover({ authorization, fromDate, toDate, lots }, deps = {})
     engine: ENGINE,
     strategy: STRATEGY_FAMILY,
     skipped: RETIRED_FAMILIES,
-    specText: active.map((b) => b.specText).filter(Boolean).join(' · ') || 'Desk sat out',
+    capitalRs: capital,
+    maxLots,
+    allocation,
+    specText: allocation.taken.length
+      ? allocation.taken.map((t) => `${t.instrumentName} ×${t.lots}`).join(' · ')
+      : 'Capital sat out (scan had setups the 2%/4% stop budget would not fund)',
     books,
     stocks: stockPayload,
     train: {
@@ -658,13 +877,16 @@ async function runDiscover({ authorization, fromDate, toDate, lots }, deps = {})
       totals: summarize(books.flatMap((b) => b.trainTrades || [])),
     },
     note:
-      'Desk (not Genie): Nifty + Bank + Crude Mini on Kite 5m, plus liquid Nifty-100 stocks on free NSE daily. Each book walk-forwards OR-fade vs OR-hold (stocks: inside-day). No edge in the lookback → that book sits out. ₹ for index/crude = points × lot units × lots (ATM/fut proxy). Stock ₹ = rupee move × lots. Live money is not attached yet.',
+      'Scan every book (Nifty, Bank, Crude Mini, Nifty-100 stocks). Capital then funds the stop: 2% of capital per trade, 4% for the day. A 1-lot index stop that does not fit is skipped — crude or stocks can take the slot when cheaper. Same-day Nifty+Bank same CE/PE keeps one book. This is risk allocation, not a profit guarantee. Live money is not attached yet.',
+    scanTotals: summarize(allTrades),
     totals,
     liveTotals: totals,
-    trades: allTrades.map((t) => ({ ...t, liveWouldTake: true })),
-    message: allTrades.length
+    trades: takenTrades,
+    message: takenTrades.length
       ? undefined
-      : 'No book had a qualified setup on this date (weekend, sit-out, or no OR/inside-day). Pick a session day.',
+      : allTrades.length
+        ? 'Scan found setups, but capital would not fund any 1-lot stop (raise capital, or the cheap book had no signal).'
+        : 'No book had a qualified setup on this date (weekend, sit-out, or no OR/inside-day). Pick a session day.',
   };
 }
 
@@ -676,6 +898,9 @@ module.exports = {
   NIFTY_TOKEN,
   BANK_TOKEN,
   LIQUID_STOCKS,
+  DEFAULT_CAPITAL_RS,
+  RISK_PER_TRADE_PCT,
+  DAY_RISK_PCT,
   addDaysIso,
   specGrid,
   simulate,
@@ -683,6 +908,8 @@ module.exports = {
   summarize,
   searchSpecs,
   searchInsideDay,
+  allocateDesk,
+  scaleClosedTrade,
   runDiscover,
   describeSpec,
   pickCrudeMiniFromCsv,

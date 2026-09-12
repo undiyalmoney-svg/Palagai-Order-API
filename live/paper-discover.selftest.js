@@ -7,6 +7,7 @@ const {
   runDiscover,
   simulateInsideDay,
   searchInsideDay,
+  allocateDesk,
   ENGINE,
   STRATEGY_FAMILY,
   RETIRED_FAMILIES,
@@ -120,6 +121,98 @@ const stockDay = simulateInsideDay(daily, stockFound.spec, {
   symbol: 'RELIANCE',
 });
 assert.ok(stockDay.length >= 1);
+assert.ok(stockDay[0].riskRs1 > 0);
+
+const cheapStock = {
+  instrumentName: 'HINDUNILVR',
+  instrumentId: 'stock',
+  direction: 'LONG',
+  entryTime: '2026-09-11T15:15:00+0530',
+  optionPnlRs: 8,
+  chargesRs: 1,
+  netOptionPnlRs: 7,
+  lots: 1,
+  riskRs1: 10,
+  indexEntry: 2500,
+  pnlSource: 'cash_shares',
+};
+const wideNifty = {
+  instrumentName: 'NIFTY 50',
+  instrumentId: 'nifty',
+  direction: 'PE',
+  entryTime: '2026-09-11T09:40:00+0530',
+  optionPnlRs: -1300,
+  chargesRs: 20,
+  netOptionPnlRs: -1320,
+  lots: 1,
+  riskRs1: 1300,
+  spec: { stopPts: 20 },
+  pnlSource: 'index_x_lot',
+};
+const wideBank = {
+  instrumentName: 'Bank Nifty',
+  instrumentId: 'bank',
+  direction: 'PE',
+  entryTime: '2026-09-11T09:41:00+0530',
+  optionPnlRs: -2700,
+  chargesRs: 20,
+  netOptionPnlRs: -2720,
+  lots: 1,
+  riskRs1: 2700,
+  spec: { stopPts: 90 },
+  pnlSource: 'index_x_lot',
+};
+const cheapCrude = {
+  instrumentName: 'Crude Oil Mini',
+  instrumentId: 'crude',
+  direction: 'CE',
+  entryTime: '2026-09-11T17:05:00+0530',
+  optionPnlRs: 80,
+  chargesRs: 20,
+  netOptionPnlRs: 60,
+  lots: 1,
+  riskRs1: 80,
+  spec: { stopPts: 8 },
+  pnlSource: 'index_x_lot',
+};
+
+const smallCap = allocateDesk({
+  capitalRs: 40000,
+  maxLots: 2,
+  books: [
+    { id: 'nifty', label: 'NIFTY 50', train: { optionNetAfterChargesRs: 12000, profitFactor: 2.3 }, trades: [wideNifty] },
+    { id: 'bank', label: 'Bank Nifty', train: { optionNetAfterChargesRs: 8000, profitFactor: 1.8 }, trades: [wideBank] },
+    { id: 'crude', label: 'Crude Oil Mini', train: { optionNetAfterChargesRs: 4000, profitFactor: 2 }, trades: [cheapCrude] },
+    { id: 'stocks', label: 'stocks', train: { optionNetAfterChargesRs: 1500, profitFactor: 1.4 }, trades: [cheapStock] },
+  ],
+});
+assert.ok(smallCap.skipped.some((s) => s.bookId === 'nifty' && s.reason === 'stop-too-wide'));
+assert.ok(smallCap.skipped.some((s) => s.bookId === 'bank' && s.reason === 'stop-too-wide'));
+assert.ok(smallCap.taken.some((t) => t.bookId === 'crude'));
+assert.ok(smallCap.taken.some((t) => t.bookId === 'stocks'));
+assert.ok(!smallCap.taken.some((t) => t.bookId === 'nifty'));
+
+const bigCap = allocateDesk({
+  capitalRs: 200000,
+  maxLots: 2,
+  books: [
+    { id: 'nifty', label: 'NIFTY 50', train: { optionNetAfterChargesRs: 12000, profitFactor: 2.3 }, trades: [wideNifty] },
+    { id: 'crude', label: 'Crude Oil Mini', train: { optionNetAfterChargesRs: 400, profitFactor: 1.3 }, trades: [cheapCrude] },
+  ],
+});
+assert.ok(bigCap.taken.some((t) => t.bookId === 'nifty' && t.lots >= 1));
+
+const correlated = allocateDesk({
+  capitalRs: 400000,
+  maxLots: 1,
+  books: [
+    { id: 'nifty', label: 'NIFTY 50', train: { optionNetAfterChargesRs: 20000, profitFactor: 2.5 }, trades: [wideNifty] },
+    { id: 'bank', label: 'Bank Nifty', train: { optionNetAfterChargesRs: 5000, profitFactor: 1.5 }, trades: [wideBank] },
+  ],
+});
+assert.strictEqual(correlated.taken.length, 1);
+assert.strictEqual(correlated.taken[0].bookId, 'nifty');
+assert.ok(correlated.skipped.some((s) => s.reason === 'correlated-index' && s.bookId === 'bank'));
 
 runDiscover(
   {
@@ -127,6 +220,7 @@ runDiscover(
     fromDate: '2026-09-11',
     toDate: '2026-09-11',
     lots: 1,
+    capitalRs: 40000,
   },
   {
     candlesByBook: { nifty: candles, bank: [], crude: [] },
@@ -142,10 +236,18 @@ runDiscover(
     assert.ok(out.books.some((b) => b.id === 'stocks'));
     assert.ok(out.stocks && Array.isArray(out.stocks.rows));
     assert.ok(out.stocks.scanned >= 1);
-    assert.ok(out.totals.trades >= 1);
+    assert.ok(out.allocation);
+    assert.strictEqual(out.capitalRs, 40000);
+    assert.ok(out.scanTotals.trades >= 1);
+    assert.ok(
+      out.allocation.skipped.some((s) => s.bookId === 'nifty' && s.reason === 'stop-too-wide') ||
+        out.trades.every((t) => t.instrumentId === 'stock'),
+    );
+    assert.ok(out.trades.every((t) => t.allocated));
     console.log(
       'paper-discover.selftest: ok',
       out.totals,
+      out.allocation.taken.map((t) => `${t.bookId}x${t.lots}`).join(','),
       out.books.map((b) => `${b.id}:${b.sitOut ? 'sit' : b.totals.trades}`).join(','),
     );
   })
