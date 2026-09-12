@@ -25,7 +25,8 @@ const mapped = mapTrade(
   65,
 );
 assert.strictEqual(mapped.direction, 'CE');
-assert.strictEqual(mapped.selectedInstrument, 'Nifty 50 ATM CE');
+assert.strictEqual(mapped.selectedInstrument, 'Nifty 50 25000 CE');
+assert.strictEqual(mapped.optionStrike, 25000);
 assert.strictEqual(mapped.sideLabel, 'CE BUY');
 assert.strictEqual(mapped.entryTime, '2026-09-11T10:15:00+0530');
 assert.strictEqual(mapped.exitTime, '2026-09-11T10:45:00+0530');
@@ -37,6 +38,45 @@ assert.strictEqual(mapped.optionPnlRs, 1300);
 assert.strictEqual(mapped.netOptionPnlRs, 1280);
 assert.ok(!/straddle/i.test(mapped.optionSymbol));
 assert.deepStrictEqual(Object.keys(BOOKS).sort(), ['banknifty', 'nifty']);
+assert.strictEqual(BOOKS.nifty.strikeStep, 50);
+assert.strictEqual(BOOKS.banknifty.strikeStep, 100);
+
+const nearAtm = mapTrade(
+  {
+    date: '2026-09-11',
+    option: 'CE',
+    entryTime: '10:15',
+    exitTime: '10:45',
+    exitReason: 'TARGET',
+    entryPrice: 24024,
+    exitPrice: 24044,
+    points: 20,
+  },
+  BOOKS.nifty,
+  1,
+  65,
+);
+assert.strictEqual(nearAtm.optionStrike, 24000);
+assert.strictEqual(nearAtm.selectedInstrument, 'Nifty 50 24000 CE');
+
+const bankMapped = mapTrade(
+  {
+    date: '2026-09-11',
+    option: 'PE',
+    entryTime: '12:05',
+    exitTime: '12:20',
+    exitReason: 'TARGET',
+    entryPrice: 51234.5,
+    exitPrice: 51190,
+    points: 20,
+  },
+  BOOKS.banknifty,
+  1,
+  30,
+);
+assert.strictEqual(bankMapped.optionStrike, 51200);
+assert.strictEqual(bankMapped.selectedInstrument, 'Bank Nifty 51200 PE');
+assert.strictEqual(bankMapped.sideLabel, 'PE BUY');
 
 runSrDesk(
   { authorization: 'token x', fromDate: '2026-09-11', toDate: '2026-09-11', lots: 1, capitalRs: 40000 },

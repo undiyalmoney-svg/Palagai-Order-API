@@ -25,6 +25,7 @@ const BOOKS = {
     name: 'Nifty 50',
     token: '256265',
     unitsPerLot: LOT_UNITS.nifty,
+    strikeStep: 50,
     session: { entryStartHm: '09:45', entryEndHm: '14:30', squareOffHm: '15:15' },
     entryPts: 27,
     gapLo: 100,
@@ -37,6 +38,7 @@ const BOOKS = {
     name: 'Bank Nifty',
     token: '260105',
     unitsPerLot: LOT_UNITS.banknifty,
+    strikeStep: 100,
     session: { entryStartHm: '09:45', entryEndHm: '14:30', squareOffHm: '15:15' },
     entryPts: 60,
     gapLo: 275,
@@ -87,18 +89,28 @@ function summarize(trades) {
   };
 }
 
+function atmStrike(price, step) {
+  const px = Number(price);
+  const st = Number(step);
+  if (!Number.isFinite(px) || px <= 0 || !Number.isFinite(st) || st <= 0) return null;
+  return Math.round(px / st) * st;
+}
+
 function mapTrade(t, book, lots, perPoint) {
   const pts = Number(t.points) || 0;
   const optionPnlRs = Math.round(pts * perPoint);
   const chargesRs = CHARGE_RS * Math.max(1, lots);
   const direction = t.option || (t.side === 'BUY' ? 'CE' : 'PE');
-  const selectedInstrument = `${book.name} ATM ${direction}`;
   const entryPrice = t.entryPrice == null ? null : Number(t.entryPrice);
   const exitPrice = t.exitPrice == null ? null : Number(t.exitPrice);
+  const optionStrike = atmStrike(entryPrice, book.strikeStep || (book.id === 'bank' ? 100 : 50));
+  const selectedInstrument =
+    optionStrike != null ? `${book.name} ${optionStrike} ${direction}` : `${book.name} ATM ${direction}`;
   return {
     instrumentName: book.name,
     instrumentId: book.id,
     selectedInstrument,
+    optionStrike,
     side: 'BUY',
     sideLabel: `${direction} BUY`,
     direction,
@@ -295,5 +307,6 @@ module.exports = {
   BOOKS,
   runSrDesk,
   mapTrade,
+  atmStrike,
   summarize,
 };
