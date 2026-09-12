@@ -1,5 +1,6 @@
 const store = require('./live.store');
-const { runDiscover } = require('./paper-discover');
+const srLive = require('./sr-live');
+const { runSrDesk } = require('./sr-desk');
 const { parseTradeBotWindow } = require('./trade-bot-dates');
 const { getOptionOhlcAndPrice } = require('./option-ohlc');
 const { findEntryExitWait, getLastFound, parseUniverse } = require('./ee-wait-research');
@@ -22,7 +23,7 @@ async function health(_req, res) {
   res.json({
     status: 'ok',
     service: 'palagai-live-control',
-    note: 'Trade Bot paper/live: quiet 15m range → sell ATM straddle. Confirmed break → buy one CE or PE with a stop. Never buy both sides. Paper today marks OPEN. 2-month paper uses 60-day Kite chunks with 3s gaps.',
+    note: 'Trade Bot paper/live: Nifty + Bank S/R wall-break (walk-forward). Not a straddle. Paper ₹ is index×lot. Live buys one ATM CE or PE. Day ±₹3,500. Crude off.',
     version: APP_VERSION,
     appBuild: APP_BUILD,
     dnaId: LIVE_GREEN_DNA.id,
@@ -64,7 +65,19 @@ function userId(req) {
 }
 
 async function status(req, res) {
-  res.json(store.statusFor(userId(req)));
+  const uid = userId(req);
+  const sr = srLive.status(uid);
+  if (sr && sr.running) {
+    res.json({
+      ...store.statusFor(uid),
+      ...sr,
+      status: 'running',
+      liveMoney: true,
+      realOrders: true,
+    });
+    return;
+  }
+  res.json(store.statusFor(uid));
 }
 
 async function events(req, res) {
@@ -190,7 +203,7 @@ async function start(req, res) {
       /* stored token optional when header is present */
     }
   }
-  const out = await runDiscover({
+  const out = await runSrDesk({
     authorization,
     fromDate: window.fromDate,
     toDate: window.toDate,
@@ -198,41 +211,26 @@ async function start(req, res) {
     capitalRs: body.capitalRs || body.capital,
   });
   if (window.liveMoney) {
-    const deskPlan = {
-      fromDate: out.fromDate,
-      toDate: out.toDate,
-      capitalRs: out.capitalRs,
-      allocation: out.allocation,
-      month: out.month || out.allocation?.month,
-      books: (out.books || []).map((b) => ({
-        id: b.id,
-        spec: b.spec,
-        sitOut: b.sitOut,
-        token: b.token,
-        label: b.label,
-        vehicle: b.vehicle,
-      })),
-    };
-    const live = await store.start(userId(req), {
-      engine: 'paper-desk',
-      realOrders: true,
-      liveMoney: true,
-      lots: body.lots || body.niftyLots || 1,
-      capitalRs: body.capitalRs || body.capital,
-      deskPlan,
+    const lots = body.lots || body.niftyLots || 1;
+    await store.stop(userId(req));
+    const live = await srLive.start(userId(req), {
+      instruments: ['nifty', 'banknifty'],
+      lots,
+      lotsByInstrument: { nifty: lots, banknifty: lots },
     });
     res.json({
       ...out,
       ...live,
+      status: live.running ? 'running' : live.status,
       mode: 'live',
       liveMoney: true,
       realOrders: true,
-      shadowOf: 'paper-desk',
+      shadowOf: 'sr-desk',
       today: window.today,
       trades: out.trades,
       totals: out.totals,
       note:
-        'Live is the paper desk with Kite ATM MIS orders. Quiet range at 10:00 → sell CE+PE. Confirmed break → buy one CE or PE. Never buy both sides. Late start does not chase. Stocks stay paper.',
+        'Live is S/R Nifty + Bank. It buys one ATM CE or PE when the paper engine fires. It does not sell a straddle. Day ±₹3,500. Crude off.',
     });
     return;
   }
@@ -246,8 +244,15 @@ async function start(req, res) {
 }
 
 async function stop(req, res) {
-  const out = await store.stop(userId(req));
-  res.json(out);
+  const uid = userId(req);
+  const sr = await srLive.stop(uid);
+  const storeOut = await store.stop(uid);
+  const running = !!(sr && sr.running);
+  res.json({
+    ...storeOut,
+    ...sr,
+    status: running ? 'running' : 'stopped',
+  });
 }
 
 async function putAuth(req, res) {

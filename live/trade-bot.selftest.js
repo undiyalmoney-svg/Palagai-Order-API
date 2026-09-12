@@ -65,11 +65,11 @@ assert.strictEqual(typeof genie.makeGenieStrategy, 'function');
 assert.strictEqual(genie.DESK_STRATEGY_ID, 'align-combo-genie');
 
 const ctrl = fs.readFileSync(path.join(__dirname, 'live.controller.js'), 'utf8');
-assert.match(ctrl, /runDiscover/);
+assert.match(ctrl, /runSrDesk/);
 assert.doesNotMatch(ctrl, /runBacktest/);
-assert.match(ctrl, /paper-desk|orb-vs-straddle|opening-range|Nifty, Bank/);
+assert.match(ctrl, /sr-desk|sr-breakout|S\/R/);
 assert.match(ctrl, /capitalRs: body\.capitalRs/);
-assert.match(ctrl, /engine: 'paper-desk'/);
+assert.doesNotMatch(ctrl, /engine: 'paper-desk'/);
 assert.match(ctrl, /async function funds/);
 assert.match(ctrl, /fetchedAt/);
 assert.doesNotMatch(ctrl, /not wired to the paper desk/);
