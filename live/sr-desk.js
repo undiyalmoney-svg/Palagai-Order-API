@@ -365,7 +365,7 @@ function resolveDeskCapital({ capitalRs, capitalSource, liveMoney, kiteFunds } =
   return { capital: mine, capitalSource: useActual ? 'actual' : 'mine' };
 }
 
-async function runSrDesk({ authorization, fromDate, toDate, lots, capitalRs, capitalSource, liveMoney }, deps = {}) {
+async function runSrDesk({ authorization, fromDate, toDate, capitalRs, capitalSource, liveMoney }, deps = {}) {
   if (!fromDate || !toDate || fromDate > toDate) {
     const err = new Error('Valid fromDate ≤ toDate (YYYY-MM-DD) required');
     err.status = 400;
