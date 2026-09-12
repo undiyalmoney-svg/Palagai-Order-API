@@ -9,6 +9,7 @@ const {
   simulateInsideDay,
   searchInsideDay,
   allocateDesk,
+  allocateMonth,
   summarize,
   specStillAlive,
   ENGINE,
@@ -396,6 +397,55 @@ const lastRed = allocateDesk({
 });
 assert.ok(lastRed.skipped.some((s) => s.reason === 'last-train-red'));
 assert.strictEqual(lastRed.taken.length, 0);
+
+const { nextDayCap: capFn } = require('./month-guard');
+assert.strictEqual(capFn({ mtdRs: 0, hadTrade: false, dayBudgetRs: 2400, riskPerTradeRs: 800 }).mode, 'month-open');
+assert.strictEqual(capFn({ mtdRs: 5000, hadTrade: true, dayBudgetRs: 2400, riskPerTradeRs: 800 }).mode, 'protect-green');
+assert.strictEqual(capFn({ mtdRs: 5000, hadTrade: true, dayBudgetRs: 2400, riskPerTradeRs: 800 }).capRs, 2400);
+assert.strictEqual(capFn({ mtdRs: 1000, hadTrade: true, dayBudgetRs: 2400, riskPerTradeRs: 800 }).capRs, 1000);
+assert.strictEqual(capFn({ mtdRs: 0, hadTrade: true, dayBudgetRs: 2400, riskPerTradeRs: 800 }).mode, 'month-locked');
+assert.strictEqual(capFn({ mtdRs: -1500, hadTrade: true, dayBudgetRs: 2400, riskPerTradeRs: 800, targetR: 1.5 }).mode, 'recover-red');
+assert.strictEqual(capFn({ mtdRs: -1500, hadTrade: true, dayBudgetRs: 2400, riskPerTradeRs: 800, targetR: 1.5 }).maxTrades, 1);
+
+const winDay = {
+  ...cheapStock,
+  instrumentName: 'WIN',
+  entryTime: '2026-09-02T15:15:00+0530',
+  optionPnlRs: 220,
+  netOptionPnlRs: 200,
+  riskRs1: 200,
+};
+const loseDay = {
+  ...cheapStock,
+  instrumentName: 'LOSE',
+  entryTime: '2026-09-03T15:15:00+0530',
+  optionPnlRs: -200,
+  netOptionPnlRs: -200,
+  riskRs1: 200,
+};
+const guarded = allocateMonth({
+  capitalRs: 40000,
+  maxLots: 2,
+  fromDate: '2026-09-02',
+  toDate: '2026-09-03',
+  books: [
+    {
+      id: 'stock:WIN',
+      label: 'WIN',
+      train: { optionNetAfterChargesRs: 4000, profitFactor: 2 },
+      monthTrades: [winDay, loseDay],
+      trades: [winDay, loseDay],
+    },
+  ],
+});
+assert.ok(guarded.month);
+assert.ok(guarded.trades.some((t) => t.instrumentName === 'WIN'));
+assert.ok(guarded.month.mtdRs >= 0, `month must not finish red, mtd=${guarded.month.mtdRs}`);
+assert.ok(
+  guarded.skipped.some((s) => s.reason === 'month-floor' || s.reason === 'day-risk-full' || s.reason === 'month-locked') ||
+    guarded.trades.every((t) => t.instrumentName !== 'LOSE' || (Number(t.allocation?.riskRs) || 0) <= 800),
+  'a full red day cannot be sized large enough to turn a green month red',
+);
 
 const split = summarize([
   { optionPnlRs: 120, netOptionPnlRs: 100, indexPoints: 2 },

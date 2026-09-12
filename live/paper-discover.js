@@ -18,6 +18,7 @@
 
 const defaultMarket = require('./kite-market');
 const { fetchEquityDaily, fetchNifty100Symbols, mapPool } = require('./nse-equity-history');
+const { monthStartIso, monthKey, roundMtd, nextDayCap } = require('./month-guard');
 
 const ENGINE = 'paper-desk';
 const STRATEGY_FAMILY = 'or-regime-plus-inside-day';
@@ -596,11 +597,15 @@ function allocateDesk({
   maxLots = 1,
   riskPerTradePct = RISK_PER_TRADE_PCT,
   dayRiskPct = DAY_RISK_PCT,
+  dayRiskRs = null,
+  maxFunded = MAX_FUNDED_TRADES,
 } = {}) {
   const capital = Math.max(1_000, Math.floor(Number(capitalRs) || DEFAULT_CAPITAL_RS));
   const lotCap = Math.max(1, Math.floor(Number(maxLots) || 1));
   const perTrade = capital * riskPerTradePct;
-  const dayBudget = capital * dayRiskPct;
+  const dayBudget =
+    dayRiskRs == null ? capital * dayRiskPct : Math.max(0, Number(dayRiskRs) || 0);
+  const fundedCap = Math.max(0, Math.floor(Number(maxFunded) ?? MAX_FUNDED_TRADES));
   const raw = [];
   for (const book of books || []) {
     const trainScore = Number(book.train?.optionNetAfterChargesRs) || 0;
@@ -768,7 +773,7 @@ function allocateDesk({
         trainScore: Math.round(c.trainScore),
       },
     });
-    if (taken.length >= MAX_FUNDED_TRADES) break;
+    if (taken.length >= fundedCap) break;
   }
 
   const takenKeys = new Set(taken.map((t) => `${t.allocation?.bookId}|${t.entryTime}`));
@@ -782,7 +787,9 @@ function allocateDesk({
       direction: c.trade.direction,
       riskRs1: Math.round(c.risk1),
       reason: 'not-top-edge',
-        detail: `Only the top ${MAX_FUNDED_TRADES} setups are funded`,
+        detail: fundedCap < 1
+          ? 'Month locked at flat — no new risk (red month not allowed)'
+          : `Only the top ${fundedCap} setups are funded`,
     });
   }
 
@@ -805,6 +812,131 @@ function allocateDesk({
     skipped,
     trades: taken,
     totals: summarize(taken),
+    monthCap: {
+      dayRiskRs: Math.round(dayBudget),
+      maxFunded: fundedCap,
+    },
+  };
+}
+
+function tradeDay(t) {
+  return String(t?.entryTime || t?.date || '').slice(0, 10);
+}
+
+function allocateMonth({
+  books = [],
+  capitalRs = DEFAULT_CAPITAL_RS,
+  maxLots = 1,
+  fromDate,
+  toDate,
+} = {}) {
+  const capital = Math.max(1_000, Math.floor(Number(capitalRs) || DEFAULT_CAPITAL_RS));
+  const monthFrom = monthStartIso(fromDate);
+  const dayBudget = capital * DAY_RISK_PCT;
+  const perTrade = capital * RISK_PER_TRADE_PCT;
+  const prior = [];
+  for (const book of books || []) {
+    for (const t of book.monthTrades || book.trades || []) {
+      const day = tradeDay(t);
+      if (day >= monthFrom && day < fromDate) prior.push(t);
+    }
+  }
+  let mtd = roundMtd(summarize(prior).optionNetAfterChargesRs);
+  let hadTrade = prior.length > 0;
+  const taken = [];
+  const skipped = [];
+  const days = [];
+  let d = fromDate;
+  while (d && toDate && d <= toDate) {
+    const cap = nextDayCap({
+      mtdRs: mtd,
+      hadTrade,
+      dayBudgetRs: dayBudget,
+      riskPerTradeRs: perTrade,
+      targetR: 1.5,
+    });
+    const dayBooks = (books || []).map((b) => ({
+      ...b,
+      trades: (b.monthTrades || b.trades || []).filter((t) => tradeDay(t) === d),
+    }));
+    const alloc = allocateDesk({
+      books: dayBooks,
+      capitalRs: capital,
+      maxLots,
+      dayRiskRs: cap.capRs,
+      maxFunded: cap.maxTrades,
+    });
+    const mappedSkip = (alloc.skipped || []).map((s) => {
+      if (cap.mode === 'month-locked') {
+        return {
+          ...s,
+          reason: 'month-locked',
+          detail: 'Month is flat after being green — lock. Red days were allowed; a red month is not.',
+        };
+      }
+      if (cap.mode === 'protect-green' && (s.reason === 'day-risk-full' || s.reason === 'not-top-edge')) {
+        return {
+          ...s,
+          reason: 'month-floor',
+          detail: `Today’s stop budget is month P&L ₹${mtd} so a red day cannot turn the month red`,
+        };
+      }
+      if (cap.mode === 'recover-red') {
+        return {
+          ...s,
+          reason: s.reason === 'day-risk-full' ? 'month-recover' : s.reason,
+          detail: s.reason === 'day-risk-full'
+            ? `Recovery size only ₹${Math.round(cap.capRs)} (1.5R would flatten month P&L ₹${mtd})`
+            : s.detail,
+        };
+      }
+      return s;
+    });
+    skipped.push(...mappedSkip);
+    taken.push(...(alloc.trades || []));
+    const dayNet = roundMtd(summarize(alloc.trades || []).optionNetAfterChargesRs);
+    if ((alloc.trades || []).length) hadTrade = true;
+    mtd = roundMtd(mtd + dayNet);
+    days.push({
+      date: d,
+      mode: cap.mode,
+      capRs: Math.round(cap.capRs),
+      dayNetRs: dayNet,
+      mtdRs: mtd,
+      taken: (alloc.taken || []).length,
+    });
+    d = addDaysIso(d, 1);
+  }
+  taken.sort((a, b) => String(a.entryTime).localeCompare(String(b.entryTime)));
+  const last = days[days.length - 1] || {};
+  return {
+    capitalRs: capital,
+    maxLots: Math.max(1, Math.floor(Number(maxLots) || 1)),
+    riskPerTradePct: RISK_PER_TRADE_PCT,
+    dayRiskPct: DAY_RISK_PCT,
+    riskPerTradeRs: Math.round(perTrade),
+    dayRiskRs: last.capRs != null ? last.capRs : Math.round(dayBudget),
+    dayRiskUsedRs: Math.round(taken.reduce((s, t) => s + (Number(t.allocation?.riskRs) || 0), 0)),
+    taken: taken.map((t) => ({
+      instrumentName: t.instrumentName,
+      bookId: t.allocation?.bookId,
+      direction: t.direction,
+      lots: t.lots,
+      riskRs: t.allocation?.riskRs,
+    })),
+    skipped,
+    trades: taken,
+    totals: summarize(taken),
+    month: {
+      key: monthKey(fromDate),
+      fromDate: monthFrom,
+      mtdRs: mtd,
+      hadTrade,
+      locked: hadTrade && mtd === 0,
+      mode: last.mode || (hadTrade && mtd === 0 ? 'month-locked' : 'month-open'),
+      rule: 'Red days allowed. After the month is green, a day cannot risk more than month P&L. Flat month locks. Red month is not accepted — recovery only while MTD is red.',
+      days,
+    },
   };
 }
 
@@ -1120,6 +1252,7 @@ async function runDiscover({ authorization, fromDate, toDate, lots, capitalRs },
   const maxLots = Math.max(1, Math.floor(Number(lots)) || 1);
   const { capital, kiteFunds } = await resolvePaperCapital(authorization, capitalRs, deps, market);
   const L = 1;
+  const monthFrom = monthStartIso(fromDate);
   const warmFrom = addDaysIso(fromDate, -LOOKBACK_CAL_DAYS);
   const trainTo = addDaysIso(fromDate, -1);
   const stockFrom = addDaysIso(fromDate, -STOCK_LOOKBACK_CAL_DAYS);
@@ -1135,9 +1268,13 @@ async function runDiscover({ authorization, fromDate, toDate, lots, capitalRs },
       const loaded = await loadBookCandles(market, authorization, book, warmFrom, toDate, deps);
       const candles = loaded.candles || loaded;
       const found = searchSpecs(candles, { trainFrom: warmFrom, trainTo, lots: L, book });
-      const trades = found.sitOut
+      const monthTrades = found.sitOut
         ? []
-        : simulate(candles, found.spec, { fromDate, toDate, lots: L, book });
+        : simulate(candles, found.spec, { fromDate: monthFrom, toDate, lots: L, book });
+      const trades = monthTrades.filter((t) => {
+        const day = tradeDay(t);
+        return day >= fromDate && day <= toDate;
+      });
       const why = explainIndexBook(book, { candles, found, trades });
       books.push({
         id: book.id,
@@ -1151,6 +1288,7 @@ async function runDiscover({ authorization, fromDate, toDate, lots, capitalRs },
         trainTrades: found.trades || [],
         totals: summarize(trades),
         trades,
+        monthTrades,
         data: 'kite-5m',
         token: loaded.token || book.token,
         bars: Array.isArray(candles) ? candles.length : 0,
@@ -1186,16 +1324,21 @@ async function runDiscover({ authorization, fromDate, toDate, lots, capitalRs },
         symbol: row.symbol,
       });
       if (found.sitOut) continue;
-      const trades = simulateInsideDay(row.historical, found.spec, {
-        fromDate,
+      const monthTrades = simulateInsideDay(row.historical, found.spec, {
+        fromDate: monthFrom,
         toDate,
         lots: L,
         symbol: row.symbol,
+      });
+      const trades = monthTrades.filter((t) => {
+        const day = tradeDay(t);
+        return day >= fromDate && day <= toDate;
       });
       ranked.push({
         ...found,
         trainTrades: found.trades,
         trades,
+        monthTrades,
         totals: summarize(trades),
       });
     }
@@ -1215,6 +1358,7 @@ async function runDiscover({ authorization, fromDate, toDate, lots, capitalRs },
         trainTrades: row.trainTrades || [],
         totals: row.totals,
         trades: row.trades,
+        monthTrades: row.monthTrades || row.trades,
         data: 'nse-daily',
       });
     }
@@ -1262,7 +1406,7 @@ async function runDiscover({ authorization, fromDate, toDate, lots, capitalRs },
   }
 
   allTrades.sort((a, b) => String(a.entryTime).localeCompare(String(b.entryTime)));
-  const allocation = allocateDesk({ books, capitalRs: capital, maxLots });
+  const allocation = allocateMonth({ books, capitalRs: capital, maxLots, fromDate, toDate });
   stampCoreBooks(books, allocation);
   const totals = allocation.totals;
   const takenTrades = allocation.trades;
@@ -1278,6 +1422,7 @@ async function runDiscover({ authorization, fromDate, toDate, lots, capitalRs },
     maxLots,
     kiteFunds,
     allocation,
+    month: allocation.month,
     specText: allocation.taken.length
       ? allocation.taken.map((t) => `${t.instrumentName} ×${t.lots}`).join(' · ')
       : 'Capital sat out (scan had setups the 2%/6% stop budget would not fund)',
@@ -1290,7 +1435,7 @@ async function runDiscover({ authorization, fromDate, toDate, lots, capitalRs },
       totals: summarize(books.flatMap((b) => b.trainTrades || [])),
     },
     note:
-      'One play per index/crude book after the opening range: VWAP-aligned ORB, fade a failed break, or VWAP pullback. Skip tiny OR, skip >1% gaps, skip Tuesday. Bank 1-lot is often skipped at ~₹30k. Crude is evening-only. Live is the same engine plus Kite orders.',
+      'Red days allowed; a red month is not. After the month is green, today cannot risk more than month P&L. If the month is red, only a small recovery trade. Flat after green locks. One OR play (VWAP ORB / fade / pullback). Crude evening-only. Live is the same engine plus Kite orders.',
     scanTotals: summarize(allTrades),
     totals,
     liveTotals: totals,
@@ -1328,6 +1473,9 @@ module.exports = {
   explainIndexBook,
   stampCoreBooks,
   allocateDesk,
+  allocateMonth,
+  nextDayCap,
+  monthStartIso,
   scaleClosedTrade,
   runDiscover,
   resolvePaperCapital,

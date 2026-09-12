@@ -136,6 +136,15 @@ class PaperDeskWorker {
       return;
     }
     const today = istToday();
+    const month = this.getConfig()?.deskPlan?.month || {};
+    if (month.locked || month.mode === 'month-locked') {
+      this.heartbeat('Paper desk live — month locked at flat (red month not allowed)');
+      if (this.lastSig !== 'month-lock') {
+        this.lastSig = 'month-lock';
+        this.pushEvent('DESK', 'Month is flat after a green stretch. No new live risk.');
+      }
+      return;
+    }
     const funded = this.fundedBooks();
     if (!funded.length) {
       this.heartbeat('Paper desk live — capital sat out (same as paper)');

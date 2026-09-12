@@ -203,6 +203,7 @@ async function start(req, res) {
       toDate: out.toDate,
       capitalRs: out.capitalRs,
       allocation: out.allocation,
+      month: out.month || out.allocation?.month,
       books: (out.books || []).map((b) => ({
         id: b.id,
         spec: b.spec,
