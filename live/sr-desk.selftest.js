@@ -1,9 +1,26 @@
 'use strict';
 const assert = require('assert');
-const { runSrDesk, mapTrade, applyOptionOhlc, overlayNseOptionOhlc, ENGINE, BOOKS } = require('./sr-desk');
+const { runSrDesk, mapTrade, applyOptionOhlc, overlayNseOptionOhlc, resolveDeskCapital, ENGINE, BOOKS } = require('./sr-desk');
 const { pickBarFlex, ohlcOf } = require('./sr-option-pnl');
 const { nseWeeklyOptionSymbol } = require('./nse-option-intraday');
 const { STRATEGY_ID } = require('./sr-strategy-config');
+
+assert.deepStrictEqual(
+  resolveDeskCapital({ capitalRs: 40000, capitalSource: 'mine', kiteFunds: { capitalRs: 61200 } }),
+  { capital: 40000, capitalSource: 'mine' },
+);
+assert.deepStrictEqual(
+  resolveDeskCapital({ capitalRs: 40000, capitalSource: 'actual', kiteFunds: { capitalRs: 61200 } }),
+  { capital: 61200, capitalSource: 'actual' },
+);
+assert.deepStrictEqual(
+  resolveDeskCapital({ capitalRs: 40000, capitalSource: 'mine', liveMoney: true, kiteFunds: { capitalRs: 61200 } }),
+  { capital: 61200, capitalSource: 'actual' },
+);
+assert.strictEqual(
+  resolveDeskCapital({ capitalRs: 40000, capitalSource: 'actual', kiteFunds: null }).capital,
+  40000,
+);
 
 assert.strictEqual(ENGINE, 'sr-desk');
 assert.strictEqual(STRATEGY_ID, 'sr-breakout');
@@ -241,6 +258,7 @@ Promise.resolve()
     assert.ok(out.instruments.every((r) => r.id === 'nifty' || r.id === 'bank'));
     assert.ok(!out.instruments.some((r) => r.id === 'crude'));
     assert.strictEqual(out.totals.netRs, 0);
+    assert.ok(out.capitalSource === 'actual' || out.capitalSource === 'mine');
     assert.ok(out.coreBooks.length === 3);
     assert.ok(out.books.some((b) => b.id === 'nifty'));
     assert.ok(out.books.find((b) => b.id === 'crude').sitOut);

@@ -209,6 +209,8 @@ async function start(req, res) {
     toDate: window.toDate,
     lots: body.lots || body.niftyLots || 1,
     capitalRs: body.capitalRs || body.capital,
+    capitalSource: window.liveMoney ? 'actual' : (body.capitalSource || body.fundSource),
+    liveMoney: window.liveMoney,
   });
   if (window.liveMoney) {
     const lots = body.lots || body.niftyLots || 1;

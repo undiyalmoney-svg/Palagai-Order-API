@@ -68,7 +68,7 @@ const ctrl = fs.readFileSync(path.join(__dirname, 'live.controller.js'), 'utf8')
 assert.match(ctrl, /runSrDesk/);
 assert.doesNotMatch(ctrl, /runBacktest/);
 assert.match(ctrl, /sr-desk|sr-breakout|S\/R/);
-assert.match(ctrl, /capitalRs: body\.capitalRs/);
+assert.match(ctrl, /capitalSource: window\.liveMoney \? 'actual'/);
 assert.doesNotMatch(ctrl, /engine: 'paper-desk'/);
 assert.match(ctrl, /async function funds/);
 assert.match(ctrl, /fetchedAt/);

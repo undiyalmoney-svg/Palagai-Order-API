@@ -352,7 +352,19 @@ async function loadCandles(market, authorization, book, fromDate, toDate, deps) 
   });
 }
 
-async function runSrDesk({ authorization, fromDate, toDate, lots, capitalRs }, deps = {}) {
+function resolveDeskCapital({ capitalRs, capitalSource, liveMoney, kiteFunds } = {}) {
+  const kite = Math.floor(Number(kiteFunds?.capitalRs) || 0);
+  const mine = Math.max(10_000, Math.floor(Number(capitalRs) || 40000));
+  const live = liveMoney === true || liveMoney === 'true';
+  const asked = String(capitalSource || '').toLowerCase();
+  const useActual = live || asked !== 'mine';
+  if (useActual && kite > 0) {
+    return { capital: kite, capitalSource: 'actual' };
+  }
+  return { capital: mine, capitalSource: useActual ? 'actual' : 'mine' };
+}
+
+async function runSrDesk({ authorization, fromDate, toDate, lots, capitalRs, capitalSource, liveMoney }, deps = {}) {
   if (!fromDate || !toDate || fromDate > toDate) {
     const err = new Error('Valid fromDate ≤ toDate (YYYY-MM-DD) required');
     err.status = 400;
@@ -368,10 +380,8 @@ async function runSrDesk({ authorization, fromDate, toDate, lots, capitalRs }, d
       kiteFunds = null;
     }
   }
-  const capital =
-    Math.floor(Number(kiteFunds?.capitalRs) || 0) > 0
-      ? Math.floor(Number(kiteFunds.capitalRs))
-      : Math.max(10_000, Math.floor(Number(capitalRs)) || 40000);
+  const resolved = resolveDeskCapital({ capitalRs, capitalSource, liveMoney, kiteFunds });
+  const capital = resolved.capital;
   const booksOut = [];
   const allTrades = [];
   const keys = ['nifty', 'banknifty'];
@@ -471,6 +481,7 @@ async function runSrDesk({ authorization, fromDate, toDate, lots, capitalRs }, d
     strategy: STRATEGY_ID,
     strategyVersion: STRATEGY_VERSION,
     capitalRs: capital,
+    capitalSource: resolved.capitalSource,
     kiteFunds,
     maxLots: L,
     allocation: { taken, trades: allTrades, totals },
@@ -504,6 +515,7 @@ async function runSrDesk({ authorization, fromDate, toDate, lots, capitalRs }, d
 module.exports = {
   ENGINE,
   BOOKS,
+  resolveDeskCapital,
   runSrDesk,
   mapTrade,
   applyOptionOhlc,
