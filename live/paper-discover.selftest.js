@@ -383,8 +383,12 @@ runDiscover(
     assert.strictEqual(out.engine, ENGINE);
     assert.strictEqual(out.strategy, STRATEGY_FAMILY);
     assert.ok(out.books.some((b) => b.id === 'nifty' && b.totals.trades >= 1));
-    assert.ok(out.books.some((b) => b.id === 'bank'));
-    assert.ok(out.books.some((b) => b.id === 'crude'));
+    const bankBook = out.books.find((b) => b.id === 'bank');
+    const crudeBook = out.books.find((b) => b.id === 'crude');
+    assert.ok(bankBook && /Bank Nifty/i.test(bankBook.why || bankBook.label));
+    assert.ok(crudeBook && /Crude/i.test(crudeBook.why || crudeBook.label));
+    assert.ok(out.coreBooks && out.coreBooks.length === 3);
+    assert.ok(crudeBook.why && /evening|Crude Mini|16:00/i.test(crudeBook.why));
     assert.ok(out.books.some((b) => b.id === 'stocks' || String(b.id).startsWith('stock:')));
     assert.ok(out.stocks && Array.isArray(out.stocks.rows));
     assert.ok(out.stocks.scanned >= 1);

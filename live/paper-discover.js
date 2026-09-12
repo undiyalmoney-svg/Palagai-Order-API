@@ -676,17 +676,91 @@ function searchSpecs(bars, { trainFrom, trainTo, lots, book } = {}) {
   const profile = book || BOOKS.nifty;
   const grid = specGrid(profile);
   let best = null;
+  let sawScore = false;
+  let lastRed = false;
   for (const spec of grid) {
     if (RETIRED_FAMILIES.includes(spec.family) || RETIRED_FAMILIES.includes(spec.engine)) continue;
     const trades = simulate(bars, spec, { fromDate: trainFrom, toDate: trainTo, lots, book: profile });
     const score = scoreTrades(trades);
     if (!Number.isFinite(score)) continue;
-    if (!specStillAlive(bars, spec, { trainFrom, trainTo, lots, book: profile })) continue;
+    sawScore = true;
+    if (!specStillAlive(bars, spec, { trainFrom, trainTo, lots, book: profile })) {
+      lastRed = true;
+      continue;
+    }
     const row = { spec, trades, totals: summarize(trades), score };
     if (!best || row.score > best.score) best = row;
   }
-  if (!best || !Number.isFinite(best.score)) return { spec: null, totals: summarize([]), sitOut: true };
-  return { ...best, sitOut: false };
+  if (!best || !Number.isFinite(best.score)) {
+    let sitOutReason = 'weak-train';
+    if (lastRed) sitOutReason = 'last-train-red';
+    else if (!sawScore) sitOutReason = 'weak-train';
+    return { spec: null, totals: summarize([]), sitOut: true, sitOutReason };
+  }
+  return { ...best, sitOut: false, sitOutReason: undefined };
+}
+
+function explainIndexBook(book, { candles, found, trades, error } = {}) {
+  if (error) {
+    if (book.id === 'crude') {
+      return `Crude Mini failed to load: ${error}. Needs Kite MCX CRUDEOILM future (16:00–21:30 IST).`;
+    }
+    return `${book.name} failed to load: ${error}`;
+  }
+  const rows = Array.isArray(candles) ? candles : candles?.candles || [];
+  if (!rows.length) {
+    if (book.id === 'crude') {
+      return 'No Crude Mini 5m bars. Get Token; Crude only has an evening book (16:00–21:30 IST), not the cash session.';
+    }
+    return `No ${book.name} 5m bars from Kite. Get Token and retry.`;
+  }
+  if (found?.sitOut) {
+    if (found.sitOutReason === 'last-train-red') {
+      return `${book.name} sit-out: last walk-forward trade was red.`;
+    }
+    if (book.id === 'crude') {
+      return 'Crude Mini sit-out: walk-forward edge too weak (need ~5 train trades, PF ≥ 1.5, last train green). Evening book only.';
+    }
+    return `${book.name} sit-out: walk-forward edge too weak (need ~5 train trades, PF ≥ 1.5, 55% wins, last train green).`;
+  }
+  if (!(trades || []).length) {
+    if (book.id === 'crude') {
+      return 'No Crude Mini OR signal on this date (weekend/holiday, or no evening fade/hold). Crude does not trade 09:15–15:30.';
+    }
+    return `No ${book.name} OR signal on this date (weekend, holiday, or no fade/hold print).`;
+  }
+  return `${book.name} printed a setup — capital may still skip a 1-lot stop that is wider than 2%.`;
+}
+
+function stampCoreBooks(books, allocation) {
+  const core = new Set(['nifty', 'bank', 'crude']);
+  for (const b of books || []) {
+    if (!core.has(b.id)) continue;
+    const taken = (allocation.taken || []).filter((t) => t.bookId === b.id);
+    const skip = (allocation.skipped || []).find((s) => s.bookId === b.id);
+    if (taken.length) {
+      b.status = 'funded';
+      b.why = `Funded ${taken.map((t) => `${t.instrumentName} ×${t.lots}`).join(', ')}`;
+    } else if (skip) {
+      b.status = 'skipped';
+      b.why = skip.detail || skip.reason;
+      if (skip.reason === 'stop-too-wide' && b.id === 'bank') {
+        b.why +=
+          ' Bank 1-lot stop is typically ₹1,500–₹2,700 (50–90 pts × ₹30). 2% of ~₹30k is ~₹600, so Bank is listed here as skipped, not missing.';
+      }
+      if (skip.reason === 'stop-too-wide' && b.id === 'nifty') {
+        b.why +=
+          ' Nifty 1-lot stop is typically ₹1,300–₹2,275 (20–35 pts × ₹65). Raise capital if you want the index 1-lot.';
+      }
+    } else if (b.sitOut) {
+      b.status = 'sit-out';
+    } else if (!(b.trades || []).length) {
+      b.status = 'no-signal';
+    } else {
+      b.status = 'scanned';
+    }
+  }
+  return books;
 }
 
 function describeSpec(spec, book) {
@@ -907,11 +981,13 @@ async function runDiscover({ authorization, fromDate, toDate, lots, capitalRs },
       const trades = found.sitOut
         ? []
         : simulate(candles, found.spec, { fromDate, toDate, lots: L, book });
+      const why = explainIndexBook(book, { candles, found, trades });
       books.push({
         id: book.id,
         label: book.name,
         vehicle: loaded.symbol || book.name,
         sitOut: !!found.sitOut,
+        sitOutReason: found.sitOutReason,
         spec: found.spec,
         specText: describeSpec(found.spec, book),
         train: found.totals,
@@ -920,9 +996,13 @@ async function runDiscover({ authorization, fromDate, toDate, lots, capitalRs },
         trades,
         data: 'kite-5m',
         token: loaded.token || book.token,
+        bars: Array.isArray(candles) ? candles.length : 0,
+        status: found.sitOut ? 'sit-out' : trades.length ? 'scanned' : 'no-signal',
+        why,
       });
       allTrades.push(...trades);
     } catch (err) {
+      const why = explainIndexBook(book, { error: err.message || String(err) });
       books.push({
         id: book.id,
         label: book.name,
@@ -930,6 +1010,8 @@ async function runDiscover({ authorization, fromDate, toDate, lots, capitalRs },
         error: err.message || String(err),
         totals: summarize([]),
         trades: [],
+        status: 'error',
+        why,
       });
     }
   }
@@ -1024,8 +1106,10 @@ async function runDiscover({ authorization, fromDate, toDate, lots, capitalRs },
 
   allTrades.sort((a, b) => String(a.entryTime).localeCompare(String(b.entryTime)));
   const allocation = allocateDesk({ books, capitalRs: capital, maxLots });
+  stampCoreBooks(books, allocation);
   const totals = allocation.totals;
   const takenTrades = allocation.trades;
+  const coreBooks = books.filter((b) => b.id === 'nifty' || b.id === 'bank' || b.id === 'crude');
 
   return {
     fromDate,
@@ -1041,6 +1125,7 @@ async function runDiscover({ authorization, fromDate, toDate, lots, capitalRs },
       ? allocation.taken.map((t) => `${t.instrumentName} ×${t.lots}`).join(' · ')
       : 'Capital sat out (scan had setups the 2%/6% stop budget would not fund)',
     books,
+    coreBooks,
     stocks: stockPayload,
     train: {
       fromDate: warmFrom,
@@ -1048,7 +1133,7 @@ async function runDiscover({ authorization, fromDate, toDate, lots, capitalRs },
       totals: summarize(books.flatMap((b) => b.trainTrades || [])),
     },
     note:
-      'Kite available funds size the desk. Names whose last walk-forward trade was red sit out. 2% per trade / 6% day stop. Live is the same engine plus Kite orders.',
+      'Always scans Nifty 50, Bank Nifty, and Crude Oil Mini. Bank 1-lot is often skipped at ~₹30k (stop wider than 2%). Crude is an evening book (16:00–21:30 IST), not the cash session. A last-train red sits a book out. Live is the same engine plus Kite orders.',
     scanTotals: summarize(allTrades),
     totals,
     liveTotals: totals,
@@ -1083,6 +1168,8 @@ module.exports = {
   searchInsideDay,
   specStillAlive,
   isRedTrade,
+  explainIndexBook,
+  stampCoreBooks,
   allocateDesk,
   scaleClosedTrade,
   runDiscover,
