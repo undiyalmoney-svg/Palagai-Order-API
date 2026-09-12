@@ -613,11 +613,43 @@ function simulateDay(dayBars, spec, lots, book, opts = {}) {
   return trades;
 }
 
-function simulate(bars, spec, { fromDate, toDate, lots, book } = {}) {
+function istToday(now = new Date()) {
+  return now.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+}
+
+function isOpenTrade(t) {
+  return !!(t && (t.open || String(t.exitReason) === 'open'));
+}
+
+function executableSpec(book) {
+  return {
+    engine: ENGINE,
+    family: 'straddle',
+    mode: 'straddle',
+    straddle: 'short',
+    orMinutes: 15,
+    stopPts: book.stopPts[0],
+  };
+}
+
+function markOpenTrade(open, lastBar, lots, book) {
+  if (!open || !lastBar) return null;
+  const t =
+    open.straddle
+      ? closeStraddleTrade(open, lastBar, 'open', lots, book)
+      : closeTrade(open, lastBar, 'open', lots, book);
+  t.open = true;
+  t.liveWouldTake = true;
+  return t;
+}
+
+function simulate(bars, spec, { fromDate, toDate, lots, book, asOfDate } = {}) {
   const profile = book || BOOKS.nifty;
+  const asOf = asOfDate || istToday();
   const dates = uniqueDates(bars, profile).filter((d) => {
     if (fromDate && d < fromDate) return false;
     if (toDate && d > toDate) return false;
+    if (d > asOf) return false;
     return true;
   });
   const trades = [];
@@ -628,7 +660,21 @@ function simulate(bars, spec, { fromDate, toDate, lots, book } = {}) {
       const prevBars = sessionBars(bars, dates[i - 1], profile);
       if (prevBars.length) prevClose = Number(prevBars[prevBars.length - 1].close);
     }
-    trades.push(...simulateDay(sessionBars(bars, d, profile), spec, lots, profile, { prevClose }));
+    const dayBars = sessionBars(bars, d, profile);
+    const liveDay = d === asOf;
+    const pastSquareOff = dayBars.length && barHm(dayBars[dayBars.length - 1]) >= profile.squareOff;
+    const flatten = !liveDay || pastSquareOff;
+    const result = simulateDay(dayBars, spec, lots, profile, {
+      prevClose,
+      withOpen: true,
+      flattenOpen: flatten,
+    });
+    const dayTrades = result.trades || [];
+    if (!flatten && result.open) {
+      const marked = markOpenTrade(result.open, dayBars[dayBars.length - 1], lots, profile);
+      if (marked) dayTrades.push(marked);
+    }
+    trades.push(...dayTrades);
   }
   return trades;
 }
@@ -804,6 +850,12 @@ function allocateDesk({
     } else {
       lots = Math.min(lots, lotCap);
     }
+    const isStraddle = String(c.trade.pnlSource || '').includes('straddle') || c.trade.spec?.mode === 'straddle';
+    if (isStraddle) {
+      lots = Math.min(1, lotCap);
+      fundable.push({ ...c, lots, risk1 });
+      continue;
+    }
     if (lots < 1) {
       skipped.push({
         instrumentName: c.trade.instrumentName,
@@ -821,7 +873,8 @@ function allocateDesk({
   const quality = [];
   for (const c of fundable) {
     const minPf = isStockBookId(c.bookId) ? MIN_STOCK_TRAIN_PF : MIN_INDEX_TRAIN_PF;
-    if (c.trainPf > 0 && c.trainPf < minPf) {
+    const isStraddle = String(c.trade.pnlSource || '').includes('straddle') || c.trade.spec?.mode === 'straddle';
+    if (!isStraddle && c.trainPf > 0 && c.trainPf < minPf) {
       skipped.push({
         instrumentName: c.trade.instrumentName,
         bookId: c.bookId,
@@ -832,7 +885,7 @@ function allocateDesk({
       });
       continue;
     }
-    if (c.lastTrainRed) {
+    if (!isStraddle && c.lastTrainRed) {
       skipped.push({
         instrumentName: c.trade.instrumentName,
         bookId: c.bookId,
@@ -851,6 +904,7 @@ function allocateDesk({
   const dropped = new Set();
   for (const c of quality) {
     if (!indexIds.has(c.bookId)) continue;
+    if (String(c.trade.pnlSource || '').includes('straddle') || c.trade.spec?.mode === 'straddle') continue;
     const key = `${String(c.trade.entryTime || '').slice(0, 10)}|${c.trade.direction || ''}`;
     const prev = winners.get(key);
     if (!prev) {
@@ -897,11 +951,18 @@ function allocateDesk({
   let dayRiskUsed = 0;
 
   for (const c of diversified) {
+    const liveOpenStraddle =
+      isOpenTrade(c.trade) &&
+      (String(c.trade.pnlSource || '').includes('straddle') || c.trade.spec?.mode === 'straddle');
     let lots = c.lots;
     let risk = lots * c.risk1;
     while (lots >= 1 && dayRiskUsed + risk > dayBudget + 1e-6) {
       lots -= 1;
       risk = lots * c.risk1;
+    }
+    if (lots < 1 && liveOpenStraddle) {
+      lots = 1;
+      risk = c.risk1;
     }
     if (lots < 1) {
       skipped.push({
@@ -911,6 +972,20 @@ function allocateDesk({
         riskRs1: Math.round(c.risk1),
         reason: 'day-risk-full',
         detail: `Day stop budget ₹${Math.round(dayBudget)} already used ₹${Math.round(dayRiskUsed)}`,
+      });
+      continue;
+    }
+    if (taken.length >= fundedCap && !liveOpenStraddle) {
+      skipped.push({
+        instrumentName: c.trade.instrumentName,
+        bookId: c.bookId,
+        direction: c.trade.direction,
+        riskRs1: Math.round(c.risk1),
+        reason: 'not-top-edge',
+        detail:
+          fundedCap < 1
+            ? 'Month locked at flat — no new risk (red month not allowed)'
+            : `Only the top ${fundedCap} setups are funded`,
       });
       continue;
     }
@@ -925,7 +1000,6 @@ function allocateDesk({
         trainScore: Math.round(c.trainScore),
       },
     });
-    if (taken.length >= fundedCap) break;
   }
 
   const takenKeys = new Set(taken.map((t) => `${t.allocation?.bookId}|${t.entryTime}`));
@@ -1046,7 +1120,8 @@ function allocateMonth({
     });
     skipped.push(...mappedSkip);
     taken.push(...(alloc.trades || []));
-    const dayNet = roundMtd(summarize(alloc.trades || []).optionNetAfterChargesRs);
+    const closedDay = (alloc.trades || []).filter((t) => !isOpenTrade(t));
+    const dayNet = roundMtd(summarize(closedDay).optionNetAfterChargesRs);
     if ((alloc.trades || []).length) hadTrade = true;
     mtd = roundMtd(mtd + dayNet);
     days.push({
@@ -1162,7 +1237,7 @@ function explainIndexBook(book, { candles, found, trades, error } = {}) {
     if (book.id === 'crude') {
       return 'No Crude Mini OR signal on this date (weekend/holiday, or no evening fade/hold). Crude does not trade 09:15–15:30.';
     }
-    return `No ${book.name} OR signal on this date (weekend, holiday, or no fade/hold print).`;
+    return `No ${book.name} 15m OR yet — wait until 09:30 IST, then sell ATM CE+PE. Paper/live do not wait for the close.`;
   }
   return `${book.name} printed a setup — capital may still skip a 1-lot stop that is wider than 2%.`;
 }
@@ -1581,6 +1656,7 @@ async function runDiscover({ authorization, fromDate, toDate, lots, capitalRs },
     err.status = 400;
     throw err;
   }
+  const asOf = deps.asOfDate || istToday();
   const market = deps.market || defaultMarket;
   const maxLots = Math.max(1, Math.floor(Number(lots)) || 1);
   const { capital, kiteFunds } = await resolvePaperCapital(authorization, capitalRs, deps, market);
@@ -1601,13 +1677,51 @@ async function runDiscover({ authorization, fromDate, toDate, lots, capitalRs },
     try {
       const loaded = await loadBookCandles(market, authorization, book, warmFrom, toDate, deps);
       const candles = loaded.candles || loaded;
-      const found = searchSpecs(candles, { trainFrom: warmFrom, trainTo, lots: L, book });
       if (id === 'nifty' || id === 'bank') {
         compareBooks.push(compareIndexBook(candles, book, { fromDate, toDate, lots: L }));
       }
-      const monthTrades = found.sitOut
-        ? []
-        : simulate(candles, found.spec, { fromDate: monthFrom, toDate, lots: L, book });
+      if (id === 'crude') {
+        books.push({
+          id: book.id,
+          label: book.name,
+          vehicle: loaded.symbol || book.name,
+          sitOut: true,
+          sitOutReason: 'not-on-desk',
+          spec: null,
+          specText: 'Not on the live desk',
+          train: summarize([]),
+          trainTrades: [],
+          totals: summarize([]),
+          trades: [],
+          data: 'kite-5m',
+          token: loaded.token || book.token,
+          bars: Array.isArray(candles) ? candles.length : 0,
+          status: 'sit-out',
+          why: 'Live/paper desk is Nifty + Bank short straddle after the 15m opening range. Crude is not on this path.',
+        });
+        continue;
+      }
+      const spec = executableSpec(book);
+      const trainTrades = simulate(candles, spec, {
+        fromDate: warmFrom,
+        toDate: trainTo,
+        lots: L,
+        book,
+        asOfDate: asOf,
+      });
+      const found = {
+        spec,
+        sitOut: false,
+        trades: trainTrades,
+        totals: summarize(trainTrades),
+      };
+      const monthTrades = simulate(candles, spec, {
+        fromDate: monthFrom,
+        toDate,
+        lots: L,
+        book,
+        asOfDate: asOf,
+      });
       const trades = monthTrades.filter((t) => {
         const day = tradeDay(t);
         return day >= fromDate && day <= toDate;
@@ -1650,8 +1764,9 @@ async function runDiscover({ authorization, fromDate, toDate, lots, capitalRs },
 
   let stockNote = '';
   try {
-    const series = await loadStocks(stockFrom, toDate, L, deps);
-    compareBooks.push(compareStocks(series, { fromDate, toDate, lots: L }));
+    const stockDoneTo = toDate < asOf ? toDate : addDaysIso(asOf, -1);
+    const series = await loadStocks(stockFrom, stockDoneTo, L, deps);
+    compareBooks.push(compareStocks(series, { fromDate, toDate: stockDoneTo, lots: L }));
     const ranked = [];
     for (const row of series) {
       if (!row.historical || row.historical.length < 30) continue;
@@ -1664,7 +1779,7 @@ async function runDiscover({ authorization, fromDate, toDate, lots, capitalRs },
       if (found.sitOut) continue;
       const monthTrades = simulateInsideDay(row.historical, found.spec, {
         fromDate: monthFrom,
-        toDate,
+        toDate: stockDoneTo,
         lots: L,
         symbol: row.symbol,
       });
@@ -1775,7 +1890,7 @@ async function runDiscover({ authorization, fromDate, toDate, lots, capitalRs },
       totals: summarize(books.flatMap((b) => b.trainTrades || [])),
     },
     note:
-      'ORB vs long/short ATM straddle on Nifty 50, Bank Nifty, and stocks. Victory = more wins than losses, then net ₹. Straddle P&L is an ATM premium proxy (index × lot), not a live option chain fill.',
+      'Desk: short ATM straddle on Nifty and Bank the moment the 15-minute opening range ends (~09:30). Paper today shows that trade as OPEN until square-off — it does not wait for the close to “find” it. Live uses the same 5m path and sells ATM CE+PE then. Late start does not chase. Stocks stay paper on completed days only.',
     scanTotals: summarize(allTrades),
     totals,
     liveTotals: totals,
@@ -1825,6 +1940,9 @@ module.exports = {
   nextDayCap,
   monthStartIso,
   scaleClosedTrade,
+  executableSpec,
+  istToday,
+  isOpenTrade,
   runDiscover,
   resolvePaperCapital,
   describeSpec,

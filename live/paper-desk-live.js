@@ -4,7 +4,7 @@
  * Kite ATM MIS orders are the only extra step. Late start does not chase.
  */
 
-const { fetchInstruments, fetchInstrumentsCsv, fetchHistorical5m, fetchQuotes } = require('./kite-market');
+const { fetchInstruments, fetchHistorical5m, fetchQuotes } = require('./kite-market');
 const { LiveBroker } = require('./live-broker');
 const {
   BOOKS,
@@ -13,7 +13,6 @@ const {
 } = require('./paper-discover');
 const {
   resolveAtmWeeklyOption,
-  resolveAtmCrudeMiniOption,
   NIFTY_50_INSTRUMENT,
   BANK_NIFTY_INSTRUMENT,
   CRUDE_OIL_MINI_INSTRUMENT,
@@ -33,35 +32,6 @@ const SPOT_KEY = {
 
 function istToday() {
   return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
-}
-
-function parseMcxOptions(csv) {
-  const lines = String(csv || '').split(/\r?\n/);
-  const out = [];
-  for (let i = 1; i < lines.length; i += 1) {
-    const cols = lines[i].split(',');
-    if (cols.length < 12) continue;
-    const itype = String(cols[9] || '').replace(/"/g, '').toUpperCase();
-    const exchange = String(cols[11] || '').replace(/"/g, '').toUpperCase();
-    const sym = String(cols[2] || '').replace(/"/g, '');
-    if (exchange !== 'MCX' || (itype !== 'CE' && itype !== 'PE')) continue;
-    if (!/^CRUDEOILM/i.test(sym)) continue;
-    out.push({
-      instrumentToken: Number(String(cols[0] || '').replace(/"/g, '')) || 0,
-      tradingSymbol: sym,
-      name: String(cols[3] || '').replace(/"/g, ''),
-      expiry: String(cols[5] || '').replace(/"/g, ''),
-      strike: Number(String(cols[6] || '').replace(/"/g, '')) || 0,
-      lotSize: Number(String(cols[8] || '').replace(/"/g, '')) || 1,
-      instrumentType: itype,
-      exchange: 'MCX',
-    });
-  }
-  return out;
-}
-
-function cepeToBrokerDir(cepe) {
-  return String(cepe).toUpperCase() === 'CE' ? 'BUY' : 'SELL';
 }
 
 class PaperDeskWorker {
@@ -118,7 +88,16 @@ class PaperDeskWorker {
     const taken = plan.allocation?.taken || [];
     const books = plan.books || [];
     const out = [];
+    const seen = new Set();
+    for (const book of books) {
+      if (book.sitOut || !book.spec) continue;
+      if (book.id !== 'nifty' && book.id !== 'bank') continue;
+      const row = taken.find((t) => t.bookId === book.id);
+      out.push({ taken: row || { bookId: book.id, lots: 1 }, book });
+      seen.add(book.id);
+    }
     for (const t of taken) {
+      if (seen.has(t.bookId)) continue;
       if (t.bookId === 'stocks' || String(t.bookId || '').startsWith('stock:')) continue;
       const book = books.find((b) => b.id === t.bookId);
       if (!book || book.sitOut || !book.spec) continue;
@@ -136,15 +115,6 @@ class PaperDeskWorker {
       return;
     }
     const today = istToday();
-    const month = this.getConfig()?.deskPlan?.month || {};
-    if (month.locked || month.mode === 'month-locked') {
-      this.heartbeat('Paper desk live — month locked at flat (red month not allowed)');
-      if (this.lastSig !== 'month-lock') {
-        this.lastSig = 'month-lock';
-        this.pushEvent('DESK', 'Month is flat after a green stretch. No new live risk.');
-      }
-      return;
-    }
     const funded = this.fundedBooks();
     if (!funded.length) {
       this.heartbeat('Paper desk live — capital sat out (same as paper)');
@@ -157,14 +127,6 @@ class PaperDeskWorker {
 
     if (!this.instruments.length) {
       this.instruments = await fetchInstruments(authorization);
-    }
-    if (!this.mcx.length && funded.some((f) => f.book.id === 'crude')) {
-      try {
-        const csv = await fetchInstrumentsCsv(authorization, 'MCX');
-        this.mcx = parseMcxOptions(csv);
-      } catch (err) {
-        this.pushEvent('DATA', `MCX list failed: ${err.message || err}`);
-      }
     }
 
     const bits = [];
@@ -183,7 +145,7 @@ class PaperDeskWorker {
         flattenOpen: false,
       });
       const openSim = sim.open;
-      let brokerOpen = null;
+      const legs = [];
       if (openSim) {
         const entryMs = Date.parse(openSim.entryTime);
         if (Number.isFinite(entryMs) && entryMs + 2 * 60 * 1000 < this.startedMs) {
@@ -192,23 +154,42 @@ class PaperDeskWorker {
             `${profile.name} signal already printed before live start — not chasing (paper still shows it)`,
           );
         } else {
-          brokerOpen = await this.toBrokerOpen(authorization, row.book.id, openSim, dayBars);
+          legs.push(...(await this.toBrokerLegs(authorization, row.book.id, openSim, dayBars)));
         }
       }
-      const brokerId = BROKER_ID[row.book.id];
-      if (brokerId) {
+      for (const leg of legs) {
         await this.broker.syncInstrument({
           authorization,
-          instrumentId: brokerId,
-          instrumentName: profile.name,
-          open: brokerOpen,
+          instrumentId: leg.instrumentId,
+          instrumentName: `${profile.name} ${leg.optionType}`,
+          open: leg.open,
           lots,
         });
       }
+      if (!legs.length) {
+        const brokerId = BROKER_ID[row.book.id];
+        if (brokerId) {
+          await this.broker.syncInstrument({
+            authorization,
+            instrumentId: `${brokerId}:CE`,
+            instrumentName: profile.name,
+            open: null,
+            lots,
+          });
+          await this.broker.syncInstrument({
+            authorization,
+            instrumentId: `${brokerId}:PE`,
+            instrumentName: profile.name,
+            open: null,
+            lots,
+          });
+        }
+      }
+      const brokerOpen = legs.length > 0;
       bits.push(
         brokerOpen
-          ? `${profile.name} ${openSim.spec?.mode || ''} ${openSim.dir > 0 ? 'CE' : 'PE'} ×${lots}`
-          : `${profile.name} watching`,
+          ? `${profile.name} short straddle ${openSim.straddle || openSim.spec?.straddle || ''} ×${lots}`
+          : `${profile.name} watching 15m OR`,
       );
     }
     const sig = bits.join(' · ');
@@ -219,56 +200,53 @@ class PaperDeskWorker {
     }
   }
 
-  async toBrokerOpen(authorization, bookId, openSim, dayBars) {
+  async toBrokerLegs(authorization, bookId, openSim, dayBars) {
     const last = dayBars[dayBars.length - 1];
     const spot = Number(openSim.entryClose) || Number(last?.close) || 0;
-    const direction = cepeToBrokerDir(openSim.dir > 0 ? 'CE' : 'PE');
-    let resolved;
-    if (bookId === 'crude') {
-      resolved = resolveAtmCrudeMiniOption({
-        instruments: this.mcx,
-        direction,
-        spot,
-        asOfDateTime: new Date().toISOString(),
-      });
-    } else {
-      let liveSpot = spot;
-      const key = SPOT_KEY[bookId];
-      if (key) {
-        try {
-          const q = await fetchQuotes(authorization, [key]);
-          liveSpot = Number(q[key]?.last_price || q[key]?.ohlc?.close) || spot;
-        } catch {
-          liveSpot = spot;
-        }
+    let liveSpot = spot;
+    const key = SPOT_KEY[bookId];
+    if (key) {
+      try {
+        const q = await fetchQuotes(authorization, [key]);
+        liveSpot = Number(q[key]?.last_price || q[key]?.ohlc?.close) || spot;
+      } catch {
+        liveSpot = spot;
       }
-      resolved = resolveAtmWeeklyOption({
+    }
+    const types = openSim.straddle || openSim.spec?.mode === 'straddle' ? ['CE', 'PE'] : [openSim.dir > 0 ? 'CE' : 'PE'];
+    const txn = openSim.straddle === 'short' || openSim.spec?.straddle === 'short' ? 'SELL' : 'BUY';
+    const stopPts = Number(openSim.premiumPts || openSim.spec?.stopPts) || 0;
+    const legs = [];
+    for (const optionType of types) {
+      const resolved = resolveAtmWeeklyOption({
         instruments: this.instruments,
         kind: ATM_KIND[bookId] || 'nifty',
-        direction,
+        direction: optionType === 'CE' ? 'BUY' : 'SELL',
         spot: liveSpot,
         asOfDateTime: new Date().toISOString(),
       });
+      const inst = resolved?.instrument || {};
+      if (!inst.instrumentToken || resolved.source === 'synthetic') continue;
+      const brokerId = `${BROKER_ID[bookId]}:${optionType}`;
+      legs.push({
+        instrumentId: brokerId,
+        optionType,
+        open: {
+          direction: txn,
+          entryTime: openSim.entryTime,
+          indexEntry: openSim.entryClose,
+          indexStop: txn === 'SELL' ? openSim.entryClose + stopPts : openSim.entryClose - stopPts,
+          indexTarget: openSim.entryClose,
+          option: inst,
+          optionEntryPremium: null,
+          premiumEstimated: false,
+          skipChargeGate: true,
+          lotsMultiplier: 1,
+        },
+      });
     }
-    const inst = resolved?.instrument || {};
-    if (!inst.instrumentToken || resolved.source === 'synthetic') return null;
-    const stopPts = Number(openSim.spec?.stopPts) || 0;
-    return {
-      direction: 'BUY',
-      entryTime: openSim.entryTime,
-      indexEntry: openSim.entryClose,
-      indexStop: openSim.dir > 0 ? openSim.entryClose - stopPts : openSim.entryClose + stopPts,
-      indexTarget:
-        openSim.dir > 0
-          ? openSim.entryClose + stopPts * (openSim.spec?.targetR || 2)
-          : openSim.entryClose - stopPts * (openSim.spec?.targetR || 2),
-      option: inst,
-      optionEntryPremium: null,
-      premiumEstimated: false,
-      skipChargeGate: true,
-      lotsMultiplier: 1,
-    };
+    return legs;
   }
 }
 
-module.exports = { PaperDeskWorker, parseMcxOptions, BROKER_ID };
+module.exports = { PaperDeskWorker, BROKER_ID };

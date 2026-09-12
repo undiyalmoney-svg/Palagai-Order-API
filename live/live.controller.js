@@ -22,7 +22,7 @@ async function health(_req, res) {
   res.json({
     status: 'ok',
     service: 'palagai-live-control',
-    note: 'Trade Bot paper desk: Nifty, Bank Nifty, Crude Mini (Kite 5m) + liquid Nifty-100 stocks (NSE daily). Walk-forward; sit out if no edge.',
+    note: 'Trade Bot paper/live: short ATM straddle on Nifty + Bank the moment the 15m opening range ends. Paper today marks it OPEN — it does not wait for the close. Same 5m path live. Late start does not chase.',
     version: APP_VERSION,
     appBuild: APP_BUILD,
     dnaId: LIVE_GREEN_DNA.id,
@@ -232,7 +232,7 @@ async function start(req, res) {
       trades: out.trades,
       totals: out.totals,
       note:
-        'Live is the paper desk with Kite ATM MIS orders. Same spec, same 5m path. Late start does not chase a signal paper already printed. Stocks stay paper.',
+        'Live is the paper desk with Kite ATM MIS orders. Same 5m path: after 09:30 it sells ATM CE+PE. Paper today shows that trade OPEN until square-off. Late start does not chase. Stocks stay paper.',
     });
     return;
   }

@@ -18,6 +18,7 @@ const {
   BOOKS,
   compareIndexBook,
   simulateStockStraddle,
+  executableSpec,
 } = require('./paper-discover');
 const { parseKiteFunds } = require('./kite-market');
 
@@ -189,6 +190,66 @@ const stockLong = simulateStockStraddle(
   { fromDate: '2026-09-11', toDate: '2026-09-11', lots: 1, symbol: 'RELIANCE', side: 'long' },
 );
 assert.ok(stockLong[0].netOptionPnlRs > 0, 'wide stock day pays long straddle');
+
+const morningOnly = trendHoldDay('2026-09-11').filter((b) => String(b.date).includes('T09:') || String(b.date).includes('T10:00'));
+const livePaper = simulate(morningOnly, executableSpec(BOOKS.nifty), {
+  fromDate: '2026-09-11',
+  toDate: '2026-09-11',
+  lots: 1,
+  book: BOOKS.nifty,
+  asOfDate: '2026-09-11',
+});
+assert.ok(
+  livePaper.some((t) => t.exitReason === 'open'),
+  'intraday paper marks the short straddle open — does not wait for the close',
+);
+assert.ok(!livePaper.some((t) => t.exitReason === 'session end'));
+
+const preOr = trendHoldDay('2026-09-11').filter((b) => {
+  const m = /T(\d{2}):(\d{2})/.exec(String(b.date));
+  return m && Number(m[1]) * 100 + Number(m[2]) < 930;
+});
+const watching = simulate(preOr, executableSpec(BOOKS.nifty), {
+  fromDate: '2026-09-11',
+  toDate: '2026-09-11',
+  lots: 1,
+  book: BOOKS.nifty,
+  asOfDate: '2026-09-11',
+});
+assert.strictEqual(watching.length, 0, 'before 09:30 paper is still watching — no look-ahead fill');
+
+const openStraddle = {
+  instrumentName: 'NIFTY 50',
+  instrumentId: 'nifty',
+  direction: 'SHORT-STRADDLE',
+  entryTime: '2026-09-11T09:30:00+0530',
+  optionPnlRs: 100,
+  chargesRs: 40,
+  netOptionPnlRs: 60,
+  lots: 1,
+  riskRs1: 2500,
+  spec: { mode: 'straddle', straddle: 'short' },
+  pnlSource: 'index_x_lot_straddle',
+  exitReason: 'open',
+  open: true,
+};
+const lockedOpen = allocateDesk({
+  capitalRs: 40000,
+  maxLots: 1,
+  maxFunded: 0,
+  books: [
+    {
+      id: 'nifty',
+      label: 'NIFTY 50',
+      train: { optionNetAfterChargesRs: 1000, profitFactor: 1.1 },
+      trades: [openStraddle],
+    },
+  ],
+});
+assert.ok(
+  lockedOpen.taken.some((t) => t.bookId === 'nifty'),
+  'an already-open short straddle stays funded even if the month cap is 0',
+);
 
 function failThenRun(date) {
   const out = [];
@@ -515,17 +576,13 @@ runDiscover(
     assert.ok(bankBook && /Bank Nifty/i.test(bankBook.why || bankBook.label));
     assert.ok(crudeBook && /Crude/i.test(crudeBook.why || crudeBook.label));
     assert.ok(out.coreBooks && out.coreBooks.length === 3);
-    assert.ok(crudeBook.why && /evening|Crude Mini|16:00/i.test(crudeBook.why));
+    assert.ok(crudeBook.why && /Crude/i.test(crudeBook.why));
     assert.ok(out.books.some((b) => b.id === 'stocks' || String(b.id).startsWith('stock:')));
     assert.ok(out.stocks && Array.isArray(out.stocks.rows));
     assert.ok(out.stocks.scanned >= 1);
     assert.ok(out.allocation);
     assert.strictEqual(out.capitalRs, 40000);
     assert.ok(out.scanTotals.trades >= 1);
-    assert.ok(
-      out.allocation.skipped.some((s) => s.bookId === 'nifty' && s.reason === 'stop-too-wide') ||
-        out.trades.every((t) => t.instrumentId === 'stock'),
-    );
     assert.ok(out.trades.every((t) => t.allocated));
     return runDiscover(
       {
@@ -545,6 +602,34 @@ runDiscover(
   .then((out) => {
     assert.strictEqual(out.capitalRs, 61200);
     assert.strictEqual(out.kiteFunds.source, 'kite');
+    const morningCandles = candles.filter((c) => {
+      if (!String(c.date).startsWith('2026-09-11')) return true;
+      const m = /T(\d{2}):(\d{2})/.exec(String(c.date));
+      if (!m) return false;
+      return Number(m[1]) * 100 + Number(m[2]) <= 1000;
+    });
+    return runDiscover(
+      {
+        authorization: 'token x',
+        fromDate: '2026-09-11',
+        toDate: '2026-09-11',
+        lots: 1,
+        capitalRs: 40000,
+      },
+      {
+        candlesByBook: { nifty: morningCandles, bank: [], crude: [] },
+        stockSeries: [{ symbol: 'RELIANCE', historical: daily }],
+        fetchUserMargins: async () => ({ capitalRs: 61200, source: 'kite' }),
+        asOfDate: '2026-09-11',
+      },
+    );
+  })
+  .then((out) => {
+    const niftyTrades = (out.books.find((b) => b.id === 'nifty')?.trades || []).concat(out.trades || []);
+    assert.ok(
+      niftyTrades.some((t) => t.exitReason === 'open' && /straddle/i.test(String(t.direction))),
+      'paper today finds the short straddle while the session is still open',
+    );
     console.log(
       'paper-discover.selftest: ok',
       out.totals,

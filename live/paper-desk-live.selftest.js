@@ -19,7 +19,7 @@ const worker = new PaperDeskWorker({
         ],
       },
       books: [
-        { id: 'nifty', spec: { mode: 'fade', stopPts: 20 }, sitOut: false, token: 256265 },
+        { id: 'nifty', spec: { mode: 'straddle', straddle: 'short', orMinutes: 15, stopPts: 20 }, sitOut: false, token: 256265 },
         { id: 'stocks', spec: { family: 'inside-day' }, sitOut: false },
         { id: 'stock:RELIANCE', spec: { family: 'inside-day' }, sitOut: false },
       ],
@@ -29,6 +29,25 @@ const worker = new PaperDeskWorker({
 const funded = worker.fundedBooks();
 assert.strictEqual(funded.length, 1);
 assert.strictEqual(funded[0].book.id, 'nifty');
+
+const watching = new PaperDeskWorker({
+  readAuth: () => ({ apiKey: 'k', accessToken: 't' }),
+  pushEvent: () => {},
+  heartbeat: () => {},
+  getConfig: () => ({
+    engine: 'paper-desk',
+    realOrders: false,
+    deskPlan: {
+      allocation: { taken: [] },
+      month: { locked: true, mode: 'month-locked' },
+      books: [
+        { id: 'nifty', spec: { mode: 'straddle', straddle: 'short', orMinutes: 15 }, sitOut: false, token: 256265 },
+        { id: 'bank', spec: { mode: 'straddle', straddle: 'short', orMinutes: 15 }, sitOut: false, token: 260105 },
+      ],
+    },
+  }),
+});
+assert.strictEqual(watching.fundedBooks().length, 2, 'live watches Nifty+Bank before the 15m print, even with empty taken');
 
 (async () => {
   const uid = `paper-desk-selftest-${Date.now()}`;
