@@ -41,7 +41,7 @@ const BOOKS = {
     token: '260105',
     unitsPerLot: LOT_UNITS.banknifty,
     strikeStep: 100,
-    iv: 0.18,
+    iv: 0.22,
     session: { entryStartHm: '09:45', entryEndHm: '14:30', squareOffHm: '15:15' },
     entryPts: 60,
     gapLo: 275,
@@ -176,6 +176,14 @@ function dailyCloses(candles) {
     .map((row) => row[1]);
 }
 
+function ivForBook(book, realized) {
+  const floor = Number(book.iv) || 0.14;
+  const cap = book.id === 'bank' ? 0.35 : 0.28;
+  const r = Number(realized);
+  if (!(r > 0)) return floor;
+  return Math.min(cap, Math.max(floor, r));
+}
+
 function mapTrade(t, book, lots, perPoint, vol) {
   const pts = Number(t.points) || 0;
   const optionPnlRs = Math.round(pts * perPoint);
@@ -189,7 +197,7 @@ function mapTrade(t, book, lots, perPoint, vol) {
   const entryHm = clockFromStamp(t.entryAt, t.entryHm || t.entryTime || '09:45');
   const exitHm = t.exitAt || t.exitTime || t.exitHm ? clockFromStamp(t.exitAt, t.exitHm || t.exitTime) : '';
   const expiry = nextWeeklyExpiry(t.date);
-  const iv = Number(vol) > 0 ? Number(vol) : Number(book.iv) || 0.14;
+  const iv = ivForBook(book, vol);
   let optionEntryPremium = null;
   let optionExitPremium = null;
   if (indexEntry != null && optionStrike != null && expiry) {

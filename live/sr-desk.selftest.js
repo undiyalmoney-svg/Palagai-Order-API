@@ -134,6 +134,28 @@ assert.ok(bankHigh.entryPrice !== 56142);
 assert.ok(bankHigh.entryPrice > 50 && bankHigh.entryPrice < 2500, `bank 56142 premium ${bankHigh.entryPrice}`);
 assert.strictEqual(bankHigh.indexEntry, 56142);
 
+const bankPe = mapTrade(
+  {
+    date: '2026-09-11',
+    option: 'PE',
+    entryTime: '12:05',
+    exitTime: '12:20',
+    exitReason: 'TARGET',
+    entryPrice: 56142,
+    exitPrice: 56100,
+    points: 20,
+  },
+  BOOKS.banknifty,
+  1,
+  30,
+);
+assert.strictEqual(bankPe.optionStrike, 56100);
+assert.ok(
+  bankPe.entryPrice >= 450 && bankPe.entryPrice <= 550,
+  `11 Sep 2026 Bank PE should be ~₹500, got ${bankPe.entryPrice}`,
+);
+assert.ok(bankPe.entryPrice !== 56142);
+
 runSrDesk(
   { authorization: 'token x', fromDate: '2026-09-11', toDate: '2026-09-11', lots: 1, capitalRs: 40000 },
   { candlesByKey: { nifty: [], banknifty: [] } },
