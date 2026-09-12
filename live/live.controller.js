@@ -139,7 +139,9 @@ function isResearchEngine(engine) {
 async function start(req, res) {
   const body = req.body || {};
   const window = parseTradeBotWindow(body);
-  const engine = String(body.engine || (body.eeWait ? 'ee-wait' : body.orderFlow ? 'order-flow' : '')).toLowerCase();
+  // Only Find engines when the client names them. A leftover eeWait payload
+  // must not steal Trade Bot paper away from Align Combo GENIE.
+  const engine = String(body.engine || '').toLowerCase();
   const universe = parseUniverse(body.universe || body.indexType);
   const config = { ...body, ...window, realOrders: window.liveMoney, engine, universe };
   const researchLive = isResearchEngine(engine);

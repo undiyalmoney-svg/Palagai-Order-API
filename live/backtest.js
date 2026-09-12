@@ -30,6 +30,7 @@ const {
   filterTradesLivePath,
   livePathReplayOpts,
   DEFAULT_LIVE_PATH,
+  isEstimatedOrSynthetic,
 } = require('./live-path');
 const { archiveInstruments, instrumentsWithArchive } = require('./instrument-archive');
 
@@ -398,21 +399,30 @@ async function runBacktest({ authorization, fromDate, toDate, config }, deps = {
     };
   });
 
+  const tagged = tagPaperTrades(rawTrades, executableTrades);
+
   return {
     fromDate,
     toDate,
     engine: 'genie',
     strategy: 'align-combo-genie',
     note:
-      'Paper replays the live desk strategy (Align Combo GENIE) on Kite 5-minute candles for the From→To dates you picked. Same engine as live; Live money is the only switch that places orders.',
+      'Paper replays Align Combo GENIE on Kite 5-minute candles for the dates you picked. Net ₹ is the strategy result. Live would take only rows marked yes.',
     config: cfg,
     riskLabels: riskStatusLabels(cfg),
     paperLivePath: useLivePath,
     books: booksLive,
-    totals: summarize(executableTrades),
+    totals: summarize(rawTrades),
+    liveTotals: summarize(executableTrades),
     rawTotals: useLivePath ? summarize(rawTrades) : undefined,
-    dayStats: dayBreakdown(executableTrades),
-    trades: executableTrades,
+    dayStats: dayBreakdown(rawTrades),
+    trades: tagged,
+    message:
+      rawTrades.length && !executableTrades.length
+        ? 'Genie fired, but live-path gates would not place those orders (see skip reason).'
+        : rawTrades.length
+          ? undefined
+          : 'Genie had no trade on this date.',
     underlyingFallback: {
       enabled: useUnderlyingFallback,
       note:
@@ -424,4 +434,26 @@ async function runBacktest({ authorization, fromDate, toDate, config }, deps = {
   };
 }
 
-module.exports = { runBacktest, summarize, dayBreakdown, addDaysIso };
+/**
+ * Strategy trades stay visible. `liveWouldTake` is whether the live desk
+ * would actually place the order (estimated marks and desk gates).
+ */
+function tagPaperTrades(rawTrades, executableTrades) {
+  const kept = new Set(executableTrades || []);
+  return (rawTrades || []).map((t) => {
+    const liveWouldTake = kept.has(t);
+    let skipReason;
+    if (!liveWouldTake) {
+      if (t.optionPnlRs == null && t.netOptionPnlRs == null) {
+        skipReason = 'Live would skip — no option mark';
+      } else if (isEstimatedOrSynthetic(t)) {
+        skipReason = 'Live would skip — option mark estimated/synthetic';
+      } else {
+        skipReason = 'Live would skip — desk gate';
+      }
+    }
+    return { ...t, liveWouldTake, skipReason };
+  });
+}
+
+module.exports = { runBacktest, summarize, dayBreakdown, addDaysIso, tagPaperTrades };

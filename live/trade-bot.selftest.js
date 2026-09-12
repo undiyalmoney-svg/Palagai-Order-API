@@ -77,5 +77,26 @@ assert.doesNotMatch(ctrl, /Auto Bot is removed/);
 
 const store = fs.readFileSync(path.join(__dirname, 'live.store.js'), 'utf8');
 assert.doesNotMatch(store, /Auto Bot retired/);
+assert.doesNotMatch(ctrl, /body\.eeWait \? 'ee-wait'/);
+
+const { tagPaperTrades, summarize } = require('./backtest');
+const kept = {
+  entryTime: '2026-09-11T10:00:00',
+  optionPnlRs: -300,
+  netOptionPnlRs: -320,
+  option: { instrumentToken: 1 },
+};
+const skipped = {
+  entryTime: '2026-09-11T11:00:00',
+  optionPnlRs: -50,
+  netOptionPnlRs: -66,
+  premiumEstimated: true,
+};
+const tagged = tagPaperTrades([kept, skipped], [kept]);
+assert.strictEqual(tagged[0].liveWouldTake, true);
+assert.strictEqual(tagged[1].liveWouldTake, false);
+assert.match(tagged[1].skipReason, /estimated/);
+assert.strictEqual(summarize([kept, skipped]).trades, 2);
+assert.strictEqual(summarize([kept]).trades, 1);
 
 console.log('trade-bot.selftest: ok');
