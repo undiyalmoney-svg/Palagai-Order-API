@@ -126,6 +126,21 @@ function toIstIso(date, hm) {
   return `${date}T${clock}+0530`;
 }
 
+function clockFromStamp(stamp, hmFallback) {
+  const s = String(stamp || '');
+  const full = s.match(/T(\d{2}):(\d{2}):(\d{2})/) || s.match(/[ T](\d{2}):(\d{2}):(\d{2})/);
+  if (full) return `${full[1]}:${full[2]}:${full[3]}`;
+  return padClock(hmFallback);
+}
+
+function asIstIso(stamp, date, hm) {
+  const s = String(stamp || '');
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(s)) {
+    return s.replace(/\+05:30$/, '+0530');
+  }
+  return toIstIso(date, hm);
+}
+
 function mapTrade(t, book, lots, perPoint) {
   const pts = Number(t.points) || 0;
   const optionPnlRs = Math.round(pts * perPoint);
@@ -136,8 +151,8 @@ function mapTrade(t, book, lots, perPoint) {
   const optionStrike = atmStrike(entryPrice, book.strikeStep || (book.id === 'bank' ? 100 : 50));
   const selectedInstrument =
     optionStrike != null ? `${book.name} ${optionStrike} ${direction}` : `${book.name} ATM ${direction}`;
-  const entryHm = padClock(t.entryTime || '09:45');
-  const exitHm = t.exitTime ? padClock(t.exitTime) : '';
+  const entryHm = clockFromStamp(t.entryAt, t.entryHm || t.entryTime || '09:45');
+  const exitHm = t.exitAt || t.exitTime || t.exitHm ? clockFromStamp(t.exitAt, t.exitHm || t.exitTime) : '';
   return {
     instrumentName: book.name,
     instrumentId: book.id,
@@ -151,8 +166,8 @@ function mapTrade(t, book, lots, perPoint) {
     exitHm: exitHm || null,
     entryClock: formatClock12(entryHm),
     exitClock: exitHm ? formatClock12(exitHm) : null,
-    entryTime: t.entryAt || toIstIso(t.date, entryHm),
-    exitTime: t.exitAt || (exitHm ? toIstIso(t.date, exitHm) : null),
+    entryTime: asIstIso(t.entryAt, t.date, entryHm),
+    exitTime: exitHm ? asIstIso(t.exitAt, t.date, exitHm) : null,
     exitReason: t.exitReason,
     open: t.exitReason === 'CLOSE' && !!t.openAtFill,
     entryPrice,

@@ -34,6 +34,30 @@ assert.strictEqual(mapped.entryHm, '10:15:00');
 assert.strictEqual(mapped.exitHm, '10:45:00');
 assert.strictEqual(mapped.entryClock, '10:15:00 AM');
 assert.strictEqual(mapped.exitClock, '10:45:00 AM');
+
+const withSeconds = mapTrade(
+  {
+    date: '2026-09-11',
+    option: 'CE',
+    entryTime: '10:15',
+    exitTime: '10:45',
+    entryAt: '2026-09-11T10:15:37+05:30',
+    exitAt: '2026-09-11T10:45:08+05:30',
+    exitReason: 'TARGET',
+    entryPrice: 25000,
+    exitPrice: 25020,
+    points: 20,
+  },
+  BOOKS.nifty,
+  1,
+  65,
+);
+assert.strictEqual(withSeconds.entryHm, '10:15:37');
+assert.strictEqual(withSeconds.exitHm, '10:45:08');
+assert.strictEqual(withSeconds.entryClock, '10:15:37 AM');
+assert.strictEqual(withSeconds.exitClock, '10:45:08 AM');
+assert.strictEqual(withSeconds.entryTime, '2026-09-11T10:15:37+0530');
+assert.strictEqual(withSeconds.exitTime, '2026-09-11T10:45:08+0530');
 assert.strictEqual(mapped.entryPrice, 25000);
 assert.strictEqual(mapped.exitPrice, 25020);
 assert.strictEqual(mapped.indexEntry, 25000);

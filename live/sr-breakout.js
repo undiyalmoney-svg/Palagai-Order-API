@@ -188,7 +188,7 @@ function runSrBreakout(bars5, opts) {
     if (minScore > 0 && score < minScore) continue;
 
     const breakoutPrice = b.c, breakoutTime = b.hm;
-    let entry = b.c, entryTime = b.hm, retestTime = null;
+    let entry = b.c, entryTime = b.hm, retestTime = null, entryAt = null;
     let after = (day5.get(b.d) || []).filter(x => hhmm(x.date) > b.hm && hhmm(x.date) <= squareOffHm);
     if (!after.length) continue;
     if (retest) {
@@ -202,6 +202,7 @@ function runSrBreakout(bars5, opts) {
       if (maxRetestBars > 0 && hi + 1 > maxRetestBars) continue;
       const fillBar = after[hi];
       entry = level; entryTime = hhmm(fillBar.date); retestTime = entryTime;
+      entryAt = fillBar.date;
       after = after.slice(hi + 1);
       // LIVE/PAPER SAME CODE: the retest bar is enough to be IN the trade.
       // Requiring a *following* 5m bar meant Live only saw the signal after that
@@ -212,9 +213,9 @@ function runSrBreakout(bars5, opts) {
         st.trades++; st.pnl += ptsOpen;
         trades.push({
           date: b.d, side: dir > 0 ? 'BUY' : 'SELL', option: dir > 0 ? 'CE' : 'PE',
-          confidence: score, entryTime, entryPrice: round2(entry), level: round2(level),
+          confidence: score, entryTime, entryAt, entryPrice: round2(entry), level: round2(level),
           breakoutTime, breakoutPrice: round2(breakoutPrice), retestTime,
-          bodyPts: round2(body), target, exitTime: entryTime, exitPrice: round2(px),
+          bodyPts: round2(body), target, exitTime: entryTime, exitAt: fillBar.date, exitPrice: round2(px),
           exitReason: 'CLOSE', points: round2(ptsOpen), openAtFill: true,
         });
         if (dayLossStop > 0 && st.pnl <= -dayLossStop) st.stopped = true;
@@ -222,7 +223,14 @@ function runSrBreakout(bars5, opts) {
         continue;
       }
     }
-    let exit = after[after.length - 1].close, exitTime = hhmm(after[after.length - 1].date), reason = 'CLOSE';
+    if (!entryAt) {
+      const hit = (day5.get(b.d) || []).find((x) => hhmm(x.date) === entryTime);
+      entryAt = hit ? hit.date : `${b.d}T${entryTime}:00+05:30`;
+    }
+    let exit = after[after.length - 1].close;
+    let exitTime = hhmm(after[after.length - 1].date);
+    let exitAt = after[after.length - 1].date;
+    let reason = 'CLOSE';
     let locked = false, bestFav = -Infinity;   // profit-lock / give-up state
     // Effective stop for THIS trade: never risk more than the day has left.
     // st.pnl is the day's running P&L in points (negative when down).
@@ -243,11 +251,11 @@ function runSrBreakout(bars5, opts) {
       // always dominates the hard stop below — operationally the stop has been
       // moved up to the lock. Checking the stop first would let an armed trade
       // take the full loss on a wide bar, which is the bug this ordering fixes.
-      if (locked && adv <= lockAtPts) { exit = entry + dir * lockAtPts; exitTime = hhmm(bar.date); reason = 'LOCK'; break; }
+      if (locked && adv <= lockAtPts) { exit = entry + dir * lockAtPts; exitTime = hhmm(bar.date); exitAt = bar.date; reason = 'LOCK'; break; }
       // HARD STOP: adverse excursion hit the cut-off → out at the stop price.
       // Deliberately evaluated before the target (see stopPts above).
-      if (effStop > 0 && adv <= -effStop) { exit = entry - dir * effStop; exitTime = hhmm(bar.date); reason = 'STOP'; break; }
-      if (target > 0 && fav >= target) { exit = entry + dir * target; exitTime = hhmm(bar.date); reason = 'TARGET'; break; }
+      if (effStop > 0 && adv <= -effStop) { exit = entry - dir * effStop; exitTime = hhmm(bar.date); exitAt = bar.date; reason = 'STOP'; break; }
+      if (target > 0 && fav >= target) { exit = entry + dir * target; exitTime = hhmm(bar.date); exitAt = bar.date; reason = 'TARGET'; break; }
       if (lockArmPts > 0 && fav >= lockArmPts) locked = true;
       // GIVE-UP: no meaningful progress by the checkpoint bar → stop waiting.
       if (giveUpBar > 0 && bi === giveUpBar - 1 && !locked && bestFav < giveUpMinPts) {
@@ -255,21 +263,20 @@ function runSrBreakout(bars5, opts) {
         // Only walk away while the damage is still small; deeper than the floor
         // this is a losing trade, not a stalled one — let the other rules run.
         if (giveUpFloorPts <= 0 || now >= -giveUpFloorPts) {
-          exit = bar.close; exitTime = hhmm(bar.date); reason = 'GIVEUP'; break;
+          exit = bar.close; exitTime = hhmm(bar.date); exitAt = bar.date; reason = 'GIVEUP'; break;
         }
       }
       // FAIL-STOP: the broken level did not hold (price closed back through it) → cut it.
-      if (failStop && (dir > 0 ? bar.close < level : bar.close > level)) { exit = bar.close; exitTime = hhmm(bar.date); reason = 'FAIL'; break; }
-      // TIME EXIT: not paying by the time limit → get out at market (this bar's close).
-      if (timeStopBars > 0 && bi >= timeStopBars - 1) { exit = bar.close; exitTime = hhmm(bar.date); reason = 'TIME'; break; }
+      if (failStop && (dir > 0 ? bar.close < level : bar.close > level)) { exit = bar.close; exitTime = hhmm(bar.date); exitAt = bar.date; reason = 'FAIL'; break; }
+      if (timeStopBars > 0 && bi >= timeStopBars - 1) { exit = bar.close; exitTime = hhmm(bar.date); exitAt = bar.date; reason = 'TIME'; break; }
     }
     const pts = dir * (exit - entry);
     st.trades++; st.pnl += pts;
     trades.push({
       date: b.d, side: dir > 0 ? 'BUY' : 'SELL', option: dir > 0 ? 'CE' : 'PE',
-      confidence: score, entryTime, entryPrice: round2(entry), level: round2(level),
+      confidence: score, entryTime, entryAt, entryPrice: round2(entry), level: round2(level),
       breakoutTime, breakoutPrice: round2(breakoutPrice), retestTime,
-      bodyPts: round2(body), target, exitTime, exitPrice: round2(exit), exitReason: reason, points: round2(pts),
+      bodyPts: round2(body), target, exitTime, exitAt, exitPrice: round2(exit), exitReason: reason, points: round2(pts),
     });
     // daily risk stop (checked after the trade completes)
     if (dayLossStop > 0 && st.pnl <= -dayLossStop) st.stopped = true;
