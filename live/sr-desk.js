@@ -257,14 +257,14 @@ function mapTrade(t, book, lots, perPoint, vol) {
   };
 }
 
-/** Desk fill = Kite option 5m close (and full OHLC). BS premium is fallback only. */
-function applyKiteOptionOhlc(mapped, pnl) {
+/** Desk fill = NSE charting 5m option close (and full OHLC). BS is fallback only. */
+function applyOptionOhlc(mapped, pnl) {
   const close = Number(pnl?.entryClose);
   if (!(close > 0) || close >= 10000) return mapped;
   mapped.entryPrice = close;
   mapped.optionEntryPremium = close;
   mapped.entryOhlc = pnl.entryOhlc || null;
-  mapped.premiumSource = 'kite-5m';
+  mapped.premiumSource = pnl.source || 'nse-5m';
   mapped.optionSymbol = pnl.optionSymbol || mapped.optionSymbol;
   const x = Number(pnl?.exitClose);
   if (x > 0 && x < 10000 && mapped.exitHm && !mapped.open) {
@@ -275,25 +275,49 @@ function applyKiteOptionOhlc(mapped, pnl) {
   return mapped;
 }
 
-async function overlayKiteOptionOhlc(mapped, rawTrade, book, authorization, deps) {
-  const injected = typeof deps.optionPnlForTrade === 'function';
+async function overlayNseOptionOhlc(mapped, rawTrade, book, deps = {}) {
+  const injected = typeof deps.fetchOption5m === 'function';
   const wantBars = deps.overlayOptionOhlc !== false;
-  const canFetch = !!(authorization && !deps.candlesByKey && wantBars);
-  if (!injected && !canFetch) return mapped;
+  if (!injected && (!wantBars || deps.candlesByKey)) return mapped;
   try {
-    const { pickOption, SPEC } = deps.srLive || require('./sr-live');
-    const spec = deps.spec || SPEC[book.key];
-    if (!spec) return mapped;
-    const fn = deps.optionPnlForTrade || require('./sr-option-pnl').optionPnlForTrade;
-    const pnl = await fn({
-      authorization,
-      spec,
-      trade: rawTrade,
-      lots: mapped.lots,
-      pickOption: deps.pickOption || pickOption,
+    const nse = deps.nseIntraday || require('./nse-option-intraday');
+    const { pickBarFlex, ohlcOf } = deps.optionPnl || require('./sr-option-pnl');
+    const root = nse.optionRootForBook(book);
+    const weekly = nse.nseWeeklyOptionSymbol(
+      root,
+      mapped.expiry,
+      mapped.optionStrike,
+      mapped.direction,
+    );
+    const monthly = nse.nseMonthlyOptionSymbol(
+      root,
+      mapped.expiry,
+      mapped.optionStrike,
+      mapped.direction,
+    );
+    if (!weekly && !monthly) return mapped;
+    const day = String(rawTrade.date || mapped.entryTime || '').slice(0, 10);
+    const fetch5m = deps.fetchOption5m || nse.fetchOption5m;
+    const candles = await fetch5m({
+      tradingSymbol: weekly || monthly,
+      symbols: [weekly, monthly].filter(Boolean),
+      fromDate: day,
+      toDate: day,
       session: deps.optionSession,
     });
-    return applyKiteOptionOhlc(mapped, pnl);
+    const entryBar = pickBarFlex(candles, rawTrade.entryTime || mapped.entryHm);
+    const exitBar = pickBarFlex(candles, rawTrade.exitTime || mapped.exitHm);
+    const entryOhlc = ohlcOf(entryBar);
+    const exitOhlc = ohlcOf(exitBar);
+    if (!entryOhlc) return mapped;
+    return applyOptionOhlc(mapped, {
+      entryClose: entryOhlc.close,
+      exitClose: exitOhlc ? exitOhlc.close : null,
+      entryOhlc,
+      exitOhlc,
+      optionSymbol: deps.optionSession?._nse5mSymbol || weekly || monthly,
+      source: 'nse-5m',
+    });
   } catch {
     return mapped;
   }
@@ -381,7 +405,7 @@ async function runSrDesk({ authorization, fromDate, toDate, lots, capitalRs }, d
       const mapped = [];
       for (const t of trades || []) {
         const row = mapTrade(t, book, L, perPoint, iv);
-        mapped.push(await overlayKiteOptionOhlc(row, t, book, authorization, {
+        mapped.push(await overlayNseOptionOhlc(row, t, book, {
           ...deps,
           optionSession,
           overlayOptionOhlc: deps.overlayOptionOhlc ?? (fromDate === toDate),
@@ -454,7 +478,7 @@ async function runSrDesk({ authorization, fromDate, toDate, lots, capitalRs }, d
     books: booksOut,
     coreBooks: booksOut.filter((b) => b.id === 'nifty' || b.id === 'bank' || b.id === 'crude'),
     note:
-      'This desk trades only Nifty 50 and Bank Nifty (S/R wall-break, with-trend). No Crude, no stocks. Paper ₹ is index points × lot. Entry/exit prices are the Kite 5-minute option OHLC close when available, otherwise the modeled ATM weekly premium — never the index. Day brake ±₹3,500. Live buys one ATM CE or PE. Crude stays off.',
+      'This desk trades only Nifty 50 and Bank Nifty (S/R wall-break, with-trend). No Crude, no stocks. Paper ₹ is index points × lot. Entry/exit prices are the NSE 5-minute option OHLC close when available, otherwise the modeled ATM weekly premium — never the index. Day brake ±₹3,500. Live buys one ATM CE or PE. Crude stays off.',
     instruments: booksOut
       .filter((b) => b.id === 'nifty' || b.id === 'bank')
       .map((b) => instrumentRow({ id: b.id, name: b.label }, b.trades || [])),
@@ -482,8 +506,8 @@ module.exports = {
   BOOKS,
   runSrDesk,
   mapTrade,
-  applyKiteOptionOhlc,
-  overlayKiteOptionOhlc,
+  applyOptionOhlc,
+  overlayNseOptionOhlc,
   atmStrike,
   nextWeeklyExpiry,
   formatClock12,

@@ -1,7 +1,8 @@
 'use strict';
 const assert = require('assert');
-const { runSrDesk, mapTrade, applyKiteOptionOhlc, overlayKiteOptionOhlc, ENGINE, BOOKS } = require('./sr-desk');
+const { runSrDesk, mapTrade, applyOptionOhlc, overlayNseOptionOhlc, ENGINE, BOOKS } = require('./sr-desk');
 const { pickBarFlex, ohlcOf } = require('./sr-option-pnl');
+const { nseWeeklyOptionSymbol } = require('./nse-option-intraday');
 const { STRATEGY_ID } = require('./sr-strategy-config');
 
 assert.strictEqual(ENGINE, 'sr-desk');
@@ -169,7 +170,7 @@ assert.strictEqual(pickBarFlex([bankBar], '12:10').close, 524);
 assert.strictEqual(pickBarFlex([bankBar], '12:05:00').close, 524);
 assert.deepStrictEqual(ohlcOf(bankBar), { open: 512.85, high: 531.80, low: 512.55, close: 524 });
 
-const kiteMarked = applyKiteOptionOhlc(
+const nseMarked = applyOptionOhlc(
   { ...bankPe, open: false, exitHm: '12:20:00' },
   {
     ok: true,
@@ -177,20 +178,25 @@ const kiteMarked = applyKiteOptionOhlc(
     exitClose: 518.4,
     entryOhlc: ohlcOf(bankBar),
     exitOhlc: { open: 524, high: 526, low: 518, close: 518.4 },
-    optionSymbol: 'BANKNIFTY25SEP56100PE',
+    optionSymbol: 'BANKNIFTY2691556100PE',
+    source: 'nse-5m',
   },
 );
-assert.strictEqual(kiteMarked.entryPrice, 524);
-assert.strictEqual(kiteMarked.optionEntryPremium, 524);
-assert.strictEqual(kiteMarked.premiumSource, 'kite-5m');
-assert.strictEqual(kiteMarked.entryOhlc.open, 512.85);
-assert.strictEqual(kiteMarked.entryOhlc.high, 531.8);
-assert.strictEqual(kiteMarked.entryOhlc.low, 512.55);
-assert.strictEqual(kiteMarked.entryOhlc.close, 524);
-assert.strictEqual(kiteMarked.exitPrice, 518.4);
+assert.strictEqual(nseMarked.entryPrice, 524);
+assert.strictEqual(nseMarked.optionEntryPremium, 524);
+assert.strictEqual(nseMarked.premiumSource, 'nse-5m');
+assert.strictEqual(nseMarked.entryOhlc.open, 512.85);
+assert.strictEqual(nseMarked.entryOhlc.high, 531.8);
+assert.strictEqual(nseMarked.entryOhlc.low, 512.55);
+assert.strictEqual(nseMarked.entryOhlc.close, 524);
+assert.strictEqual(nseMarked.exitPrice, 518.4);
+assert.strictEqual(
+  nseWeeklyOptionSymbol('BANKNIFTY', bankPe.expiry, bankPe.optionStrike, 'PE'),
+  'BANKNIFTY2691556100PE',
+);
 
 Promise.resolve()
-  .then(() => overlayKiteOptionOhlc(
+  .then(() => overlayNseOptionOhlc(
     { ...bankPe },
     {
       date: '2026-09-11',
@@ -202,26 +208,24 @@ Promise.resolve()
       points: 20,
     },
     BOOKS.banknifty,
-    'token x',
     {
       candlesByKey: { nifty: [], banknifty: [] },
-      optionPnlForTrade: async ({ trade }) => {
-        assert.strictEqual(trade.entryPrice, 56142);
-        assert.strictEqual(trade.entryTime, '12:05');
-        return {
-          ok: true,
-          entryClose: 524,
-          exitClose: 518.4,
-          entryOhlc: ohlcOf(bankBar),
-          optionSymbol: 'BANKNIFTY25SEP56100PE',
-        };
+      fetchOption5m: async ({ tradingSymbol, symbols }) => {
+        assert.ok((symbols || []).includes('BANKNIFTY2691556100PE'));
+        assert.ok((symbols || []).includes('BANKNIFTY26SEP56100PE'));
+        assert.ok(tradingSymbol === 'BANKNIFTY2691556100PE' || tradingSymbol === 'BANKNIFTY26SEP56100PE');
+        return [bankBar];
       },
     },
   ))
   .then((row) => {
     assert.strictEqual(row.entryPrice, 524);
-    assert.strictEqual(row.premiumSource, 'kite-5m');
+    assert.strictEqual(row.premiumSource, 'nse-5m');
     assert.strictEqual(row.entryOhlc.low, 512.55);
+    assert.ok(
+      row.optionSymbol === 'BANKNIFTY2691556100PE' || row.optionSymbol === 'BANKNIFTY26SEP56100PE',
+      row.optionSymbol,
+    );
     return runSrDesk(
       { authorization: 'token x', fromDate: '2026-09-11', toDate: '2026-09-11', lots: 1, capitalRs: 40000 },
       { candlesByKey: { nifty: [], banknifty: [] } },
@@ -232,7 +236,7 @@ Promise.resolve()
     assert.strictEqual(out.strategy, STRATEGY_ID);
     assert.ok(/wall-break|S\/R/i.test(out.note));
     assert.ok(/only Nifty 50 and Bank Nifty/i.test(out.note));
-    assert.ok(/Kite 5-minute option OHLC/i.test(out.note));
+    assert.ok(/NSE 5-minute option OHLC/i.test(out.note));
     assert.ok(/weekly premium/i.test(out.note));
     assert.ok(out.instruments.every((r) => r.id === 'nifty' || r.id === 'bank'));
     assert.ok(!out.instruments.some((r) => r.id === 'crude'));
