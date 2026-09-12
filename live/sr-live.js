@@ -607,7 +607,7 @@ async function pickFreshLiveEntry(session, authorization, spec, key, trades, hm,
       'SELECT',
       `${spec.name} ${option.tradingSymbol}` +
         (option.expiry ? ` exp ${option.expiry}` : '') +
-        (rolled ? ' (next expiry — skipped today)' : ''),
+        (rolled ? ' (next weekly — not today’s expiry)' : ''),
     );
     pushEvent(
       session,
