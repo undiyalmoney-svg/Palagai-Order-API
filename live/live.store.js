@@ -183,14 +183,30 @@ function readAuthPlain(session) {
 }
 
 function getWorker(session) {
+  const engine = String(session.config?.engine || '').toLowerCase();
+  const wantPaper = engine === 'paper-desk';
+  const isPaper = session.worker && session.worker.constructor && session.worker.constructor.name === 'PaperDeskWorker';
+  if (session.worker && wantPaper !== isPaper) {
+    session.worker = null;
+  }
   if (!session.worker) {
-    const { LiveWorker } = require('./live.worker');
-    session.worker = new LiveWorker({
-      readAuth: () => readAuthPlain(session),
-      pushEvent: (a, d) => pushEvent(session, a, d),
-      heartbeat: (m) => heartbeat(session, m),
-      getConfig: () => session.config,
-    });
+    if (wantPaper) {
+      const { PaperDeskWorker } = require('./paper-desk-live');
+      session.worker = new PaperDeskWorker({
+        readAuth: () => readAuthPlain(session),
+        pushEvent: (a, d) => pushEvent(session, a, d),
+        heartbeat: (m) => heartbeat(session, m),
+        getConfig: () => session.config,
+      });
+    } else {
+      const { LiveWorker } = require('./live.worker');
+      session.worker = new LiveWorker({
+        readAuth: () => readAuthPlain(session),
+        pushEvent: (a, d) => pushEvent(session, a, d),
+        heartbeat: (m) => heartbeat(session, m),
+        getConfig: () => session.config,
+      });
+    }
   }
   return session.worker;
 }
@@ -236,8 +252,9 @@ function startTickLoop(session) {
   };
   run();
   session.tickTimer = setInterval(run, 60_000);
-  heartbeat(session, 'Server Live running — strategy worker active');
-  pushEvent(session, 'WORKER', `User ${session.userId} · 60s ticks · multi-user OK`);
+  const paper = String(session.config?.engine || '').toLowerCase() === 'paper-desk';
+  heartbeat(session, paper ? 'Paper desk live — same engine as paper' : 'Server Live running — strategy worker active');
+  pushEvent(session, 'WORKER', paper ? 'Paper desk ticks · 60s · Kite orders only when Live money' : `User ${session.userId} · 60s ticks · multi-user OK`);
 }
 
 async function attachMongo(db) {
@@ -278,6 +295,36 @@ async function start(userId, config) {
   if (session.status === 'running') {
     pushEvent(session, 'START_IGNORED', 'Already running — Stop first to change books/lots');
     session.message = 'Already running. Stop first to change config.';
+    return statusPayload(session);
+  }
+  if (String(config?.engine || '').toLowerCase() === 'paper-desk') {
+    if (config.realOrders && !session.auth) {
+      const err = new Error('Push Kite token first before real money Start');
+      err.status = 400;
+      throw err;
+    }
+    session.config = {
+      engine: 'paper-desk',
+      realOrders: !!config.realOrders,
+      liveMoney: !!(config.liveMoney || config.realOrders),
+      capitalRs: config.capitalRs || null,
+      lots: config.lots || config.niftyLots || 1,
+      deskPlan: config.deskPlan || null,
+      enableNifty: true,
+      enableBank: true,
+      enableCrude: true,
+    };
+    session.status = 'running';
+    session.startedAt = new Date().toISOString();
+    session.stoppedAt = null;
+    session.message = `Paper desk live · real=${!!config.realOrders} · shadow of paper`;
+    pushEvent(
+      session,
+      'START',
+      `Paper desk (same engine as paper) · Kite orders ${config.realOrders ? 'ON' : 'OFF'}`,
+    );
+    startTickLoop(session);
+    await persistRun(session);
     return statusPayload(session);
   }
   const askedCrude = !!config?.enableCrude;

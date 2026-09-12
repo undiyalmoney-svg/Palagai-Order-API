@@ -3,6 +3,7 @@ const assert = require('assert');
 const {
   specGrid,
   simulate,
+  simulateDay,
   searchSpecs,
   runDiscover,
   simulateInsideDay,
@@ -85,6 +86,16 @@ const testTrades = simulate(candles, found.spec, { fromDate: '2026-09-11', toDat
 assert.ok(testTrades.length >= 1);
 assert.ok(testTrades.length <= 1);
 assert.strictEqual(testTrades[0].direction, 'PE');
+
+const morning = candles.filter((c) => {
+  const m = /T(\d{2}):(\d{2})/.exec(String(c.date));
+  if (!m || String(c.date).slice(0, 10) !== '2026-09-11') return false;
+  return Number(m[1]) * 100 + Number(m[2]) <= 1000;
+});
+const liveState = simulateDay(morning, found.spec, 1, BOOKS.nifty, { withOpen: true, flattenOpen: false });
+assert.ok(Array.isArray(liveState.trades));
+assert.ok(liveState.open, 'mid-session paper/live must keep the same open trade');
+assert.ok(liveState.open.dir < 0);
 
 function failThenRun(date) {
   const out = [];

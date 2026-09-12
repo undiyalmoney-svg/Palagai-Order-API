@@ -232,11 +232,12 @@ function closeTrade(open, exitBar, reason, lots, book) {
   };
 }
 
-function simulateDay(dayBars, spec, lots, book) {
+function simulateDay(dayBars, spec, lots, book, opts = {}) {
   const bars = dayBars || [];
+  const empty = opts.withOpen ? { trades: [], open: null } : [];
   const or = openingRange(bars, spec, book);
-  if (!or || !(or.width >= spec.minOrWidth)) return [];
-  if (spec.mode === 'fade' && or.width > spec.stopPts * FADE_OR_STOP_MULT) return [];
+  if (!or || !(or.width >= spec.minOrWidth)) return empty;
+  if (spec.mode === 'fade' && or.width > spec.stopPts * FADE_OR_STOP_MULT) return empty;
   const lastEntry = entryCutoffHm(spec, book);
   let broke = 0;
   let open = null;
@@ -303,8 +304,14 @@ function simulateDay(dayBars, spec, lots, book) {
     };
   }
   if (open && bars.length) {
-    trades.push(closeTrade(open, bars[bars.length - 1], 'session end', lots, book));
+    const last = bars[bars.length - 1];
+    const flatten = opts.flattenOpen !== false || barHm(last) >= book.squareOff;
+    if (flatten) {
+      trades.push(closeTrade(open, last, 'session end', lots, book));
+      open = null;
+    }
   }
+  if (opts.withOpen) return { trades, open };
   return trades;
 }
 
@@ -854,6 +861,7 @@ async function runDiscover({ authorization, fromDate, toDate, lots, capitalRs },
         totals: summarize(trades),
         trades,
         data: 'kite-5m',
+        token: loaded.token || book.token,
       });
       allTrades.push(...trades);
     } catch (err) {
@@ -966,7 +974,7 @@ async function runDiscover({ authorization, fromDate, toDate, lots, capitalRs },
       totals: summarize(books.flatMap((b) => b.trainTrades || [])),
     },
     note:
-      'Scan every book, then fund at most two highest walk-forward edges. Stops are capped at 1R, winners arm breakeven at 0.75R, fades skip wide opening ranges, and a spec that went red in the last 5 sessions sits out. 2%/4% capital rails still apply. This cuts losers; it is not a profit guarantee. Live money is not attached yet.',
+      'Paper is the shadow of live: same scan, same spec, same 5m entries/exits. Live money is the same desk with Kite ATM MIS orders. Stocks stay paper (daily cash). Start live at the session open if you want fills to match paper — late start does not chase a printed signal. Not a profit guarantee.',
     scanTotals: summarize(allTrades),
     totals,
     liveTotals: totals,
@@ -993,7 +1001,9 @@ module.exports = {
   addDaysIso,
   specGrid,
   simulate,
+  simulateDay,
   simulateInsideDay,
+  sessionBars,
   summarize,
   searchSpecs,
   searchInsideDay,

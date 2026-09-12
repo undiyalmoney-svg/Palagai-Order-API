@@ -150,14 +150,6 @@ async function start(req, res) {
     });
     return;
   }
-  if (window.liveMoney) {
-    res.status(400).json({
-      status: 'error',
-      message:
-        'Live money is not wired to the paper desk yet. Uncheck Live money — Run paper on Nifty, Bank, Crude Mini, and liquid stocks.',
-    });
-    return;
-  }
   const authorization = await kiteAuthorization(req);
   if (!authorization) {
     res.status(400).json({
@@ -166,6 +158,20 @@ async function start(req, res) {
     });
     return;
   }
+  const headerAuth = String(
+    req.headers['x-kite-authorization'] || req.headers['x-kite-authorisation'] || '',
+  );
+  const tokenBits = headerAuth.replace(/^token\s+/i, '').split(':');
+  if (tokenBits[0] && tokenBits.slice(1).join(':')) {
+    try {
+      await store.putAuth(userId(req), {
+        apiKey: tokenBits[0],
+        accessToken: tokenBits.slice(1).join(':'),
+      });
+    } catch {
+      /* stored token optional when header is present */
+    }
+  }
   const out = await runDiscover({
     authorization,
     fromDate: window.fromDate,
@@ -173,6 +179,44 @@ async function start(req, res) {
     lots: body.lots || body.niftyLots || 1,
     capitalRs: body.capitalRs || body.capital,
   });
+  if (window.liveMoney) {
+    const deskPlan = {
+      fromDate: out.fromDate,
+      toDate: out.toDate,
+      capitalRs: out.capitalRs,
+      allocation: out.allocation,
+      books: (out.books || []).map((b) => ({
+        id: b.id,
+        spec: b.spec,
+        sitOut: b.sitOut,
+        token: b.token,
+        label: b.label,
+        vehicle: b.vehicle,
+      })),
+    };
+    const live = await store.start(userId(req), {
+      engine: 'paper-desk',
+      realOrders: true,
+      liveMoney: true,
+      lots: body.lots || body.niftyLots || 1,
+      capitalRs: body.capitalRs || body.capital,
+      deskPlan,
+    });
+    res.json({
+      ...out,
+      ...live,
+      mode: 'live',
+      liveMoney: true,
+      realOrders: true,
+      shadowOf: 'paper-desk',
+      today: window.today,
+      trades: out.trades,
+      totals: out.totals,
+      note:
+        'Live is the paper desk with Kite ATM MIS orders. Same spec, same 5m path. Late start does not chase a signal paper already printed. Stocks stay paper.',
+    });
+    return;
+  }
   res.json({
     ...out,
     mode: 'paper',
