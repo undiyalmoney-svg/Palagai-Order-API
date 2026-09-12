@@ -9,6 +9,8 @@ const {
   simulateInsideDay,
   searchInsideDay,
   allocateDesk,
+  summarize,
+  specStillAlive,
   ENGINE,
   STRATEGY_FAMILY,
   RETIRED_FAMILIES,
@@ -25,6 +27,8 @@ const kitePocket = parseKiteFunds({
 });
 assert.strictEqual(kitePocket.capitalRs, 61200);
 assert.strictEqual(kitePocket.equityCash, 61200);
+assert.strictEqual(kitePocket.equityNet, 81235);
+assert.strictEqual(kitePocket.commodityCash, 1500);
 
 assert.ok(specGrid().length > 8);
 assert.strictEqual(ENGINE, 'paper-desk');
@@ -90,8 +94,9 @@ const candles = [...train, ...test];
 
 const found = searchSpecs(candles, { trainFrom: '2026-08-01', trainTo: '2026-08-10', lots: 1 });
 assert.ok(found && found.spec && !found.sitOut);
-assert.ok(found.totals.trades >= 4);
-assert.ok(found.totals.profitFactor >= 1.25);
+assert.ok(found.totals.trades >= 5);
+assert.ok(found.totals.profitFactor >= 1.5);
+assert.ok(found.totals.grossProfitRs >= found.totals.grossLossRs);
 
 const testTrades = simulate(candles, found.spec, { fromDate: '2026-09-11', toDate: '2026-09-11', lots: 1 });
 assert.ok(testTrades.length >= 1);
@@ -312,7 +317,7 @@ const several = allocateDesk({
     { id: 'stock:AAA', label: 'AAA', train: { optionNetAfterChargesRs: 2000, profitFactor: 1.4 }, trades: [fourNames[0]] },
     { id: 'stock:BBB', label: 'BBB', train: { optionNetAfterChargesRs: 1800, profitFactor: 1.3 }, trades: [fourNames[1]] },
     { id: 'stock:CCC', label: 'CCC', train: { optionNetAfterChargesRs: 1600, profitFactor: 1.5 }, trades: [fourNames[2]] },
-    { id: 'stock:DDD', label: 'DDD', train: { optionNetAfterChargesRs: 1400, profitFactor: 1.2 }, trades: [fourNames[3]] },
+    { id: 'stock:DDD', label: 'DDD', train: { optionNetAfterChargesRs: 1400, profitFactor: 1.3 }, trades: [fourNames[3]] },
     { id: 'crude', label: 'Crude Oil Mini', train: { optionNetAfterChargesRs: 4000, profitFactor: 2 }, trades: [cheapCrude] },
   ],
 });
@@ -323,8 +328,42 @@ const oneStopTrain = [
   ...train.filter((c) => !String(c.date).startsWith('2026-09-10')),
   ...failThenRun('2026-09-10'),
 ];
-const afterScratch = searchSpecs(oneStopTrain, { trainFrom: '2026-08-01', trainTo: '2026-09-10', lots: 1 });
-assert.ok(afterScratch && !afterScratch.sitOut, 'one recent red must not empty the index book');
+assert.ok(
+  found.spec &&
+    !specStillAlive(oneStopTrain, found.spec, {
+      trainFrom: '2026-08-01',
+      trainTo: '2026-09-10',
+      lots: 1,
+      book: BOOKS.nifty,
+    }),
+  'last walk-forward red sits that spec out',
+);
+
+const lastRed = allocateDesk({
+  capitalRs: 40000,
+  maxLots: 2,
+  books: [
+    {
+      id: 'crude',
+      label: 'Crude Oil Mini',
+      train: { optionNetAfterChargesRs: 4000, profitFactor: 2 },
+      trainTrades: [{ netOptionPnlRs: -40, exitReason: 'stop' }],
+      trades: [cheapCrude],
+    },
+  ],
+});
+assert.ok(lastRed.skipped.some((s) => s.reason === 'last-train-red'));
+assert.strictEqual(lastRed.taken.length, 0);
+
+const split = summarize([
+  { optionPnlRs: 120, netOptionPnlRs: 100, indexPoints: 2 },
+  { optionPnlRs: -50, netOptionPnlRs: -70, indexPoints: -1 },
+]);
+assert.strictEqual(split.grossProfitRs, 100);
+assert.strictEqual(split.grossLossRs, 70);
+assert.strictEqual(split.netRs, 30);
+assert.strictEqual(split.wins, 1);
+assert.strictEqual(split.losses, 1);
 
 runDiscover(
   {

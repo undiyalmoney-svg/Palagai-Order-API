@@ -8,9 +8,8 @@
  * Intraday family: opening-range fade OR hold (walk-forward picks per book).
  * Stocks: inside-day breakout on NSE daily.
  * A book that cannot show a walk-forward edge sits out (no forced trades).
- * After the scan, capital allocates: 2% stop per trade, 8% day stop, up to
- * six trades across books (index, crude, several stocks). Two consecutive
- * reds sit a spec out — one scratch does not empty the day.
+ * After the scan, capital allocates: 2% stop per trade, 6% day stop, up to
+ * six trades. A spec whose last walk-forward trade was red sits out.
  */
 
 const defaultMarket = require('./kite-market');
@@ -25,16 +24,16 @@ const BANK_TOKEN = 260105;
 const LOOKBACK_CAL_DAYS = 25;
 const STOCK_LOOKBACK_CAL_DAYS = 90;
 const CHARGE_RS = 20;
-const MAX_STOCK_TRADES = 8;
-const MAX_STOCK_SCAN = 40;
+const MAX_STOCK_TRADES = 4;
+const MAX_STOCK_SCAN = 30;
 const MAX_FUNDED_TRADES = 6;
 const DEFAULT_CAPITAL_RS = 40000;
 const RISK_PER_TRADE_PCT = 0.02;
-const DAY_RISK_PCT = 0.08;
+const DAY_RISK_PCT = 0.06;
 const STOCK_NAME_CAPITAL_FRAC = 0.25;
-const MIN_INDEX_TRAIN_PF = 1.25;
-const MIN_STOCK_TRAIN_PF = 1.1;
-const MIN_WIN_RATE = 0.5;
+const MIN_INDEX_TRAIN_PF = 1.5;
+const MIN_STOCK_TRAIN_PF = 1.25;
+const MIN_WIN_RATE = 0.55;
 const RECENT_SESSIONS = 5;
 const BE_R = 0.75;
 const FADE_OR_STOP_MULT = 2.2;
@@ -354,12 +353,16 @@ function summarize(trades) {
   }
   const pf = lossRs > 0 ? winRs / lossRs : wins ? 99 : 0;
   const n = (trades || []).length;
+  const net = Math.round(optionNetAfterChargesRs);
   return {
     trades: n,
     wins,
     losses,
+    grossProfitRs: Math.round(winRs),
+    grossLossRs: Math.round(lossRs),
+    netRs: net,
     optionNetRs: Math.round(optionNetRs),
-    optionNetAfterChargesRs: Math.round(optionNetAfterChargesRs),
+    optionNetAfterChargesRs: net,
     underlyingPoints: Math.round(underlyingPoints * 100) / 100,
     profitFactor: Math.round(pf * 100) / 100,
     winRate: n ? Math.round((wins / n) * 100) / 100 : 0,
@@ -377,11 +380,11 @@ function isRedTrade(t) {
 
 function scoreTrades(trades) {
   const s = summarize(trades);
-  if (s.trades < 4) return Number.NEGATIVE_INFINITY;
+  if (s.trades < 5) return Number.NEGATIVE_INFINITY;
   if (s.profitFactor < MIN_INDEX_TRAIN_PF) return Number.NEGATIVE_INFINITY;
   if (s.winRate < MIN_WIN_RATE) return Number.NEGATIVE_INFINITY;
   if (s.optionNetAfterChargesRs <= 0) return Number.NEGATIVE_INFINITY;
-  if (s.losses > 0 && s.losses / s.trades > 0.45) return Number.NEGATIVE_INFINITY;
+  if (s.losses > 0 && s.losses / s.trades > 0.3) return Number.NEGATIVE_INFINITY;
   return s.optionNetAfterChargesRs * Math.min(3, s.profitFactor) + s.wins * 15 + s.expectancyRs;
 }
 
@@ -431,10 +434,10 @@ function edgePerRisk(c) {
 
 /**
  * Scan is 1-lot. Capital then picks vehicles: 2% stop budget per trade,
- * 8% stop budget for the day (room for several names, not one 2% slot).
- * Index 1-lot stops that do not fit are skipped (no forced Nifty/Bank).
- * Stocks/crude size up when the stop is cheap.
+ * 6% stop budget for the day. Index 1-lot stops that do not fit are skipped
+ * (no forced Nifty/Bank). Stocks/crude size up when the stop is cheap.
  * Same-day Nifty + Bank in the same CE/PE keep the stronger walk-forward book.
+ * A name whose last train trade was red is not funded.
  */
 function allocateDesk({
   books = [],
@@ -451,6 +454,9 @@ function allocateDesk({
   for (const book of books || []) {
     const trainScore = Number(book.train?.optionNetAfterChargesRs) || 0;
     const trainPf = Number(book.train?.profitFactor) || 0;
+    const trainTrades = book.trainTrades || [];
+    const lastTrain = trainTrades[trainTrades.length - 1];
+    const lastTrainRed = lastTrain ? isRedTrade(lastTrain) : false;
     for (const t of book.trades || []) {
       raw.push({
         trade: t,
@@ -458,6 +464,7 @@ function allocateDesk({
         bookLabel: book.label || book.id,
         trainScore,
         trainPf,
+        lastTrainRed,
         riskRs1: tradeRiskRs1(t),
       });
     }
@@ -514,6 +521,17 @@ function allocateDesk({
         riskRs1: Math.round(c.risk1),
         reason: 'weak-train',
         detail: `Walk-forward PF ${c.trainPf} below ${minPf} — sit out`,
+      });
+      continue;
+    }
+    if (c.lastTrainRed) {
+      skipped.push({
+        instrumentName: c.trade.instrumentName,
+        bookId: c.bookId,
+        direction: c.trade.direction,
+        riskRs1: Math.round(c.risk1),
+        reason: 'last-train-red',
+        detail: 'Last walk-forward trade was a loss — sit out this name',
       });
       continue;
     }
@@ -651,12 +669,7 @@ function specStillAlive(bars, spec, { trainFrom, trainTo, lots, book }) {
     trades.push(...simulateDay(sessionBars(bars, d, book), spec, lots, book));
   }
   if (!trades.length) return false;
-  const last = trades[trades.length - 1];
-  const prev = trades[trades.length - 2];
-  if (isRedTrade(last) && prev && isRedTrade(prev)) return false;
-  const stops = trades.filter((t) => String(t.exitReason) === 'stop').length;
-  if (stops >= 3 && trades.length >= 4) return false;
-  return true;
+  return !isRedTrade(trades[trades.length - 1]);
 }
 
 function searchSpecs(bars, { trainFrom, trainTo, lots, book } = {}) {
@@ -689,16 +702,6 @@ function isInsideDay(inside, older) {
   return Number(inside.high) <= Number(older.high) && Number(inside.low) >= Number(older.low);
 }
 
-function priorRangeSqueeze(rows, i) {
-  if (i < 5) return false;
-  const ranges = [];
-  for (let k = i - 4; k <= i - 1; k += 1) {
-    ranges.push(Math.abs(Number(rows[k].high) - Number(rows[k].low)));
-  }
-  const y = ranges[ranges.length - 1];
-  return y > 0 && y <= Math.min(...ranges);
-}
-
 function simulateInsideDay(bars, spec, { fromDate, toDate, lots, symbol } = {}) {
   const L = Math.max(1, Math.floor(Number(lots)) || 1);
   const rows = (bars || []).slice().sort((a, b) => String(a.date).localeCompare(String(b.date)));
@@ -710,7 +713,7 @@ function simulateInsideDay(bars, spec, { fromDate, toDate, lots, symbol } = {}) 
     if (toDate && d > toDate) continue;
     const inside = rows[i - 1];
     const older = rows[i - 2];
-    if (!isInsideDay(inside, older) && !priorRangeSqueeze(rows, i)) continue;
+    if (!isInsideDay(inside, older)) continue;
     let dir = 0;
     if (Number(day.close) > Number(inside.high)) dir = 1;
     else if (Number(day.close) < Number(inside.low)) dir = -1;
@@ -777,8 +780,8 @@ function searchInsideDay(bars, { trainFrom, trainTo, lots, symbol } = {}) {
       lots,
       symbol,
     });
-    const lastTwo = trades.slice(-2);
-    if (lastTwo.length === 2 && lastTwo.every(isRedTrade)) continue;
+    const last = trades[trades.length - 1];
+    if (last && isRedTrade(last)) continue;
     const row = { spec, trades, totals: summarize(trades), score: scoreStockTrades(trades), symbol };
     if (!best || row.score > best.score) best = row;
   }
@@ -1036,7 +1039,7 @@ async function runDiscover({ authorization, fromDate, toDate, lots, capitalRs },
     allocation,
     specText: allocation.taken.length
       ? allocation.taken.map((t) => `${t.instrumentName} ×${t.lots}`).join(' · ')
-      : 'Capital sat out (scan had setups the 2%/8% stop budget would not fund)',
+      : 'Capital sat out (scan had setups the 2%/6% stop budget would not fund)',
     books,
     stocks: stockPayload,
     train: {
@@ -1045,7 +1048,7 @@ async function runDiscover({ authorization, fromDate, toDate, lots, capitalRs },
       totals: summarize(books.flatMap((b) => b.trainTrades || [])),
     },
     note:
-      'Kite funds size the desk. It can take several books in one session (index, crude, several stocks) inside a 2% per-trade / 8% day stop budget. Two consecutive reds sit a spec out; one scratch does not empty the day. Live is the same engine plus Kite orders.',
+      'Kite available funds size the desk. Names whose last walk-forward trade was red sit out. 2% per trade / 6% day stop. Live is the same engine plus Kite orders.',
     scanTotals: summarize(allTrades),
     totals,
     liveTotals: totals,
