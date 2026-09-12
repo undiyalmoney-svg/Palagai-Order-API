@@ -679,6 +679,81 @@ function simulate(bars, spec, { fromDate, toDate, lots, book, asOfDate } = {}) {
   return trades;
 }
 
+function instrumentLedger({ books = [], trades = [] } = {}) {
+  const rows = new Map();
+  for (const b of books || []) {
+    const s = b.totals || summarize(b.trades || []);
+    rows.set(b.id || b.label, {
+      id: b.id || b.label,
+      instrumentName: b.label || b.vehicle || b.id,
+      sitOut: !!b.sitOut,
+      status: b.status,
+      trades: s.trades || 0,
+      wins: s.wins || 0,
+      losses: s.losses || 0,
+      grossProfitRs: s.grossProfitRs || 0,
+      grossLossRs: s.grossLossRs || 0,
+      netRs: s.netRs ?? s.optionNetAfterChargesRs ?? 0,
+      source: 'scan',
+      riskRs: 0,
+    });
+  }
+  const byName = new Map();
+  for (const t of trades || []) {
+    const key = t.instrumentId || t.allocation?.bookId || t.instrumentName || 'book';
+    if (!byName.has(key)) byName.set(key, []);
+    byName.get(key).push(t);
+  }
+  for (const [key, list] of byName) {
+    const s = summarize(list);
+    const riskRs = Math.round(list.reduce((n, t) => n + (Number(t.allocation?.riskRs) || 0), 0));
+    const prev = rows.get(key);
+    rows.set(key, {
+      id: key,
+      instrumentName: list[0]?.instrumentName || prev?.instrumentName || key,
+      sitOut: false,
+      status: 'funded',
+      trades: s.trades,
+      wins: s.wins,
+      losses: s.losses,
+      grossProfitRs: s.grossProfitRs,
+      grossLossRs: s.grossLossRs,
+      netRs: s.netRs,
+      source: 'funded',
+      riskRs,
+    });
+  }
+  return [...rows.values()];
+}
+
+function capitalProtection({ capitalRs, kiteFunds, allocation, month } = {}) {
+  const fundsRs = Math.floor(Number(kiteFunds?.equityCash || kiteFunds?.capitalRs) || 0);
+  const capital = Math.max(0, Math.floor(Number(allocation?.capitalRs || capitalRs) || 0));
+  const riskPerTradeRs = Math.round(
+    Number(allocation?.riskPerTradeRs) || capital * RISK_PER_TRADE_PCT,
+  );
+  const dayRiskRs = Math.round(Number(allocation?.dayRiskRs) || capital * DAY_RISK_PCT);
+  const dayRiskUsedRs = Math.round(Number(allocation?.dayRiskUsedRs) || 0);
+  const protectedFloorRs = Math.max(0, capital - dayRiskRs);
+  const stillProtectedRs = Math.max(0, capital - dayRiskUsedRs);
+  return {
+    fundsRs,
+    capitalRs: capital,
+    riskPerTradePct: RISK_PER_TRADE_PCT,
+    dayRiskPct: DAY_RISK_PCT,
+    riskPerTradeRs,
+    dayRiskRs,
+    dayRiskUsedRs,
+    dayRiskLeftRs: Math.max(0, dayRiskRs - dayRiskUsedRs),
+    protectedFloorRs,
+    stillProtectedRs,
+    monthMtdRs: Math.round(Number(month?.mtdRs) || 0),
+    monthLocked: !!month?.locked,
+    monthMode: month?.mode || null,
+    monthRule: month?.rule || null,
+  };
+}
+
 function summarize(trades) {
   let optionNetRs = 0;
   let optionNetAfterChargesRs = 0;
@@ -1892,6 +1967,13 @@ async function runDiscover({ authorization, fromDate, toDate, lots, capitalRs },
     note:
       'Desk: short ATM straddle on Nifty and Bank the moment the 15-minute opening range ends (~09:30). Paper today shows that trade as OPEN until square-off — it does not wait for the close to “find” it. Live uses the same 5m path and sells ATM CE+PE then. Late start does not chase. Stocks stay paper on completed days only.',
     scanTotals: summarize(allTrades),
+    instruments: instrumentLedger({ books, trades: takenTrades }),
+    protection: capitalProtection({
+      capitalRs: capital,
+      kiteFunds,
+      allocation,
+      month: allocation.month,
+    }),
     totals,
     liveTotals: totals,
     trades: takenTrades,
@@ -1944,6 +2026,8 @@ module.exports = {
   istToday,
   isOpenTrade,
   runDiscover,
+  instrumentLedger,
+  capitalProtection,
   resolvePaperCapital,
   describeSpec,
   pickCrudeMiniFromCsv,

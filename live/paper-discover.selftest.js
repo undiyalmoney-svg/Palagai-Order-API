@@ -19,6 +19,8 @@ const {
   compareIndexBook,
   simulateStockStraddle,
   executableSpec,
+  instrumentLedger,
+  capitalProtection,
 } = require('./paper-discover');
 const { parseKiteFunds } = require('./kite-market');
 
@@ -553,6 +555,41 @@ assert.strictEqual(split.netRs, 30);
 assert.strictEqual(split.wins, 1);
 assert.strictEqual(split.losses, 1);
 
+const prot = capitalProtection({
+  capitalRs: 40000,
+  kiteFunds: { equityCash: 28816, capitalRs: 28816 },
+  allocation: { capitalRs: 28816, riskPerTradeRs: 576, dayRiskRs: 1729, dayRiskUsedRs: 576 },
+  month: { mtdRs: 200, locked: false, mode: 'protect-green' },
+});
+assert.strictEqual(prot.fundsRs, 28816);
+assert.strictEqual(prot.protectedFloorRs, 28816 - 1729);
+assert.strictEqual(prot.stillProtectedRs, 28816 - 576);
+assert.strictEqual(prot.dayRiskLeftRs, 1729 - 576);
+
+const led = instrumentLedger({
+  books: [{ id: 'nifty', label: 'NIFTY 50', totals: { trades: 2, wins: 1, losses: 1, grossProfitRs: 400, grossLossRs: 100, netRs: 300 } }],
+  trades: [
+    {
+      instrumentName: 'NIFTY 50',
+      instrumentId: 'nifty',
+      netOptionPnlRs: 400,
+      optionPnlRs: 420,
+      allocation: { riskRs: 576 },
+    },
+    {
+      instrumentName: 'NIFTY 50',
+      instrumentId: 'nifty',
+      netOptionPnlRs: -100,
+      optionPnlRs: -80,
+      allocation: { riskRs: 576 },
+    },
+  ],
+});
+assert.strictEqual(led[0].grossProfitRs, 400);
+assert.strictEqual(led[0].grossLossRs, 100);
+assert.strictEqual(led[0].netRs, 300);
+assert.strictEqual(led[0].status, 'funded');
+
 runDiscover(
   {
     authorization: 'token x',
@@ -582,7 +619,9 @@ runDiscover(
     assert.ok(out.stocks.scanned >= 1);
     assert.ok(out.allocation);
     assert.strictEqual(out.capitalRs, 40000);
-    assert.ok(out.scanTotals.trades >= 1);
+    assert.ok(Array.isArray(out.instruments));
+    assert.ok(out.protection && out.protection.protectedFloorRs >= 0);
+    assert.ok(out.instruments.some((r) => r.instrumentName));
     assert.ok(out.trades.every((t) => t.allocated));
     return runDiscover(
       {
