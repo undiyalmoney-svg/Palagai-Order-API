@@ -191,15 +191,13 @@ assert.strictEqual(longTrend.length, 1);
 assert.strictEqual(shortTrend.length, 1);
 assert.ok(longTrend[0].netOptionPnlRs > shortTrend[0].netOptionPnlRs, 'trending day favors long straddle over short');
 
-const deskShort = executableSpec(BOOKS.nifty);
-assert.strictEqual(deskShort.straddle, 'short');
-assert.ok(deskShort.skipBreakout);
-assert.strictEqual(
-  simulateDay(trendHoldDay('2026-09-11'), deskShort, 1, BOOKS.nifty).length,
-  0,
-  'desk short straddle sits out a 15m breakout instead of paying the trend',
-);
-const rangeShort = simulateDay(rangeInsideDay('2026-09-11'), deskShort, 1, BOOKS.nifty);
+const deskSpec = executableSpec(BOOKS.nifty);
+assert.strictEqual(deskSpec.straddle, 'adaptive');
+const deskTrend = simulateDay(trendHoldDay('2026-09-11'), deskSpec, 1, BOOKS.nifty);
+assert.strictEqual(deskTrend.length, 1, 'breakout day buys the long straddle instead of sitting out');
+assert.strictEqual(deskTrend[0].direction, 'LONG-STRADDLE');
+assert.ok(deskTrend[0].netOptionPnlRs > 0, 'trend expansion pays the long straddle');
+const rangeShort = simulateDay(rangeInsideDay('2026-09-11'), deskSpec, 1, BOOKS.nifty);
 assert.strictEqual(rangeShort.length, 1, 'desk shorts when price is still inside the 15m range at 10:00');
 assert.strictEqual(rangeShort[0].direction, 'SHORT-STRADDLE');
 assert.ok(rangeShort[0].netOptionPnlRs > 0, 'quiet inside-range day keeps the short premium');
@@ -229,8 +227,9 @@ const deskBatch = summarize(
 assert.ok(deskBatch.trades >= 1, '2-month-style batch still books range shorts');
 assert.ok(
   deskBatch.netRs > sellEveryDay.netRs,
-  `sitting out breakouts is more profitable than selling every day (${deskBatch.netRs} vs ${sellEveryDay.netRs})`,
+  `adaptive long+short is more profitable than selling every day (${deskBatch.netRs} vs ${sellEveryDay.netRs})`,
 );
+assert.ok(deskBatch.grossLossRs === 0 || deskBatch.netRs > 0, 'desk batch stays net green on this mixed window');
 
 const { historicalChunks } = require('./kite-market');
 assert.ok(historicalChunks('2026-07-14', '2026-09-12', 60).length >= 2, '2 months of 5m history splits into 60-day chunks');
@@ -731,7 +730,7 @@ runDiscover(
     assert.ok(out.trades.every((t) => t.allocated));
     assert.ok(
       out.trades.some((t) => /SHORT-STRADDLE/i.test(String(t.direction))),
-      'paper books the short straddle, not a capital sit-out',
+      'paper books the index straddle, not a capital sit-out',
     );
     return runDiscover(
       {

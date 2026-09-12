@@ -188,7 +188,7 @@ class PaperDeskWorker {
       const brokerOpen = legs.length > 0;
       bits.push(
         brokerOpen
-          ? `${profile.name} short straddle ${openSim.straddle || openSim.spec?.straddle || ''} ×${lots}`
+          ? `${profile.name} ${openSim.straddle || 'adaptive'} straddle ×${lots}`
           : `${profile.name} watching 15m OR`,
       );
     }
@@ -214,7 +214,7 @@ class PaperDeskWorker {
       }
     }
     const types = openSim.straddle || openSim.spec?.mode === 'straddle' ? ['CE', 'PE'] : [openSim.dir > 0 ? 'CE' : 'PE'];
-    const txn = openSim.straddle === 'short' || openSim.spec?.straddle === 'short' ? 'SELL' : 'BUY';
+    const txn = openSim.straddle === 'short' ? 'SELL' : 'BUY';
     const stopPts = Number(openSim.premiumPts || openSim.spec?.stopPts) || 0;
     const legs = [];
     for (const optionType of types) {

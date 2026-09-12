@@ -481,20 +481,28 @@ function closeOutsideOr(close, or) {
   return Number(close) > Number(or.high) || Number(close) < Number(or.low);
 }
 
-function findStraddleEntryIndex(bars, spec, or, book) {
+function pickStraddleEntry(bars, spec, or, book) {
   const endHm = or ? or.endHm : hmPlus(book.orAnchor, spec.orMinutes || 15);
-  const filtered = spec.straddle === 'short' && spec.skipBreakout;
   const confirmHm = Number(spec.confirmHm) || STRADDLE_CONFIRM_HM;
+  const adaptive = spec.straddle === 'adaptive' || !!spec.adaptive;
+  const shortOnly = spec.straddle === 'short' && spec.skipBreakout && !adaptive;
   for (let i = 0; i < bars.length; i += 1) {
     const hm = barHm(bars[i]);
     if (hm < endHm) continue;
-    if (filtered) {
-      if (closeOutsideOr(bars[i].close, or)) return -1;
-      if (hm < confirmHm) continue;
+    const outside = closeOutsideOr(bars[i].close, or);
+    if (adaptive) {
+      if (outside) return { index: i, side: 'long' };
+      if (hm >= confirmHm) return { index: i, side: 'short' };
+      continue;
     }
-    return i;
+    if (shortOnly) {
+      if (outside) return null;
+      if (hm < confirmHm) continue;
+      return { index: i, side: 'short' };
+    }
+    return { index: i, side: spec.straddle === 'short' ? 'short' : 'long' };
   }
-  return -1;
+  return null;
 }
 
 function simulateStraddleDay(bars, spec, lots, book, opts = {}) {
@@ -502,34 +510,40 @@ function simulateStraddleDay(bars, spec, lots, book, opts = {}) {
   if (!(bars || []).length) return empty;
   if (spec.skipGap && overnightGapPct(bars, opts.prevClose) > GAP_SKIP_PCT) return empty;
   const or = openingRange(bars, spec, book);
-  if (spec.straddle === 'short' && spec.skipBreakout && !or) return empty;
-  const entryIdx = findStraddleEntryIndex(bars, spec, or, book);
-  if (entryIdx < 0) return empty;
-  const entryBar = bars[entryIdx];
+  const adaptive = spec.straddle === 'adaptive' || !!spec.adaptive;
+  if ((adaptive || spec.skipBreakout) && !or) return empty;
+  const picked = pickStraddleEntry(bars, spec, or, book);
+  if (!picked) return empty;
+  const entryBar = bars[picked.index];
   const premium = atmPremiumPts(book, Number(entryBar.close), or ? or.width : 0);
-  const side = spec.straddle === 'short' ? 'short' : 'long';
-  const liveSpec = { ...spec, premiumPts: premium, mode: 'straddle', straddle: side };
+  const side = picked.side;
+  const liveSpec = { ...spec, premiumPts: premium, mode: 'straddle', straddle: side, adaptive };
   let open = {
     dir: 0,
     straddle: side,
     spec: liveSpec,
     entryClose: Number(entryBar.close),
     entryTime: entryBar.date,
-    entryIndex: entryIdx,
+    entryIndex: picked.index,
     premiumPts: premium,
   };
   const trades = [];
   const shortStop = premium * 2 + Math.max(Number(spec.stopPts) || 0, Math.round(premium * 0.5));
   const thetaLockHm = Number(spec.thetaLockHm) || 0;
-  for (let i = entryIdx + 1; i < bars.length; i += 1) {
+  const longTarget = premium * 3;
+  for (let i = picked.index + 1; i < bars.length; i += 1) {
     const bar = bars[i];
     const hm = barHm(bar);
-    const move = Math.abs(Number(bar.close) - open.entryClose);
+    const close = Number(bar.close);
+    const move = Math.abs(close - open.entryClose);
     let reason = null;
     if (side === 'short' && move >= shortStop) reason = 'straddle stop';
     else if (side === 'short' && thetaLockHm && hm >= thetaLockHm && move <= premium * 0.45) {
       reason = 'theta lock';
-    } else if (hm >= book.squareOff) reason = `square-off ${book.squareOff}`;
+    } else if (side === 'long' && or && hm >= (Number(spec.confirmHm) || STRADDLE_CONFIRM_HM) && !closeOutsideOr(close, or)) {
+      reason = 'failed break';
+    } else if (side === 'long' && move >= longTarget) reason = 'vol expansion';
+    else if (hm >= book.squareOff) reason = `square-off ${book.squareOff}`;
     if (reason) {
       trades.push(closeStraddleTrade(open, bar, reason, lots, book));
       open = null;
@@ -647,11 +661,11 @@ function executableSpec(book) {
     engine: ENGINE,
     family: 'straddle',
     mode: 'straddle',
-    straddle: 'short',
+    straddle: 'adaptive',
+    adaptive: true,
     orMinutes: 15,
     stopPts: book.stopPts[0],
     confirmHm: STRADDLE_CONFIRM_HM,
-    skipBreakout: true,
     thetaLockHm: STRADDLE_THETA_LOCK_HM,
   };
 }
@@ -1388,7 +1402,7 @@ function stampCoreBooks(books, allocation) {
     const skip = lastSkipForBook(allocation, b.id);
     if (taken.length) {
       b.status = 'taken';
-      b.why = `Taken · ${b.label || b.name} short straddle ×${taken.reduce((n, t) => n + (Number(t.lots) || 1), 0)}`;
+      b.why = `Taken · ${b.label || b.name} ${taken[0]?.direction || 'straddle'} ×${taken.reduce((n, t) => n + (Number(t.lots) || 1), 0)}`;
     } else if (b.id === 'crude') {
       b.status = 'off';
       b.why = 'Crude is off this desk.';
@@ -1400,7 +1414,7 @@ function stampCoreBooks(books, allocation) {
       b.why = b.why || `${b.label} is off.`;
     } else if (!(b.trades || []).length) {
       b.status = 'waiting';
-      b.why = `No ${b.label} print yet — short straddle only if price is still inside the 15m range at 10:00.`;
+      b.why = `No ${b.label} print yet — short if still inside the 15m range at 10:00, long if it already broke.`;
     } else {
       b.status = 'not-taken';
       b.why = deskSkipWhy(b, skip, month);
@@ -1415,6 +1429,9 @@ function describeSpec(spec, book) {
     return `${book?.name || ''} ORB · ${spec.orMinutes}m range, stop ${spec.stopPts}pt, ${spec.targetR}R`.trim();
   }
     if (spec.mode === 'straddle') {
+    if (spec.straddle === 'adaptive' || spec.adaptive) {
+      return `${book?.name || ''} adaptive ATM straddle · short if still inside ${spec.orMinutes || 15}m OR at ${spec.confirmHm || STRADDLE_CONFIRM_HM} · long on breakout`.trim();
+    }
     const when = spec.skipBreakout
       ? `short ATM straddle · still inside ${spec.orMinutes || 15}m OR at ${spec.confirmHm || STRADDLE_CONFIRM_HM} (breakouts sit out)`
       : `${spec.straddle === 'short' ? 'short' : 'long'} ATM straddle · after ${spec.orMinutes || 15}m OR`;
@@ -1806,8 +1823,8 @@ function bookDeskStraddles(books, { fromDate, toDate } = {}) {
         takenMap.set(book.id, {
           instrumentName: book.label || scaled.instrumentName,
           bookId: book.id,
-          direction: 'SHORT-STRADDLE',
-          lots: 1,
+          direction: scaled.direction || 'STRADDLE',
+          lots: Math.max(1, Number(scaled.lots) || 1),
           riskRs: Math.round(Number(scaled.riskRs1) || 0),
         });
       }
@@ -1816,7 +1833,7 @@ function bookDeskStraddles(books, { fromDate, toDate } = {}) {
       takenMap.set(book.id, {
         instrumentName: book.label,
         bookId: book.id,
-        direction: 'SHORT-STRADDLE',
+        direction: 'ADAPTIVE-STRADDLE',
         lots: 1,
         riskRs: 0,
       });
@@ -1844,7 +1861,7 @@ async function runDiscover({ authorization, fromDate, toDate, lots, capitalRs },
   const market = deps.market || defaultMarket;
   const maxLots = Math.max(1, Math.floor(Number(lots)) || 1);
   const { capital, kiteFunds } = await resolvePaperCapital(authorization, capitalRs, deps, market);
-  const L = 1;
+  const L = Math.max(1, maxLots);
   const monthFrom = monthStartIso(fromDate);
   const warmFrom = addDaysIso(fromDate, -LOOKBACK_CAL_DAYS);
   const trainTo = addDaysIso(fromDate, -1);
@@ -2040,7 +2057,7 @@ async function runDiscover({ authorization, fromDate, toDate, lots, capitalRs },
     token: BOOKS.crude.token,
     bars: 0,
     status: 'sit-out',
-    why: 'Live/paper desk is Nifty + Bank short straddle (inside 15m OR at 10:00). Crude is not fetched, so a 2-month Kite batch only pulls the two index books (3s between books and between history chunks).',
+    why: 'Live/paper desk is Nifty + Bank adaptive ATM straddle (short inside OR at 10:00, long on breakout). Crude is not fetched, so a 2-month Kite batch only pulls the two index books (3s between books and between history chunks).',
   });
 
   allTrades.sort((a, b) => String(a.entryTime).localeCompare(String(b.entryTime)));
@@ -2071,8 +2088,8 @@ async function runDiscover({ authorization, fromDate, toDate, lots, capitalRs },
     month: allocation.month,
     compare,
     specText: desk.taken.length
-      ? desk.taken.map((t) => `${t.instrumentName} short straddle ×${t.lots}`).join(' · ')
-      : 'No Nifty/Bank short straddle in this window',
+      ? desk.taken.map((t) => `${t.instrumentName} ${String(t.direction || 'straddle').toLowerCase()} ×${t.lots}`).join(' · ')
+      : 'No Nifty/Bank straddle in this window',
     books,
     coreBooks,
     stocks: stockPayload,
@@ -2082,7 +2099,7 @@ async function runDiscover({ authorization, fromDate, toDate, lots, capitalRs },
       totals: summarize(books.flatMap((b) => b.trainTrades || [])),
     },
     note:
-      'Desk books the short ATM straddle (1 lot Nifty + 1 lot Bank) only when price is still inside the 15-minute opening range at 10:00. Breakout days sit out so a trend cannot spend the premium. Quiet shorts lock at 11:15. Paper fetches ~2 months of 5m history in 60-day chunks with 3s gaps. Live sells ATM CE+PE the same way.',
+      'Desk takes both sides of the ATM straddle on Nifty + Bank (Max lots). Still inside the 15m range at 10:00 → sell CE+PE. Already broke → buy CE+PE. Month lock / 2% walls do not drop these books. Quiet shorts lock at 11:15. Paper fetches ~2 months of 5m history in 60-day chunks with 3s gaps.',
     scanTotals: summarize(allTrades),
     instruments: instrumentLedger({ books, trades: takenTrades }),
     protection: capitalProtection({
@@ -2096,7 +2113,7 @@ async function runDiscover({ authorization, fromDate, toDate, lots, capitalRs },
     trades: takenTrades,
     message: takenTrades.length
       ? undefined
-      : 'No short straddle printed (weekend, before 10:00, or the open already broke the 15m range). Pick session days or Run 2 months.',
+      : 'No straddle printed (weekend or before the 15m range). Pick session days or Run 2 months.',
   };
 }
 
