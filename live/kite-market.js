@@ -36,6 +36,10 @@ async function getWithRetry(url, opts, label = 'kite', retries = 3) {
       const res = await client.get(url, opts);
       if (res.status >= 500 || res.status === 429) {
         lastErr = new Error(`${label} HTTP ${res.status}`);
+        if (res.status === 429 && attempt < retries) {
+          await delay(3000 * attempt);
+          continue;
+        }
       } else {
         return res;
       }
@@ -213,22 +217,26 @@ function historicalChunks(fromDate, toDate, maxDays = 90) {
 function maxDaysForInterval(interval) {
   const iv = String(interval || '5minute').toLowerCase();
   if (iv === 'minute') return 50;
-  if (iv === '3minute' || iv === '5minute' || iv === '10minute' || iv === '15minute') return 90;
+  if (iv === '3minute' || iv === '5minute' || iv === '10minute' || iv === '15minute') return 60;
   if (iv === '30minute') return 180;
   if (iv === '60minute') return 360;
   if (iv === 'day') return 1800;
-  return 90;
+  return 60;
 }
 
 async function fetchHistoricalInterval(authorization, instrumentToken, fromDate, toDate, interval = '5minute', opts = {}) {
   const iv = interval || '5minute';
+  const gapMs = Number(opts.chunkGapMs);
+  const waitMs = Number.isFinite(gapMs) ? Math.max(0, gapMs) : 3000;
   const chunks = historicalChunks(fromDate, toDate, maxDaysForInterval(iv));
   if (chunks.length <= 1) {
     return fetchHistoricalCandles(authorization, instrumentToken, fromDate, toDate, iv, opts);
   }
   const all = [];
   const seen = new Set();
-  for (const [from, to] of chunks) {
+  for (let i = 0; i < chunks.length; i += 1) {
+    if (i > 0 && waitMs) await delay(waitMs);
+    const [from, to] = chunks[i];
     const rows = await fetchHistoricalCandles(authorization, instrumentToken, from, to, iv, opts);
     for (const r of rows) {
       if (seen.has(r.date)) continue;

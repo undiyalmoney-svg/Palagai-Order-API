@@ -1364,7 +1364,7 @@ function stampCoreBooks(books, allocation) {
     const skip = lastSkipForBook(allocation, b.id);
     if (taken.length) {
       b.status = 'taken';
-      b.why = `Taken ×${taken.reduce((n, t) => n + (Number(t.lots) || 1), 0)}`;
+      b.why = `Taken · ${b.label || b.name} short straddle ×${taken.reduce((n, t) => n + (Number(t.lots) || 1), 0)}`;
     } else if (b.id === 'crude') {
       b.status = 'off';
       b.why = 'Crude is off this desk.';
@@ -1707,7 +1707,9 @@ async function loadBookCandles(market, authorization, book, warmFrom, toDate, de
       throw new Error('No CRUDEOILM future on the Kite MCX list');
     }
   }
-  const candles = await market.fetchHistorical5m(authorization, token, warmFrom, toDate);
+  const candles = await market.fetchHistorical5m(authorization, token, warmFrom, toDate, {
+    chunkGapMs: deps.chunkGapMs ?? (deps.candlesByBook ? 0 : 3000),
+  });
   return { candles, token, symbol };
 }
 
@@ -1762,6 +1764,49 @@ async function resolvePaperCapital(authorization, capitalRs, deps, market) {
   return { capital, kiteFunds: kiteFunds || null };
 }
 
+function bookDeskStraddles(books, { fromDate, toDate } = {}) {
+  const trades = [];
+  const takenMap = new Map();
+  for (const book of books || []) {
+    if (book.id !== 'nifty' && book.id !== 'bank') continue;
+    for (const t of book.trades || []) {
+      const day = tradeDay(t);
+      if (fromDate && day < fromDate) continue;
+      if (toDate && day > toDate) continue;
+      const scaled = scaleClosedTrade(t, 1);
+      trades.push(scaled);
+      if (!takenMap.has(book.id)) {
+        takenMap.set(book.id, {
+          instrumentName: book.label || scaled.instrumentName,
+          bookId: book.id,
+          direction: 'SHORT-STRADDLE',
+          lots: 1,
+          riskRs: Math.round(Number(scaled.riskRs1) || 0),
+        });
+      }
+    }
+    if (!takenMap.has(book.id) && book.spec && !book.sitOut) {
+      takenMap.set(book.id, {
+        instrumentName: book.label,
+        bookId: book.id,
+        direction: 'SHORT-STRADDLE',
+        lots: 1,
+        riskRs: 0,
+      });
+    }
+  }
+  trades.sort((a, b) => String(a.entryTime).localeCompare(String(b.entryTime)));
+  return {
+    trades,
+    taken: [...takenMap.values()],
+    totals: summarize(trades),
+  };
+}
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function runDiscover({ authorization, fromDate, toDate, lots, capitalRs }, deps = {}) {
   if (!fromDate || !toDate || fromDate > toDate) {
     const err = new Error('Valid fromDate ≤ toDate (YYYY-MM-DD) required');
@@ -1785,6 +1830,11 @@ async function runDiscover({ authorization, fromDate, toDate, lots, capitalRs },
   let stockPayload = { source: 'nse-daily', universe: 'nifty-100', scanned: 0, taken: [], rows: [] };
 
   for (const id of bookIds) {
+    if (books.length) {
+      const gapDefault = deps.candlesByBook ? 0 : 3000;
+      const gap = Number.isFinite(Number(deps.bookGapMs)) ? Number(deps.bookGapMs) : gapDefault;
+      if (gap > 0) await wait(gap);
+    }
     const book = BOOKS[id];
     try {
       const loaded = await loadBookCandles(market, authorization, book, warmFrom, toDate, deps);
@@ -1971,11 +2021,18 @@ async function runDiscover({ authorization, fromDate, toDate, lots, capitalRs },
   }
 
   allTrades.sort((a, b) => String(a.entryTime).localeCompare(String(b.entryTime)));
-  const allocation = allocateMonth({ books, capitalRs: capital, maxLots, fromDate, toDate });
+  const monthAlloc = allocateMonth({ books, capitalRs: capital, maxLots, fromDate, toDate });
+  const desk = bookDeskStraddles(books, { fromDate, toDate });
+  const allocation = {
+    ...monthAlloc,
+    taken: desk.taken,
+    trades: desk.trades,
+    totals: desk.totals,
+  };
   const compare = compareAll({ fromDate, toDate, books: compareBooks });
   stampCoreBooks(books, allocation);
-  const totals = allocation.totals;
-  const takenTrades = allocation.trades;
+  const totals = desk.totals;
+  const takenTrades = desk.trades;
   const coreBooks = books.filter((b) => b.id === 'nifty' || b.id === 'bank' || b.id === 'crude');
 
   return {
@@ -1990,9 +2047,9 @@ async function runDiscover({ authorization, fromDate, toDate, lots, capitalRs },
     allocation,
     month: allocation.month,
     compare,
-    specText: allocation.taken.length
-      ? allocation.taken.map((t) => `${t.instrumentName} ×${t.lots}`).join(' · ')
-      : 'Capital sat out (scan had setups the 2%/6% stop budget would not fund)',
+    specText: desk.taken.length
+      ? desk.taken.map((t) => `${t.instrumentName} short straddle ×${t.lots}`).join(' · ')
+      : 'No Nifty/Bank short straddle in this window',
     books,
     coreBooks,
     stocks: stockPayload,
@@ -2002,23 +2059,21 @@ async function runDiscover({ authorization, fromDate, toDate, lots, capitalRs },
       totals: summarize(books.flatMap((b) => b.trainTrades || [])),
     },
     note:
-      'Desk: short ATM straddle on Nifty and Bank the moment the 15-minute opening range ends (~09:30). Paper today shows that trade as OPEN until square-off — it does not wait for the close to “find” it. Live uses the same 5m path and sells ATM CE+PE then. Late start does not chase. Stocks stay paper on completed days only.',
+      'Desk is the short ATM straddle: 1 lot Nifty + 1 lot Bank after the 15-minute opening range (~09:30). Paper books every session in the date range (batch fetch with 3s gaps when Kite limits). Live sells ATM CE+PE the same way. Big trend days can lose.',
     scanTotals: summarize(allTrades),
     instruments: instrumentLedger({ books, trades: takenTrades }),
     protection: capitalProtection({
       capitalRs: capital,
       kiteFunds,
       allocation,
-      month: allocation.month,
+      month: monthAlloc.month,
     }),
     totals,
     liveTotals: totals,
     trades: takenTrades,
     message: takenTrades.length
       ? undefined
-      : allTrades.length
-        ? 'Scan found setups, but capital would not fund any 1-lot stop (raise capital, or the cheap book had no signal).'
-        : 'No book had a qualified setup on this date (weekend, sit-out, or no OR/inside-day). Pick a session day.',
+      : 'No short straddle printed in this window (weekend, or before 09:30). Pick session days or Run 2 months.',
   };
 }
 
@@ -2060,6 +2115,7 @@ module.exports = {
   monthStartIso,
   scaleClosedTrade,
   executableSpec,
+  bookDeskStraddles,
   istToday,
   isOpenTrade,
   runDiscover,

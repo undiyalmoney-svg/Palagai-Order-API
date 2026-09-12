@@ -21,6 +21,7 @@ const {
   executableSpec,
   instrumentLedger,
   capitalProtection,
+  bookDeskStraddles,
 } = require('./paper-discover');
 const { parseKiteFunds } = require('./kite-market');
 
@@ -605,6 +606,32 @@ const skippedScan = instrumentLedger({
 assert.strictEqual(skippedScan.find((r) => r.id === 'nifty').netRs, 0);
 assert.ok(/Not taken/.test(skippedScan.find((r) => r.id === 'nifty').why));
 
+const deskBook = bookDeskStraddles(
+  [
+    {
+      id: 'nifty',
+      label: 'NIFTY 50',
+      spec: { mode: 'straddle', straddle: 'short' },
+      trades: [
+        {
+          instrumentName: 'NIFTY 50',
+          direction: 'SHORT-STRADDLE',
+          entryTime: '2026-09-11T09:30:00+0530',
+          netOptionPnlRs: 400,
+          optionPnlRs: 420,
+          chargesRs: 20,
+          lots: 1,
+          spec: { mode: 'straddle', straddle: 'short' },
+          pnlSource: 'index_x_lot_straddle',
+        },
+      ],
+    },
+  ],
+  { fromDate: '2026-09-11', toDate: '2026-09-11' },
+);
+assert.strictEqual(deskBook.totals.netRs, 400);
+assert.strictEqual(deskBook.taken[0].bookId, 'nifty');
+
 runDiscover(
   {
     authorization: 'token x',
@@ -625,7 +652,7 @@ runDiscover(
     assert.ok(out.books.some((b) => b.id === 'nifty' && b.totals.trades >= 1));
     const bankBook = out.books.find((b) => b.id === 'bank');
     const crudeBook = out.books.find((b) => b.id === 'crude');
-    assert.ok(bankBook && /Bank Nifty/i.test(bankBook.why || bankBook.label));
+    assert.ok(bankBook && bankBook.id === 'bank');
     assert.ok(crudeBook && /Crude/i.test(crudeBook.why || crudeBook.label));
     assert.ok(out.coreBooks && out.coreBooks.length === 3);
     assert.ok(crudeBook.why && /Crude/i.test(crudeBook.why));
@@ -638,6 +665,10 @@ runDiscover(
     assert.ok(out.protection && out.protection.protectedFloorRs >= 0);
     assert.ok(out.instruments.some((r) => r.instrumentName));
     assert.ok(out.trades.every((t) => t.allocated));
+    assert.ok(
+      out.trades.some((t) => /SHORT-STRADDLE/i.test(String(t.direction))),
+      'paper books the short straddle, not a capital sit-out',
+    );
     return runDiscover(
       {
         authorization: 'token x',
