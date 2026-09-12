@@ -356,7 +356,7 @@ class LiveBroker {
       if (open?.option) {
         this.pushEvent(
           'PAPER',
-          `PAPER: would buy ${niceOption(open.option.tradingSymbol)} (Nifty at ${open.indexEntry})`,
+          `PAPER: would ${open.direction === 'SELL' ? 'sell' : 'buy'} ${niceOption(open.option.tradingSymbol)} (index ${open.indexEntry})`,
         );
       }
       return;

@@ -1,8 +1,8 @@
 const store = require('./live.store');
-const { runBacktest } = require('./backtest');
+const { runDiscover } = require('./paper-discover');
 const { parseTradeBotWindow } = require('./trade-bot-dates');
 const { getOptionOhlcAndPrice } = require('./option-ohlc');
-const { findEntryExitWait, runEeWaitPaper, getLastFound, parseUniverse } = require('./ee-wait-research');
+const { findEntryExitWait, getLastFound, parseUniverse } = require('./ee-wait-research');
 const {
   APP_BUILD,
   APP_VERSION,
@@ -22,7 +22,7 @@ async function health(_req, res) {
   res.json({
     status: 'ok',
     service: 'palagai-live-control',
-    note: 'Trade Bot: paper and live share one engine. Live money checkbox places Kite orders.',
+    note: 'Trade Bot paper/live: short ATM straddle on Nifty + Bank the moment the 15m opening range ends. Paper today marks it OPEN — it does not wait for the close. Same 5m path live. Late start does not chase.',
     version: APP_VERSION,
     appBuild: APP_BUILD,
     dnaId: LIVE_GREEN_DNA.id,
@@ -70,6 +70,24 @@ async function status(req, res) {
 async function events(req, res) {
   const s = store.statusFor(userId(req));
   res.json({ events: s.events || [] });
+}
+
+async function funds(req, res) {
+  const authorization = await kiteAuthorization(req);
+  if (!authorization) {
+    res.status(400).json({
+      status: 'error',
+      message: 'Kite session required — Get Token, then retry.',
+    });
+    return;
+  }
+  const { fetchUserMargins } = require('./kite-market');
+  try {
+    const out = await fetchUserMargins(authorization);
+    res.json({ status: 'ok', fetchedAt: new Date().toISOString(), ...out });
+  } catch (err) {
+    res.status(400).json({ status: 'error', message: err.message || String(err) });
+  }
 }
 
 async function defaults(_req, res) {
@@ -128,8 +146,8 @@ async function kiteAuthorization(req) {
 }
 
 /**
- * One Trade Bot run. Paper and live are the same engine.
- * `liveMoney` (or `realOrders`) is the only switch that places Kite orders.
+ * One Trade Bot run. Paper discovers a new spec for the picked dates.
+ * Live money is the only switch that places Kite orders.
  */
 function isResearchEngine(engine) {
   const e = String(engine || '').toLowerCase();
@@ -139,9 +157,8 @@ function isResearchEngine(engine) {
 async function start(req, res) {
   const body = req.body || {};
   const window = parseTradeBotWindow(body);
-  const engine = String(body.engine || (body.eeWait ? 'ee-wait' : body.orderFlow ? 'order-flow' : '')).toLowerCase();
+  const engine = String(body.engine || '').toLowerCase();
   const universe = parseUniverse(body.universe || body.indexType);
-  const config = { ...body, ...window, realOrders: window.liveMoney, engine, universe };
   const researchLive = isResearchEngine(engine);
   if (researchLive && window.liveMoney && universe === 'nifty-100-stocks') {
     res.status(400).json({
@@ -151,59 +168,79 @@ async function start(req, res) {
     });
     return;
   }
-  if (researchLive && !window.liveMoney) {
-    const out = await runEeWaitPaper({
-      fromDate: window.fromDate,
-      toDate: window.toDate,
-      today: window.today,
-      lots: body.lots || body.niftyLots || 1,
-      spec: body.eeWait || body.spec || body.orderFlow,
-      engine,
-      indexType: body.indexType,
-      universe,
-      symbol: body.symbol,
-    });
-    res.json({
-      ...out,
-      mode: 'paper',
-      liveMoney: false,
-      realOrders: false,
-      today: window.today,
+  const authorization = await kiteAuthorization(req);
+  if (!authorization) {
+    res.status(400).json({
+      status: 'error',
+      message: 'Kite session required — Get Token, then Run (or push the token).',
     });
     return;
   }
-  if (!window.liveMoney) {
-    const authorization = await kiteAuthorization(req);
-    if (!authorization) {
-      res.status(400).json({
-        status: 'error',
-        message: 'Kite session required — Get Token, then Run (or push the token).',
+  const headerAuth = String(
+    req.headers['x-kite-authorization'] || req.headers['x-kite-authorisation'] || '',
+  );
+  const tokenBits = headerAuth.replace(/^token\s+/i, '').split(':');
+  if (tokenBits[0] && tokenBits.slice(1).join(':')) {
+    try {
+      await store.putAuth(userId(req), {
+        apiKey: tokenBits[0],
+        accessToken: tokenBits.slice(1).join(':'),
       });
-      return;
+    } catch {
+      /* stored token optional when header is present */
     }
-    const out = await runBacktest({
-      authorization,
-      fromDate: window.fromDate,
-      toDate: window.toDate,
-      config,
-    });
-    res.json({
-      ...out,
-      mode: 'paper',
-      liveMoney: false,
-      realOrders: false,
-      today: window.today,
-    });
-    return;
   }
-  const out = await store.start(userId(req), config);
-  res.json({
-    ...out,
-    mode: 'live',
-    liveMoney: true,
-    realOrders: true,
+  const out = await runDiscover({
+    authorization,
     fromDate: window.fromDate,
     toDate: window.toDate,
+    lots: body.lots || body.niftyLots || 1,
+    capitalRs: body.capitalRs || body.capital,
+  });
+  if (window.liveMoney) {
+    const deskPlan = {
+      fromDate: out.fromDate,
+      toDate: out.toDate,
+      capitalRs: out.capitalRs,
+      allocation: out.allocation,
+      month: out.month || out.allocation?.month,
+      books: (out.books || []).map((b) => ({
+        id: b.id,
+        spec: b.spec,
+        sitOut: b.sitOut,
+        token: b.token,
+        label: b.label,
+        vehicle: b.vehicle,
+      })),
+    };
+    const live = await store.start(userId(req), {
+      engine: 'paper-desk',
+      realOrders: true,
+      liveMoney: true,
+      lots: body.lots || body.niftyLots || 1,
+      capitalRs: body.capitalRs || body.capital,
+      deskPlan,
+    });
+    res.json({
+      ...out,
+      ...live,
+      mode: 'live',
+      liveMoney: true,
+      realOrders: true,
+      shadowOf: 'paper-desk',
+      today: window.today,
+      trades: out.trades,
+      totals: out.totals,
+      note:
+        'Live is the paper desk with Kite ATM MIS orders. Same 5m path: after 09:30 it sells ATM CE+PE. Paper today shows that trade OPEN until square-off. Late start does not chase. Stocks stay paper.',
+    });
+    return;
+  }
+  res.json({
+    ...out,
+    mode: 'paper',
+    liveMoney: false,
+    realOrders: false,
     today: window.today,
   });
 }
@@ -281,4 +318,4 @@ async function lastEeWait(_req, res) {
   res.json({ status: 'ok', found: getLastFound() });
 }
 
-module.exports = { health, status, events, defaults, start, stop, putAuth, backtest, optionOhlc, findEeWait, lastEeWait };
+module.exports = { health, status, events, funds, defaults, start, stop, putAuth, backtest, optionOhlc, findEeWait, lastEeWait };
