@@ -440,23 +440,22 @@ function searchInsideDay(bars, { trainFrom, trainTo, lots, symbol } = {}) {
   return { ...best, sitOut: false };
 }
 
-function pickCrudeMiniToken(instruments) {
-  const rows = Array.isArray(instruments) ? instruments : [];
+function pickCrudeMiniFromCsv(csv) {
+  const lines = String(csv || '').split(/\r?\n/);
   const futs = [];
-  for (const row of rows) {
-    const sym = String(row.tradingSymbol || '').toUpperCase();
-    const type = String(row.instrumentType || '').toUpperCase();
-    const ex = String(row.exchange || row.segment || '').toUpperCase();
-    if (!/^CRUDEOILM/.test(sym) || type !== 'FUT') continue;
-    if (ex && !/MCX/.test(ex)) continue;
-    futs.push({
-      token: Number(row.instrumentToken) || 0,
-      symbol: sym,
-      expiry: String(row.expiry || ''),
-    });
+  for (let i = 1; i < lines.length; i += 1) {
+    const cols = lines[i].split(',');
+    if (cols.length < 12) continue;
+    const token = Number(String(cols[0] || '').replace(/"/g, '')) || 0;
+    const sym = String(cols[2] || '').replace(/"/g, '').toUpperCase();
+    const type = String(cols[9] || '').replace(/"/g, '').toUpperCase();
+    const expiry = String(cols[5] || '').replace(/"/g, '');
+    if (!/^CRUDEOILM/.test(sym) || type !== 'FUT' || !token) continue;
+    futs.push({ token, symbol: sym, expiry });
   }
   futs.sort((a, b) => String(a.expiry).localeCompare(String(b.expiry)));
-  return futs.find((f) => f.token > 0) || null;
+  const today = new Date().toISOString().slice(0, 10);
+  return futs.find((f) => !f.expiry || f.expiry >= today) || futs[0] || null;
 }
 
 async function loadBookCandles(market, authorization, book, warmFrom, toDate, deps) {
@@ -466,11 +465,15 @@ async function loadBookCandles(market, authorization, book, warmFrom, toDate, de
   let token = book.token;
   let symbol = book.name;
   if (book.id === 'crude') {
-    const instruments = deps.instruments || (await market.fetchInstruments(authorization));
-    const fut = pickCrudeMiniToken(instruments);
-    if (!fut) throw new Error('No CRUDEOILM future on the Kite MCX list');
-    token = fut.token;
-    symbol = fut.symbol;
+    if (typeof market.fetchInstrumentsCsv === 'function') {
+      const csv = await market.fetchInstrumentsCsv(authorization, 'MCX');
+      const fut = pickCrudeMiniFromCsv(csv);
+      if (!fut) throw new Error('No CRUDEOILM future on the Kite MCX list');
+      token = fut.token;
+      symbol = fut.symbol;
+    } else {
+      throw new Error('No CRUDEOILM future on the Kite MCX list');
+    }
   }
   const candles = await market.fetchHistorical5m(authorization, token, warmFrom, toDate);
   return { candles, token, symbol };
@@ -644,5 +647,5 @@ module.exports = {
   searchInsideDay,
   runDiscover,
   describeSpec,
-  pickCrudeMiniToken,
+  pickCrudeMiniFromCsv,
 };
