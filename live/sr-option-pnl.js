@@ -31,15 +31,46 @@ function tickPrem(p) {
   return Number(Math.max(TICK, Math.round(n / TICK) * TICK).toFixed(2));
 }
 
-/** Last 5-min option bar whose clock is <= hm (causal). */
+function hmAdd(hm, deltaMin) {
+  const n = hmToMin(hm);
+  if (n == null) return '';
+  const x = Math.max(0, n + Number(deltaMin) || 0);
+  const h = String(Math.floor(x / 60)).padStart(2, '0');
+  const m = String(x % 60).padStart(2, '0');
+  return `${h}:${m}`;
+}
+
+/** Prefer the exact 5m stamp; else the next/prev 5m (Kite option bars often sit on :10 when the index fill is :05). */
+function pickBarFlex(candles, hm) {
+  return pickBar(candles, hm)
+    || pickBar(candles, hmAdd(hm, 5))
+    || pickBar(candles, hmAdd(hm, -5));
+}
+
+function ohlcOf(bar) {
+  if (!bar) return null;
+  const close = Number(bar.close);
+  if (!(close > 0)) return null;
+  const open = Number(bar.open);
+  const high = Number(bar.high);
+  const low = Number(bar.low);
+  return {
+    open: Number.isFinite(open) && open > 0 ? open : close,
+    high: Number.isFinite(high) && high > 0 ? high : close,
+    low: Number.isFinite(low) && low > 0 ? low : close,
+    close,
+  };
+}
+
 function pickBar(candles, hm) {
-  if (!Array.isArray(candles) || !hm) return null;
+  const want = String(hm || '').slice(0, 5);
+  if (!Array.isArray(candles) || !want) return null;
   let last = null;
   for (const c of candles) {
     const h = hmOf(c.date);
     if (!h) continue;
-    if (h <= hm) last = c;
-    if (h === hm) return c;
+    if (h <= want) last = c;
+    if (h === want) return c;
   }
   return last;
 }
@@ -167,8 +198,10 @@ async function optionPnlForTrade({ authorization, spec, trade, lots, session, pi
   const day = trade.date;
   const { candles: rawBars, barsSource } = await loadOptionCandles(authorization, pick, day, cache._optHist);
   const candles = Array.isArray(rawBars) ? rawBars : [];
-  const entryBar = pickBar(candles, trade.entryTime);
-  const exitBar = pickBar(candles, trade.exitTime) || (candles.length ? candles[candles.length - 1] : null);
+  const entryBar = pickBarFlex(candles, trade.entryTime);
+  const exitBar = pickBarFlex(candles, trade.exitTime) || (candles.length ? candles[candles.length - 1] : null);
+  const entryOhlc = ohlcOf(entryBar);
+  const exitOhlc = ohlcOf(exitBar);
   const friction = liveFriction();
   const entryPrem = liveLikeEntryPrem(entryBar, friction);
   let exitPrem = liveLikeExitPrem(exitBar, friction);
@@ -199,11 +232,16 @@ async function optionPnlForTrade({ authorization, spec, trade, lots, session, pi
   const gross = optionRupees(entryPrem, exitPrem, lotSize, lots);
   if (gross == null) {
     return {
+      ok: !!(entryOhlc && entryOhlc.close > 0),
       rupees: null, rupeesSource: 'unavailable', reason: 'no-option-bars',
       optionSymbol: pick.tradingSymbol, instrumentToken: Number(pick.instrumentToken) || 0,
       lotSize, barsSource,
       optionEntryPremium: entryPrem || null,
       optionExitPremium: exitPrem || null,
+      entryClose: entryOhlc ? entryOhlc.close : null,
+      exitClose: exitOhlc ? exitOhlc.close : null,
+      entryOhlc,
+      exitOhlc,
     };
   }
   const charged = estimateRoundTripCharges({
@@ -211,12 +249,17 @@ async function optionPnlForTrade({ authorization, spec, trade, lots, session, pi
   });
   const chargesRs = Math.round(Number(charged.totalRs) || 0);
   return {
+    ok: true,
     rupees: Math.round(gross - chargesRs),
     rupeesSource: barsSource === 'cache' ? 'option-cache' : 'option-live',
     optionSymbol: pick.tradingSymbol,
     instrumentToken: Number(pick.instrumentToken) || 0,
     optionEntryPremium: entryPrem,
     optionExitPremium: exitPrem,
+    entryClose: entryOhlc ? entryOhlc.close : null,
+    exitClose: exitOhlc ? exitOhlc.close : null,
+    entryOhlc,
+    exitOhlc,
     lotSize,
     chargesRs,
     exitVia,
@@ -264,6 +307,6 @@ function summarizeOptionTrades(trades) {
 }
 
 module.exports = {
-  optionRupees, pickBar, optionPnlForTrade, summarizeOptionTrades, summarizeSidecar, hmOf,
+  optionRupees, pickBar, pickBarFlex, ohlcOf, optionPnlForTrade, summarizeOptionTrades, summarizeSidecar, hmOf,
   liveLikeEntryPrem, liveLikeExitPrem, slLimitFill, markOneOpenLeg, barsInHold,
 };

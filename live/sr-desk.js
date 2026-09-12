@@ -257,6 +257,47 @@ function mapTrade(t, book, lots, perPoint, vol) {
   };
 }
 
+/** Desk fill = Kite option 5m close (and full OHLC). BS premium is fallback only. */
+function applyKiteOptionOhlc(mapped, pnl) {
+  const close = Number(pnl?.entryClose);
+  if (!(close > 0) || close >= 10000) return mapped;
+  mapped.entryPrice = close;
+  mapped.optionEntryPremium = close;
+  mapped.entryOhlc = pnl.entryOhlc || null;
+  mapped.premiumSource = 'kite-5m';
+  mapped.optionSymbol = pnl.optionSymbol || mapped.optionSymbol;
+  const x = Number(pnl?.exitClose);
+  if (x > 0 && x < 10000 && mapped.exitHm && !mapped.open) {
+    mapped.exitPrice = x;
+    mapped.optionExitPremium = x;
+    mapped.exitOhlc = pnl.exitOhlc || null;
+  }
+  return mapped;
+}
+
+async function overlayKiteOptionOhlc(mapped, rawTrade, book, authorization, deps) {
+  const injected = typeof deps.optionPnlForTrade === 'function';
+  const canFetch = !!(authorization && !deps.candlesByKey);
+  if (!injected && !canFetch) return mapped;
+  try {
+    const { pickOption, SPEC } = deps.srLive || require('./sr-live');
+    const spec = deps.spec || SPEC[book.key];
+    if (!spec) return mapped;
+    const fn = deps.optionPnlForTrade || require('./sr-option-pnl').optionPnlForTrade;
+    const pnl = await fn({
+      authorization,
+      spec,
+      trade: rawTrade,
+      lots: mapped.lots,
+      pickOption: deps.pickOption || pickOption,
+      session: deps.optionSession,
+    });
+    return applyKiteOptionOhlc(mapped, pnl);
+  } catch {
+    return mapped;
+  }
+}
+
 function instrumentRow(book, trades) {
   const tot = summarize(trades);
   return {
@@ -335,7 +376,12 @@ async function runSrDesk({ authorization, fromDate, toDate, lots, capitalRs }, d
       });
       const closes = dailyCloses(candles);
       const iv = realizedVolAnnualized(closes, closes.length - 1, 20);
-      const mapped = (trades || []).map((t) => mapTrade(t, book, L, perPoint, iv));
+      const optionSession = deps.optionSession || {};
+      const mapped = [];
+      for (const t of trades || []) {
+        const row = mapTrade(t, book, L, perPoint, iv);
+        mapped.push(await overlayKiteOptionOhlc(row, t, book, authorization, { ...deps, optionSession }));
+      }
       allTrades.push(...mapped);
       booksOut.push({
         id: book.id,
@@ -403,7 +449,7 @@ async function runSrDesk({ authorization, fromDate, toDate, lots, capitalRs }, d
     books: booksOut,
     coreBooks: booksOut.filter((b) => b.id === 'nifty' || b.id === 'bank' || b.id === 'crude'),
     note:
-      'This desk trades only Nifty 50 and Bank Nifty (S/R wall-break, with-trend). No Crude, no stocks. Paper ₹ is index points × lot. Entry/exit prices are the ATM weekly option premium (modeled), not the index. Day brake ±₹3,500. Live buys one ATM CE or PE. Crude stays off.',
+      'This desk trades only Nifty 50 and Bank Nifty (S/R wall-break, with-trend). No Crude, no stocks. Paper ₹ is index points × lot. Entry/exit prices are the Kite 5-minute option OHLC close when available, otherwise the modeled ATM weekly premium — never the index. Day brake ±₹3,500. Live buys one ATM CE or PE. Crude stays off.',
     instruments: booksOut
       .filter((b) => b.id === 'nifty' || b.id === 'bank')
       .map((b) => instrumentRow({ id: b.id, name: b.label }, b.trades || [])),
@@ -431,6 +477,8 @@ module.exports = {
   BOOKS,
   runSrDesk,
   mapTrade,
+  applyKiteOptionOhlc,
+  overlayKiteOptionOhlc,
   atmStrike,
   nextWeeklyExpiry,
   formatClock12,

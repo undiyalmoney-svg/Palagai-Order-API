@@ -1,6 +1,7 @@
 'use strict';
 const assert = require('assert');
-const { runSrDesk, mapTrade, ENGINE, BOOKS } = require('./sr-desk');
+const { runSrDesk, mapTrade, applyKiteOptionOhlc, overlayKiteOptionOhlc, ENGINE, BOOKS } = require('./sr-desk');
+const { pickBarFlex, ohlcOf } = require('./sr-option-pnl');
 const { STRATEGY_ID } = require('./sr-strategy-config');
 
 assert.strictEqual(ENGINE, 'sr-desk');
@@ -156,16 +157,83 @@ assert.ok(
 );
 assert.ok(bankPe.entryPrice !== 56142);
 
-runSrDesk(
-  { authorization: 'token x', fromDate: '2026-09-11', toDate: '2026-09-11', lots: 1, capitalRs: 40000 },
-  { candlesByKey: { nifty: [], banknifty: [] } },
-)
+const bankBar = {
+  date: '2026-09-11T12:10:00+0530',
+  open: 512.85,
+  high: 531.80,
+  low: 512.55,
+  close: 524.00,
+};
+assert.strictEqual(pickBarFlex([bankBar], '12:05').close, 524);
+assert.strictEqual(pickBarFlex([bankBar], '12:10').close, 524);
+assert.strictEqual(pickBarFlex([bankBar], '12:05:00').close, 524);
+assert.deepStrictEqual(ohlcOf(bankBar), { open: 512.85, high: 531.80, low: 512.55, close: 524 });
+
+const kiteMarked = applyKiteOptionOhlc(
+  { ...bankPe, open: false, exitHm: '12:20:00' },
+  {
+    ok: true,
+    entryClose: 524,
+    exitClose: 518.4,
+    entryOhlc: ohlcOf(bankBar),
+    exitOhlc: { open: 524, high: 526, low: 518, close: 518.4 },
+    optionSymbol: 'BANKNIFTY25SEP56100PE',
+  },
+);
+assert.strictEqual(kiteMarked.entryPrice, 524);
+assert.strictEqual(kiteMarked.optionEntryPremium, 524);
+assert.strictEqual(kiteMarked.premiumSource, 'kite-5m');
+assert.strictEqual(kiteMarked.entryOhlc.open, 512.85);
+assert.strictEqual(kiteMarked.entryOhlc.high, 531.8);
+assert.strictEqual(kiteMarked.entryOhlc.low, 512.55);
+assert.strictEqual(kiteMarked.entryOhlc.close, 524);
+assert.strictEqual(kiteMarked.exitPrice, 518.4);
+
+Promise.resolve()
+  .then(() => overlayKiteOptionOhlc(
+    { ...bankPe },
+    {
+      date: '2026-09-11',
+      option: 'PE',
+      entryTime: '12:05',
+      exitTime: '12:20',
+      entryPrice: 56142,
+      exitPrice: 56100,
+      points: 20,
+    },
+    BOOKS.banknifty,
+    'token x',
+    {
+      candlesByKey: { nifty: [], banknifty: [] },
+      optionPnlForTrade: async ({ trade }) => {
+        assert.strictEqual(trade.entryPrice, 56142);
+        assert.strictEqual(trade.entryTime, '12:05');
+        return {
+          ok: true,
+          entryClose: 524,
+          exitClose: 518.4,
+          entryOhlc: ohlcOf(bankBar),
+          optionSymbol: 'BANKNIFTY25SEP56100PE',
+        };
+      },
+    },
+  ))
+  .then((row) => {
+    assert.strictEqual(row.entryPrice, 524);
+    assert.strictEqual(row.premiumSource, 'kite-5m');
+    assert.strictEqual(row.entryOhlc.low, 512.55);
+    return runSrDesk(
+      { authorization: 'token x', fromDate: '2026-09-11', toDate: '2026-09-11', lots: 1, capitalRs: 40000 },
+      { candlesByKey: { nifty: [], banknifty: [] } },
+    );
+  })
   .then((out) => {
     assert.strictEqual(out.engine, ENGINE);
     assert.strictEqual(out.strategy, STRATEGY_ID);
     assert.ok(/wall-break|S\/R/i.test(out.note));
     assert.ok(/only Nifty 50 and Bank Nifty/i.test(out.note));
-    assert.ok(/option premium/i.test(out.note));
+    assert.ok(/Kite 5-minute option OHLC/i.test(out.note));
+    assert.ok(/weekly premium/i.test(out.note));
     assert.ok(out.instruments.every((r) => r.id === 'nifty' || r.id === 'bank'));
     assert.ok(!out.instruments.some((r) => r.id === 'crude'));
     assert.strictEqual(out.totals.netRs, 0);
