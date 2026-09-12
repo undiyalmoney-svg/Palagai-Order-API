@@ -22,7 +22,7 @@ async function health(_req, res) {
   res.json({
     status: 'ok',
     service: 'palagai-live-control',
-    note: 'Trade Bot paper searches a new VWAP-impulse spec for the dates you pick. Live money is not attached to that spec yet.',
+    note: 'Trade Bot paper searches opening-range failure (VWAP impulse retired) for the dates you pick. Live money is not attached to that spec yet.',
     version: APP_VERSION,
     appBuild: APP_BUILD,
     dnaId: LIVE_GREEN_DNA.id,
@@ -154,7 +154,7 @@ async function start(req, res) {
     res.status(400).json({
       status: 'error',
       message:
-        'Live money is not wired to a newly discovered paper spec yet. Uncheck Live money — Run paper finds a VWAP-impulse spec on days before From, then shows that spec on your dates.',
+        'Live money is not wired to a newly discovered paper spec yet. Uncheck Live money — Run paper searches opening-range failure (VWAP impulse was dropped).',
     });
     return;
   }

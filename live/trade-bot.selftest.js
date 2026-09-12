@@ -67,7 +67,7 @@ assert.strictEqual(genie.DESK_STRATEGY_ID, 'align-combo-genie');
 const ctrl = fs.readFileSync(path.join(__dirname, 'live.controller.js'), 'utf8');
 assert.match(ctrl, /runDiscover/);
 assert.doesNotMatch(ctrl, /runBacktest/);
-assert.match(ctrl, /vwap-impulse|discovered paper spec/);
+assert.match(ctrl, /or-failure|opening-range failure|discovered paper spec/);
 
 const store = fs.readFileSync(path.join(__dirname, 'live.store.js'), 'utf8');
 assert.doesNotMatch(store, /Auto Bot retired/);

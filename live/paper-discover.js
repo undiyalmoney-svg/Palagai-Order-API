@@ -1,20 +1,21 @@
 'use strict';
 /**
- * Paper strategy discovery — not Genie, Trap, S/R, ee-wait, or order-flow.
+ * Paper strategy discovery — not Genie, Trap, S/R, ee-wait, order-flow,
+ * and not the retired session-VWAP impulse family.
  *
- * Family: session VWAP impulse.
- * After the open, a 5m bar that expands away from session VWAP must be
- * confirmed by the next closes holding that side of VWAP. Exit on VWAP
- * giveback, a point stop, a time stop, or 15:15 IST.
+ * Active family: opening-range failure (fade).
+ * Build the first N minutes of the NSE cash session. If price breaks that
+ * range and then closes back inside, buy the opposite ATM proxy (failed high
+ * → PE, failed low → CE). One trade per day. Stop / R-target / 15:15.
  *
- * Search uses sessions strictly before From. The returned trades are only
- * inside From→To (how that found spec would have acted on the dates you pick).
+ * Search uses sessions strictly before From. Trades are only inside From→To.
  */
 
 const defaultMarket = require('./kite-market');
 
-const ENGINE = 'vwap-impulse';
-const STRATEGY_FAMILY = 'session-vwap-impulse';
+const ENGINE = 'or-failure';
+const STRATEGY_FAMILY = 'opening-range-failure';
+const RETIRED_FAMILIES = ['session-vwap-impulse', 'vwap-impulse'];
 const NIFTY_TOKEN = 256265;
 const NIFTY_LOT_SIZE = 65;
 const LOOKBACK_CAL_DAYS = 25;
@@ -69,65 +70,23 @@ function uniqueDates(bars) {
   return out;
 }
 
-function typical(bar) {
-  return (Number(bar.high) + Number(bar.low) + Number(bar.close)) / 3;
-}
-
-function runningVwap(bars) {
-  let pv = 0;
-  let vol = 0;
-  return bars.map((b) => {
-    const v = Number(b.volume) > 0 ? Number(b.volume) : 1;
-    pv += typical(b) * v;
-    vol += v;
-    return { ...b, vwap: vol > 0 ? pv / vol : Number(b.close) };
-  });
-}
-
-function impulseDir(bar, minRangePts) {
-  const range = Number(bar.high) - Number(bar.low);
-  if (!(range >= minRangePts)) return 0;
-  const pos = range > 0 ? (Number(bar.close) - Number(bar.low)) / range : 0.5;
-  const vwap = Number(bar.vwap);
-  if (bar.close > vwap && bar.close > bar.open && pos >= 0.66) return 1;
-  if (bar.close < vwap && bar.close < bar.open && pos <= 0.34) return -1;
-  return 0;
-}
-
-function confirmed(bars, i, spec) {
-  const bar = bars[i];
-  if (barHm(bar) < hmPlus(915, spec.startMin)) return 0;
-  if (barHm(bar) > 1415) return 0;
-  const dir = impulseDir(bar, spec.minRangePts);
-  if (!dir) return 0;
-  const need = Math.max(1, spec.confirmBars);
-  if (i + need >= bars.length) return 0;
-  for (let k = 1; k <= need; k += 1) {
-    const nxt = bars[i + k];
-    if (!nxt) return 0;
-    if (dir > 0 && !(nxt.close > nxt.vwap)) return 0;
-    if (dir < 0 && !(nxt.close < nxt.vwap)) return 0;
-  }
-  return dir;
-}
-
 function specGrid() {
   const grid = [];
-  for (const startMin of [20, 45]) {
-    for (const confirmBars of [1, 2]) {
-      for (const minRangePts of [8, 15]) {
-        for (const holdBars of [6, 12]) {
-          for (const stopPts of [20, 35]) {
-            for (const givebackPts of [8, 15]) {
+  for (const orMinutes of [15, 30]) {
+    for (const bufferPts of [0, 5]) {
+      for (const minOrWidth of [12, 20]) {
+        for (const stopPts of [15, 25]) {
+          for (const targetR of [1, 2]) {
+            for (const holdBars of [8, 16]) {
               grid.push({
                 engine: ENGINE,
                 family: STRATEGY_FAMILY,
-                startMin,
-                confirmBars,
-                minRangePts,
-                holdBars,
+                orMinutes,
+                bufferPts,
+                minOrWidth,
                 stopPts,
-                givebackPts,
+                targetR,
+                holdBars,
               });
             }
           }
@@ -136,6 +95,19 @@ function specGrid() {
     }
   }
   return grid;
+}
+
+function openingRange(bars, orMinutes) {
+  const endHm = hmPlus(915, orMinutes);
+  const orBars = (bars || []).filter((b) => barHm(b) < endHm);
+  if (orBars.length < 2) return null;
+  let high = -Infinity;
+  let low = Infinity;
+  for (const b of orBars) {
+    high = Math.max(high, Number(b.high));
+    low = Math.min(low, Number(b.low));
+  }
+  return { high, low, endHm, width: high - low };
 }
 
 function closeTrade(open, exitBar, reason, lots) {
@@ -165,40 +137,48 @@ function closeTrade(open, exitBar, reason, lots) {
 }
 
 function simulateDay(dayBars, spec, lots) {
-  const bars = runningVwap(dayBars);
-  const trades = [];
+  const bars = dayBars || [];
+  const or = openingRange(bars, spec.orMinutes);
+  if (!or || !(or.width >= spec.minOrWidth)) return [];
+  let broke = 0;
   let open = null;
+  const trades = [];
   for (let i = 0; i < bars.length; i += 1) {
     const bar = bars[i];
+    const hm = barHm(bar);
     if (open) {
       const held = i - open.entryIndex;
       const adverse = (open.entryClose - Number(bar.close)) * open.dir;
-      const giveback =
-        open.dir > 0
-          ? Number(bar.close) < Number(bar.vwap) - spec.givebackPts
-          : Number(bar.close) > Number(bar.vwap) + spec.givebackPts;
+      const favor = (Number(bar.close) - open.entryClose) * open.dir;
       let reason = null;
       if (adverse >= spec.stopPts) reason = 'stop';
-      else if (giveback) reason = 'vwap giveback';
+      else if (favor >= spec.stopPts * spec.targetR) reason = `${spec.targetR}R target`;
       else if (held >= spec.holdBars) reason = 'time stop';
-      else if (barHm(bar) >= 1515) reason = 'square-off 15:15';
+      else if (hm >= 1515) reason = 'square-off 15:15';
       if (reason) {
         trades.push(closeTrade(open, bar, reason, lots));
         open = null;
+        break;
       }
       continue;
     }
-    const dir = confirmed(bars, i, spec);
-    if (!dir) continue;
-    const entry = bars[i + spec.confirmBars];
+    if (hm < or.endHm || hm > 1415) continue;
+    if (!broke) {
+      if (Number(bar.close) > or.high + spec.bufferPts) broke = 1;
+      else if (Number(bar.close) < or.low - spec.bufferPts) broke = -1;
+      continue;
+    }
+    const failed =
+      (broke > 0 && Number(bar.close) < or.high) || (broke < 0 && Number(bar.close) > or.low);
+    if (!failed) continue;
+    const dir = -broke;
     open = {
       dir,
       spec,
-      entryClose: Number(entry.close),
-      entryTime: entry.date,
-      entryIndex: i + spec.confirmBars,
+      entryClose: Number(bar.close),
+      entryTime: bar.date,
+      entryIndex: i,
     };
-    i += spec.confirmBars;
   }
   if (open && bars.length) {
     trades.push(closeTrade(open, bars[bars.length - 1], 'session end', lots));
@@ -245,18 +225,18 @@ function summarize(trades) {
 
 function scoreTrades(trades) {
   const s = summarize(trades);
-  return s.optionNetAfterChargesRs + s.wins * 10 - s.losses * 15;
+  if (s.trades < 3) return s.optionNetAfterChargesRs - 500;
+  return s.optionNetAfterChargesRs + s.wins * 20 - s.losses * 25;
 }
 
 function searchSpecs(bars, { trainFrom, trainTo, lots } = {}) {
   const grid = specGrid();
   let best = null;
   for (const spec of grid) {
+    if (RETIRED_FAMILIES.includes(spec.family) || RETIRED_FAMILIES.includes(spec.engine)) continue;
     const trades = simulate(bars, spec, { fromDate: trainFrom, toDate: trainTo, lots });
     const row = { spec, trades, totals: summarize(trades), score: scoreTrades(trades) };
-    if (!best || row.score > best.score || (row.score === best.score && row.totals.trades > best.totals.trades)) {
-      best = row;
-    }
+    if (!best || row.score > best.score) best = row;
   }
   return best;
 }
@@ -264,9 +244,9 @@ function searchSpecs(bars, { trainFrom, trainTo, lots } = {}) {
 function describeSpec(spec) {
   if (!spec) return '';
   return (
-    `VWAP impulse after ${spec.startMin}m, confirm ${spec.confirmBars} bar(s), ` +
-    `range ≥ ${spec.minRangePts}pt, hold ${spec.holdBars}×5m, stop ${spec.stopPts}pt, ` +
-    `giveback ${spec.givebackPts}pt`
+    `OR failure fade · ${spec.orMinutes}m range, buffer ${spec.bufferPts}pt, ` +
+    `min width ${spec.minOrWidth}pt, stop ${spec.stopPts}pt, ${spec.targetR}R, ` +
+    `hold ${spec.holdBars}×5m`
   );
 }
 
@@ -287,33 +267,34 @@ async function runDiscover({ authorization, fromDate, toDate, lots }, deps = {})
   const spec = found?.spec || specGrid()[0];
   const trades = simulate(candles, spec, { fromDate, toDate, lots: L });
   const totals = summarize(trades);
-  const trainTotals = found?.totals || summarize([]);
   return {
     fromDate,
     toDate,
     engine: ENGINE,
     strategy: STRATEGY_FAMILY,
+    skipped: RETIRED_FAMILIES,
     spec,
     specText: describeSpec(spec),
     train: {
       fromDate: warmFrom,
       toDate: trainTo,
-      totals: trainTotals,
+      totals: found?.totals || summarize([]),
     },
     note:
-      'Paper searched a new session-VWAP impulse family on days before your From date, then applied the winner to the dates you picked. This is not Genie, Trap, S/R, or the Find scanner. ₹ = Nifty points × 65 × lots (ATM option proxy).',
+      'VWAP impulse was dropped. Paper now searches opening-range failure (fade a break that cannot hold) on days before From, then applies that spec to your dates. Not Genie / Trap / S/R / Find. ₹ = Nifty points × 65 × lots (ATM option proxy). Max one trade per session.',
     totals,
     liveTotals: totals,
     trades: trades.map((t) => ({ ...t, liveWouldTake: true })),
     message: trades.length
       ? undefined
-      : 'The discovered spec had no trade on this date. Pick a session day (not a weekend).',
+      : 'The OR-failure spec had no fade on this date. Pick a session day (not a weekend).',
   };
 }
 
 module.exports = {
   ENGINE,
   STRATEGY_FAMILY,
+  RETIRED_FAMILIES,
   NIFTY_TOKEN,
   addDaysIso,
   specGrid,
