@@ -22,7 +22,7 @@ async function health(_req, res) {
   res.json({
     status: 'ok',
     service: 'palagai-live-control',
-    note: 'Trade Bot paper/live: adaptive ATM straddle on Nifty + Bank — sell if still inside the 15m range at 10:00, buy if it broke. Paper today marks it OPEN. 2-month paper fetches 60-day Kite chunks with 3s gaps.',
+    note: 'Trade Bot paper/live: quiet 15m range → sell ATM straddle. Confirmed break → buy one CE or PE with a stop. Never buy both sides. Paper today marks OPEN. 2-month paper uses 60-day Kite chunks with 3s gaps.',
     version: APP_VERSION,
     appBuild: APP_BUILD,
     dnaId: LIVE_GREEN_DNA.id,
@@ -232,7 +232,7 @@ async function start(req, res) {
       trades: out.trades,
       totals: out.totals,
       note:
-        'Live is the paper desk with Kite ATM MIS orders. Inside 15m range at 10:00 → sell CE+PE. Breakout → buy CE+PE. Late start does not chase. Stocks stay paper.',
+        'Live is the paper desk with Kite ATM MIS orders. Quiet range at 10:00 → sell CE+PE. Confirmed break → buy one CE or PE. Never buy both sides. Late start does not chase. Stocks stay paper.',
     });
     return;
   }

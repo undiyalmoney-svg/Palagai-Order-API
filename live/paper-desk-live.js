@@ -188,7 +188,9 @@ class PaperDeskWorker {
       const brokerOpen = legs.length > 0;
       bits.push(
         brokerOpen
-          ? `${profile.name} ${openSim.straddle || 'adaptive'} straddle ×${lots}`
+          ? openSim.straddle
+            ? `${profile.name} ${openSim.straddle} straddle ×${lots}`
+            : `${profile.name} ${openSim.dir > 0 ? 'CE' : 'PE'} ORB ×${lots}`
           : `${profile.name} watching 15m OR`,
       );
     }

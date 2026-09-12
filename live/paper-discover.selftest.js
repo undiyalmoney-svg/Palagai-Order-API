@@ -192,16 +192,23 @@ assert.strictEqual(shortTrend.length, 1);
 assert.ok(longTrend[0].netOptionPnlRs > shortTrend[0].netOptionPnlRs, 'trending day favors long straddle over short');
 
 const deskSpec = executableSpec(BOOKS.nifty);
-assert.strictEqual(deskSpec.straddle, 'adaptive');
+assert.strictEqual(deskSpec.mode, 'desk');
 const deskTrend = simulateDay(trendHoldDay('2026-09-11'), deskSpec, 1, BOOKS.nifty);
-assert.strictEqual(deskTrend.length, 1, 'breakout day buys the long straddle instead of sitting out');
-assert.strictEqual(deskTrend[0].direction, 'LONG-STRADDLE');
-assert.ok(deskTrend[0].netOptionPnlRs > 0, 'trend expansion pays the long straddle');
+assert.strictEqual(deskTrend.length, 1, 'breakout day takes a directional ORB, not a long straddle');
+assert.strictEqual(deskTrend[0].direction, 'CE');
+assert.ok(deskTrend[0].netOptionPnlRs > 0, 'confirmed upside break pays the CE');
+assert.ok(deskTrend[0].netOptionPnlRs < 20000, 'ORB stop/target bounds the rupees — not an unbounded long-vol debit');
 const rangeShort = simulateDay(rangeInsideDay('2026-09-11'), deskSpec, 1, BOOKS.nifty);
 assert.strictEqual(rangeShort.length, 1, 'desk shorts when price is still inside the 15m range at 10:00');
 assert.strictEqual(rangeShort[0].direction, 'SHORT-STRADDLE');
 assert.ok(rangeShort[0].netOptionPnlRs > 0, 'quiet inside-range day keeps the short premium');
 assert.ok(/theta lock|square-off|session end/i.test(String(rangeShort[0].exitReason)));
+
+const fakeBreak = simulateDay(failHighDay('2026-09-11'), deskSpec, 1, BOOKS.nifty);
+assert.ok(
+  !fakeBreak.some((t) => /LONG-STRADDLE/i.test(String(t.direction))),
+  'a fake morning spike never buys both option sides',
+);
 
 const mixedBatch = [];
 for (let d = 3; d <= 28; d += 1) {
@@ -224,12 +231,17 @@ const deskBatch = summarize(
     book: BOOKS.nifty,
   }),
 );
-assert.ok(deskBatch.trades >= 1, '2-month-style batch still books range shorts');
+assert.ok(deskBatch.trades >= 1, '2-month-style batch still books desk trades');
+assert.ok(deskBatch.netRs > 0, `profit desk stays green on this mixed window (net ₹${deskBatch.netRs})`);
 assert.ok(
-  deskBatch.netRs > sellEveryDay.netRs,
-  `adaptive long+short is more profitable than selling every day (${deskBatch.netRs} vs ${sellEveryDay.netRs})`,
+  !simulate(mixedBatch, executableSpec(BOOKS.nifty), {
+    fromDate: '2026-08-03',
+    toDate: '2026-08-28',
+    lots: 1,
+    book: BOOKS.nifty,
+  }).some((t) => /LONG-STRADDLE/i.test(String(t.direction))),
+  'profit desk never buys the ATM straddle',
 );
-assert.ok(deskBatch.grossLossRs === 0 || deskBatch.netRs > 0, 'desk batch stays net green on this mixed window');
 
 const { historicalChunks } = require('./kite-market');
 assert.ok(historicalChunks('2026-07-14', '2026-09-12', 60).length >= 2, '2 months of 5m history splits into 60-day chunks');

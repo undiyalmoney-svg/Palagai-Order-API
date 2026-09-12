@@ -228,8 +228,9 @@ function openingRange(bars, spec, book) {
 }
 
 function entryCutoffHm(spec, book) {
+  if (Number(spec?.lastEntryHm) > 0) return Number(spec.lastEntryHm);
   if (spec?.mode === 'regime') return book.sessionStart >= 1600 ? 1800 : REGIME_LAST_ENTRY_CASH;
-  if (spec?.mode === 'orb') return book.sessionStart >= 1600 ? 2000 : 1430;
+  if (spec?.mode === 'orb' || spec?.mode === 'desk') return book.sessionStart >= 1600 ? 2000 : 1430;
   if (spec?.mode !== 'fade') return book.lastEntry;
   return book.sessionStart >= 1600 ? 1800 : 1130;
 }
@@ -443,6 +444,7 @@ function simulateOrbDay(bars, spec, lots, book, opts = {}) {
   const stopPts = Math.max(1, Math.min(spec.stopPts, Math.round(Math.max(spec.stopPts, or.width * 0.5))));
   const liveSpec = { ...spec, stopPts };
   let open = null;
+  let broke = 0;
   const trades = [];
   for (let i = 0; i < bars.length; i += 1) {
     const bar = bars[i];
@@ -458,9 +460,25 @@ function simulateOrbDay(bars, spec, lots, book, opts = {}) {
     }
     if (hm < or.endHm || hm > lastEntry) continue;
     const close = Number(bar.close);
-    if (close > or.high + spec.bufferPts) {
+    const up = close > or.high + spec.bufferPts;
+    const down = close < or.low - spec.bufferPts;
+    if (spec.confirmBar) {
+      if (!broke) {
+        if (up) broke = 1;
+        else if (down) broke = -1;
+        continue;
+      }
+      const held = (broke > 0 && up) || (broke < 0 && down);
+      if (!held) {
+        broke = 0;
+        continue;
+      }
+      open = { dir: broke, spec: liveSpec, entryClose: close, entryTime: bar.date, entryIndex: i, beArmed: false, play: 'orb' };
+      continue;
+    }
+    if (up) {
       open = { dir: 1, spec: liveSpec, entryClose: close, entryTime: bar.date, entryIndex: i, beArmed: false, play: 'orb' };
-    } else if (close < or.low - spec.bufferPts) {
+    } else if (down) {
       open = { dir: -1, spec: liveSpec, entryClose: close, entryTime: bar.date, entryIndex: i, beArmed: false, play: 'orb' };
     }
   }
@@ -562,9 +580,51 @@ function simulateStraddleDay(bars, spec, lots, book, opts = {}) {
   return trades;
 }
 
+function simulateDeskDay(bars, spec, lots, book, opts = {}) {
+  const empty = opts.withOpen ? { trades: [], open: null } : [];
+  if (!(bars || []).length) return empty;
+  if (spec.skipGap !== false && overnightGapPct(bars, opts.prevClose) > GAP_SKIP_PCT) return empty;
+  const or = openingRange(bars, spec, book);
+  if (!or) return empty;
+  const confirmHm = Number(spec.confirmHm) || STRADDLE_CONFIRM_HM;
+  const buffer = Number(spec.bufferPts) || 0;
+  let brokeBeforeConfirm = false;
+  for (let i = 0; i < bars.length; i += 1) {
+    const hm = barHm(bars[i]);
+    if (hm < or.endHm) continue;
+    if (hm >= confirmHm) break;
+    const close = Number(bars[i].close);
+    if (close > or.high + buffer || close < or.low - buffer) {
+      brokeBeforeConfirm = true;
+      break;
+    }
+  }
+  if (brokeBeforeConfirm) {
+    if (!(or.width >= (Number(spec.minOrWidth) || 0))) return empty;
+    const orbSpec = {
+      ...spec,
+      mode: 'orb',
+      family: 'orb',
+      confirmBar: true,
+      lastEntryHm: Number(spec.lastEntryHm) || 1100,
+    };
+    return simulateOrbDay(bars, orbSpec, lots, book, opts);
+  }
+  const shortSpec = {
+    ...spec,
+    mode: 'straddle',
+    family: 'straddle',
+    straddle: 'short',
+    skipBreakout: true,
+    adaptive: false,
+  };
+  return simulateStraddleDay(bars, shortSpec, lots, book, opts);
+}
+
 function simulateDay(dayBars, spec, lots, book, opts = {}) {
   const bars = dayBars || [];
   const empty = opts.withOpen ? { trades: [], open: null } : [];
+  if (spec?.mode === 'desk') return simulateDeskDay(bars, spec, lots, book, opts);
   if (spec?.mode === 'straddle') return simulateStraddleDay(bars, spec, lots, book, opts);
   if (spec?.mode === 'orb') return simulateOrbDay(bars, spec, lots, book, opts);
   if (spec?.mode === 'regime') return simulateRegimeDay(bars, spec, lots, book, opts);
@@ -659,14 +719,19 @@ function isOpenTrade(t) {
 function executableSpec(book) {
   return {
     engine: ENGINE,
-    family: 'straddle',
-    mode: 'straddle',
-    straddle: 'adaptive',
-    adaptive: true,
+    family: 'orb-vs-straddle',
+    mode: 'desk',
     orMinutes: 15,
+    bufferPts: 0,
+    minOrWidth: book.minOrWidth[0],
     stopPts: book.stopPts[0],
+    targetR: 1.5,
+    holdBars: 24,
+    beR: BE_R,
     confirmHm: STRADDLE_CONFIRM_HM,
+    lastEntryHm: 1100,
     thetaLockHm: STRADDLE_THETA_LOCK_HM,
+    skipGap: true,
   };
 }
 
@@ -1414,7 +1479,7 @@ function stampCoreBooks(books, allocation) {
       b.why = b.why || `${b.label} is off.`;
     } else if (!(b.trades || []).length) {
       b.status = 'waiting';
-      b.why = `No ${b.label} print yet — short if still inside the 15m range at 10:00, long if it already broke.`;
+      b.why = `No ${b.label} print yet — short straddle if still inside the 15m range at 10:00, or buy CE/PE if the range has already broken.`;
     } else {
       b.status = 'not-taken';
       b.why = deskSkipWhy(b, skip, month);
@@ -1425,10 +1490,13 @@ function stampCoreBooks(books, allocation) {
 
 function describeSpec(spec, book) {
   if (!spec) return `${book?.name || 'book'} sit-out (no walk-forward edge)`;
+  if (spec.mode === 'desk') {
+    return `${book?.name || ''} desk · short ATM straddle if still inside ${spec.orMinutes || 15}m OR at 10:00 · else confirmed ORB (one CE or PE, stop ${spec.stopPts}pt)`.trim();
+  }
   if (spec.mode === 'orb') {
     return `${book?.name || ''} ORB · ${spec.orMinutes}m range, stop ${spec.stopPts}pt, ${spec.targetR}R`.trim();
   }
-    if (spec.mode === 'straddle') {
+  if (spec.mode === 'straddle') {
     if (spec.straddle === 'adaptive' || spec.adaptive) {
       return `${book?.name || ''} adaptive ATM straddle · short if still inside ${spec.orMinutes || 15}m OR at ${spec.confirmHm || STRADDLE_CONFIRM_HM} · long on breakout`.trim();
     }
@@ -1833,7 +1901,7 @@ function bookDeskStraddles(books, { fromDate, toDate } = {}) {
       takenMap.set(book.id, {
         instrumentName: book.label,
         bookId: book.id,
-        direction: 'ADAPTIVE-STRADDLE',
+        direction: 'DESK',
         lots: 1,
         riskRs: 0,
       });
@@ -2057,7 +2125,7 @@ async function runDiscover({ authorization, fromDate, toDate, lots, capitalRs },
     token: BOOKS.crude.token,
     bars: 0,
     status: 'sit-out',
-    why: 'Live/paper desk is Nifty + Bank adaptive ATM straddle (short inside OR at 10:00, long on breakout). Crude is not fetched, so a 2-month Kite batch only pulls the two index books (3s between books and between history chunks).',
+    why: 'Live/paper desk is Nifty + Bank: short ATM straddle on a quiet 15m range, or one CE/PE on a confirmed breakout. Crude is not fetched, so a 2-month Kite batch only pulls the two index books (3s between books and between history chunks).',
   });
 
   allTrades.sort((a, b) => String(a.entryTime).localeCompare(String(b.entryTime)));
@@ -2099,7 +2167,7 @@ async function runDiscover({ authorization, fromDate, toDate, lots, capitalRs },
       totals: summarize(books.flatMap((b) => b.trainTrades || [])),
     },
     note:
-      'Desk takes both sides of the ATM straddle on Nifty + Bank (Max lots). Still inside the 15m range at 10:00 → sell CE+PE. Already broke → buy CE+PE. Month lock / 2% walls do not drop these books. Quiet shorts lock at 11:15. Paper fetches ~2 months of 5m history in 60-day chunks with 3s gaps.',
+      'Buying both option sides on a breakout is what produced the large paper losses. The desk no longer does that. Quiet 15m range at 10:00 → sell ATM CE+PE. Confirmed break → buy one CE or PE with a point stop. Gap days sit out. 2-month paper uses 60-day Kite chunks with 3s gaps.',
     scanTotals: summarize(allTrades),
     instruments: instrumentLedger({ books, trades: takenTrades }),
     protection: capitalProtection({
@@ -2113,7 +2181,7 @@ async function runDiscover({ authorization, fromDate, toDate, lots, capitalRs },
     trades: takenTrades,
     message: takenTrades.length
       ? undefined
-      : 'No straddle printed (weekend or before the 15m range). Pick session days or Run 2 months.',
+      : 'No desk trade (weekend, gap, or before the 15m range). Pick session days or Run 2 months.',
   };
 }
 
@@ -2135,6 +2203,7 @@ module.exports = {
   simulateInsideDay,
   simulateOrbDay,
   simulateStraddleDay,
+  simulateDeskDay,
   simulateStockStraddle,
   compareIndexBook,
   compareStocks,
