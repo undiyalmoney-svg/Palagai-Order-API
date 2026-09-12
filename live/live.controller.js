@@ -2,7 +2,7 @@ const store = require('./live.store');
 const { runBacktest } = require('./backtest');
 const { parseTradeBotWindow } = require('./trade-bot-dates');
 const { getOptionOhlcAndPrice } = require('./option-ohlc');
-const { findEntryExitWait, runEeWaitPaper, getLastFound, parseUniverse } = require('./ee-wait-research');
+const { findEntryExitWait, getLastFound, parseUniverse } = require('./ee-wait-research');
 const {
   APP_BUILD,
   APP_VERSION,
@@ -153,27 +153,8 @@ async function start(req, res) {
     });
     return;
   }
-  if (researchLive && !window.liveMoney) {
-    const out = await runEeWaitPaper({
-      fromDate: window.fromDate,
-      toDate: window.toDate,
-      today: window.today,
-      lots: body.lots || body.niftyLots || 1,
-      spec: body.eeWait || body.spec || body.orderFlow,
-      engine,
-      indexType: body.indexType,
-      universe,
-      symbol: body.symbol,
-    });
-    res.json({
-      ...out,
-      mode: 'paper',
-      liveMoney: false,
-      realOrders: false,
-      today: window.today,
-    });
-    return;
-  }
+  // Paper is always Align Combo GENIE for the picked dates. Find stays on
+  // POST /research/ee-wait and must not replace the live strategy result.
   if (!window.liveMoney) {
     const authorization = await kiteAuthorization(req);
     if (!authorization) {
