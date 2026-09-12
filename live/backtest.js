@@ -401,6 +401,10 @@ async function runBacktest({ authorization, fromDate, toDate, config }, deps = {
   return {
     fromDate,
     toDate,
+    engine: 'genie',
+    strategy: 'align-combo-genie',
+    note:
+      'Paper replays the live desk strategy (Align Combo GENIE) on Kite 5-minute candles for the From→To dates you picked. Same engine as live; Live money is the only switch that places orders.',
     config: cfg,
     riskLabels: riskStatusLabels(cfg),
     paperLivePath: useLivePath,
