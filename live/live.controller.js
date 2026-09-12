@@ -133,7 +133,7 @@ async function kiteAuthorization(req) {
  */
 function isResearchEngine(engine) {
   const e = String(engine || '').toLowerCase();
-  return !e || e === 'ee-wait' || e === 'order-flow' || e === 'confluence';
+  return e === 'ee-wait' || e === 'order-flow' || e === 'confluence';
 }
 
 async function start(req, res) {

@@ -69,6 +69,7 @@ assert.match(ctrl, /parseTradeBotWindow/);
 assert.match(ctrl, /findEntryExitWait/);
 assert.match(ctrl, /runEeWaitPaper/);
 assert.match(ctrl, /isResearchEngine/);
+assert.doesNotMatch(ctrl, /return !e \|\| e === 'ee-wait'/);
 assert.match(ctrl, /paperPnlWindow|today: window.today/);
 assert.match(ctrl, /Kite session required for live price or ATM lookup/);
 assert.match(ctrl, /liveMoney/);
