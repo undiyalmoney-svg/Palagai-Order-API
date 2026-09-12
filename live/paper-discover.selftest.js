@@ -256,7 +256,8 @@ const smallCap = allocateDesk({
 assert.ok(smallCap.skipped.some((s) => s.bookId === 'nifty' && s.reason === 'stop-too-wide'));
 assert.ok(smallCap.skipped.some((s) => s.bookId === 'bank' && s.reason === 'stop-too-wide'));
 assert.ok(smallCap.taken.some((t) => t.bookId === 'crude'));
-assert.strictEqual(smallCap.taken.length, 1);
+assert.ok(smallCap.taken.some((t) => t.bookId === 'stocks'));
+assert.ok(smallCap.taken.length >= 2);
 assert.ok(!smallCap.taken.some((t) => t.bookId === 'nifty'));
 
 const bigCap = allocateDesk({
@@ -279,8 +280,10 @@ const crowded = allocateDesk({
     { id: 'stocks', label: 'stocks', train: { optionNetAfterChargesRs: 1500, profitFactor: 1.4 }, trades: [cheapStock] },
   ],
 });
-assert.strictEqual(crowded.taken.length, 1);
-assert.ok(crowded.skipped.some((s) => s.reason === 'not-top-edge'));
+assert.ok(crowded.taken.length >= 3);
+assert.ok(crowded.taken.some((t) => t.bookId === 'nifty'));
+assert.ok(crowded.taken.some((t) => t.bookId === 'crude'));
+assert.ok(crowded.taken.some((t) => t.bookId === 'stocks'));
 
 const correlated = allocateDesk({
   capitalRs: 400000,

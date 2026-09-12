@@ -75,7 +75,7 @@ class PaperDeskWorker {
       realOrders: false,
       onFill: () => {},
     });
-    this.broker.setMaxOpenLegs(2);
+    this.broker.setMaxOpenLegs(6);
     this.instruments = [];
     this.mcx = [];
     this.tickBusy = false;
@@ -87,7 +87,7 @@ class PaperDeskWorker {
     const cfg = this.getConfig() || {};
     this.broker.realOrders = !!cfg.realOrders;
     this.broker.clear();
-    this.broker.setMaxOpenLegs(2);
+    this.broker.setMaxOpenLegs(6);
     this.lastSig = '';
     this.startedMs = Date.now();
     this.tickBusy = false;

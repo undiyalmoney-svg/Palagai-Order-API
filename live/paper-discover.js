@@ -8,8 +8,9 @@
  * Intraday family: opening-range fade OR hold (walk-forward picks per book).
  * Stocks: inside-day breakout on NSE daily.
  * A book that cannot show a walk-forward edge sits out (no forced trades).
- * After the scan, capital allocates: 2% stop per trade, 4% day stop, max one
- * book. A spec with a stop-out in the last 5 sessions sits out (profit or no trade).
+ * After the scan, capital allocates: 2% stop per trade, 4% day stop, up to
+ * six trades across books (index, crude, several stocks). A spec with a
+ * stop-out in the last 5 sessions sits out.
  */
 
 const defaultMarket = require('./kite-market');
@@ -24,9 +25,9 @@ const BANK_TOKEN = 260105;
 const LOOKBACK_CAL_DAYS = 25;
 const STOCK_LOOKBACK_CAL_DAYS = 90;
 const CHARGE_RS = 20;
-const MAX_STOCK_TRADES = 2;
+const MAX_STOCK_TRADES = 4;
 const MAX_STOCK_SCAN = 30;
-const MAX_FUNDED_TRADES = 1;
+const MAX_FUNDED_TRADES = 6;
 const DEFAULT_CAPITAL_RS = 40000;
 const RISK_PER_TRADE_PCT = 0.02;
 const DAY_RISK_PCT = 0.04;
@@ -541,16 +542,26 @@ function allocateDesk({
 
   const pool = quality.filter((c) => !dropped.has(c));
   pool.sort((a, b) => {
-    const ea = (Number(a.trainScore) || 0) * Math.max(1, a.lots || 1);
-    const eb = (Number(b.trainScore) || 0) * Math.max(1, b.lots || 1);
+    const ea = (Number(a.trainScore) || 0) * Math.max(1, a.trainPf || 1);
+    const eb = (Number(b.trainScore) || 0) * Math.max(1, b.trainPf || 1);
     if (eb !== ea) return eb - ea;
     return (b.trainPf || 0) - (a.trainPf || 0);
   });
+  const diversified = [];
+  const seenBook = new Set();
+  for (const c of pool) {
+    if (seenBook.has(c.bookId)) continue;
+    seenBook.add(c.bookId);
+    diversified.push(c);
+  }
+  for (const c of pool) {
+    if (!diversified.includes(c)) diversified.push(c);
+  }
 
   const taken = [];
   let dayRiskUsed = 0;
 
-  for (const c of pool) {
+  for (const c of diversified) {
     let lots = c.lots;
     let risk = lots * c.risk1;
     while (lots >= 1 && dayRiskUsed + risk > dayBudget + 1e-6) {
@@ -593,7 +604,7 @@ function allocateDesk({
       direction: c.trade.direction,
       riskRs1: Math.round(c.risk1),
       reason: 'not-top-edge',
-      detail: `Only the top ${MAX_FUNDED_TRADES} walk-forward books are funded`,
+        detail: `Only the top ${MAX_FUNDED_TRADES} setups are funded`,
     });
   }
 
@@ -997,7 +1008,7 @@ async function runDiscover({ authorization, fromDate, toDate, lots, capitalRs },
       totals: summarize(books.flatMap((b) => b.trainTrades || [])),
     },
     note:
-      'Kite funds size the desk when the token is live. Paper sits out unless the last 5 sessions of the chosen spec have no stop-outs (profit or no trade). That cuts false setups; it cannot erase every future loss. Live is the same engine plus Kite orders.',
+      'Kite funds size the desk. It can take several books (Nifty, Bank, Crude, stocks) inside the 2%/4% stop budget. A spec with a recent stop-out still sits out. Live is the same engine plus Kite orders.',
     scanTotals: summarize(allTrades),
     totals,
     liveTotals: totals,
