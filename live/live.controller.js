@@ -1,5 +1,5 @@
 const store = require('./live.store');
-const { runBacktest } = require('./backtest');
+const { runDiscover } = require('./paper-discover');
 const { parseTradeBotWindow } = require('./trade-bot-dates');
 const { getOptionOhlcAndPrice } = require('./option-ohlc');
 const { findEntryExitWait, getLastFound, parseUniverse } = require('./ee-wait-research');
@@ -22,7 +22,7 @@ async function health(_req, res) {
   res.json({
     status: 'ok',
     service: 'palagai-live-control',
-    note: 'Trade Bot: paper and live share one engine. Live money checkbox places Kite orders.',
+    note: 'Trade Bot paper searches a new VWAP-impulse spec for the dates you pick. Live money is not attached to that spec yet.',
     version: APP_VERSION,
     appBuild: APP_BUILD,
     dnaId: LIVE_GREEN_DNA.id,
@@ -128,8 +128,8 @@ async function kiteAuthorization(req) {
 }
 
 /**
- * One Trade Bot run. Paper and live are the same engine.
- * `liveMoney` (or `realOrders`) is the only switch that places Kite orders.
+ * One Trade Bot run. Paper discovers a new spec for the picked dates.
+ * Live money is the only switch that places Kite orders.
  */
 function isResearchEngine(engine) {
   const e = String(engine || '').toLowerCase();
@@ -139,11 +139,8 @@ function isResearchEngine(engine) {
 async function start(req, res) {
   const body = req.body || {};
   const window = parseTradeBotWindow(body);
-  // Only Find engines when the client names them. A leftover eeWait payload
-  // must not steal Trade Bot paper away from Align Combo GENIE.
   const engine = String(body.engine || '').toLowerCase();
   const universe = parseUniverse(body.universe || body.indexType);
-  const config = { ...body, ...window, realOrders: window.liveMoney, engine, universe };
   const researchLive = isResearchEngine(engine);
   if (researchLive && window.liveMoney && universe === 'nifty-100-stocks') {
     res.status(400).json({
@@ -153,40 +150,33 @@ async function start(req, res) {
     });
     return;
   }
-  // Paper is always Align Combo GENIE for the picked dates. Find stays on
-  // POST /research/ee-wait and must not replace the live strategy result.
-  if (!window.liveMoney) {
-    const authorization = await kiteAuthorization(req);
-    if (!authorization) {
-      res.status(400).json({
-        status: 'error',
-        message: 'Kite session required — Get Token, then Run (or push the token).',
-      });
-      return;
-    }
-    const out = await runBacktest({
-      authorization,
-      fromDate: window.fromDate,
-      toDate: window.toDate,
-      config,
-    });
-    res.json({
-      ...out,
-      mode: 'paper',
-      liveMoney: false,
-      realOrders: false,
-      today: window.today,
+  if (window.liveMoney) {
+    res.status(400).json({
+      status: 'error',
+      message:
+        'Live money is not wired to a newly discovered paper spec yet. Uncheck Live money — Run paper finds a VWAP-impulse spec on days before From, then shows that spec on your dates.',
     });
     return;
   }
-  const out = await store.start(userId(req), config);
-  res.json({
-    ...out,
-    mode: 'live',
-    liveMoney: true,
-    realOrders: true,
+  const authorization = await kiteAuthorization(req);
+  if (!authorization) {
+    res.status(400).json({
+      status: 'error',
+      message: 'Kite session required — Get Token, then Run (or push the token).',
+    });
+    return;
+  }
+  const out = await runDiscover({
+    authorization,
     fromDate: window.fromDate,
     toDate: window.toDate,
+    lots: body.lots || body.niftyLots || 1,
+  });
+  res.json({
+    ...out,
+    mode: 'paper',
+    liveMoney: false,
+    realOrders: false,
     today: window.today,
   });
 }

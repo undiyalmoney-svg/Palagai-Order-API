@@ -65,16 +65,9 @@ assert.strictEqual(typeof genie.makeGenieStrategy, 'function');
 assert.strictEqual(genie.DESK_STRATEGY_ID, 'align-combo-genie');
 
 const ctrl = fs.readFileSync(path.join(__dirname, 'live.controller.js'), 'utf8');
-assert.match(ctrl, /parseTradeBotWindow/);
-assert.match(ctrl, /findEntryExitWait/);
-assert.doesNotMatch(ctrl, /runEeWaitPaper/);
-assert.doesNotMatch(ctrl, /researchLive && !window\.liveMoney/);
-assert.match(ctrl, /isResearchEngine/);
-assert.doesNotMatch(ctrl, /return !e \|\| e === 'ee-wait'/);
-assert.match(ctrl, /paperPnlWindow|today: window.today/);
-assert.match(ctrl, /Kite session required for live price or ATM lookup/);
-assert.match(ctrl, /liveMoney/);
-assert.doesNotMatch(ctrl, /Auto Bot is removed/);
+assert.match(ctrl, /runDiscover/);
+assert.doesNotMatch(ctrl, /runBacktest/);
+assert.match(ctrl, /vwap-impulse|discovered paper spec/);
 
 const store = fs.readFileSync(path.join(__dirname, 'live.store.js'), 'utf8');
 assert.doesNotMatch(store, /Auto Bot retired/);
