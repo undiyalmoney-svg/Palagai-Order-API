@@ -22,6 +22,11 @@ assert.strictEqual(paper.liveMoney, false);
 assert.strictEqual(paper.realOrders, false);
 assert.strictEqual(paper.fromDate, '2026-08-01');
 
+const liveNoDates = parseTradeBotWindow({ liveMoney: true }, now);
+assert.strictEqual(liveNoDates.liveMoney, true);
+assert.strictEqual(liveNoDates.fromDate, '2026-09-11');
+assert.strictEqual(liveNoDates.toDate, '2026-09-11');
+
 const live = parseTradeBotWindow(
   { fromDate: '2026-09-11', toDate: '2026-09-11', liveMoney: true },
   now,
@@ -64,11 +69,21 @@ assert.strictEqual(expanded.usedFindWindow, false);
 assert.strictEqual(typeof genie.makeGenieStrategy, 'function');
 assert.strictEqual(genie.DESK_STRATEGY_ID, 'align-combo-genie');
 
+const { deskLotsFromCapitalRs } = require('./daily-desk-defaults');
+assert.strictEqual(deskLotsFromCapitalRs(40000), 1);
+assert.strictEqual(deskLotsFromCapitalRs(80000), 2);
+assert.strictEqual(deskLotsFromCapitalRs(200000), 5);
+
 const ctrl = fs.readFileSync(path.join(__dirname, 'live.controller.js'), 'utf8');
 assert.match(ctrl, /runSrDesk/);
 assert.doesNotMatch(ctrl, /runBacktest/);
 assert.match(ctrl, /sr-desk|sr-breakout|S\/R/);
-assert.match(ctrl, /capitalSource: window\.liveMoney \? 'actual'/);
+assert.match(ctrl, /preflightLive/);
+assert.match(ctrl, /parseTradeBotWindow/);
+assert.match(ctrl, /require\('\.\/trade-bot-dates'\)/);
+assert.match(ctrl, /deskLotsFromCapitalRs/);
+assert.match(ctrl, /body\.liveMoney === true/);
+assert.doesNotMatch(ctrl, /runSrDesk\(\{[\s\S]*liveMoney: window\.liveMoney/);
 assert.doesNotMatch(ctrl, /engine: 'paper-desk'/);
 assert.match(ctrl, /async function funds/);
 assert.match(ctrl, /fetchedAt/);

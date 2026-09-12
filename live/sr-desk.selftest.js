@@ -259,6 +259,7 @@ Promise.resolve()
     assert.ok(!out.instruments.some((r) => r.id === 'crude'));
     assert.strictEqual(out.totals.netRs, 0);
     assert.ok(out.capitalSource === 'actual' || out.capitalSource === 'mine');
+    assert.strictEqual(out.maxLots, 1);
     assert.ok(out.coreBooks.length === 3);
     assert.ok(out.books.some((b) => b.id === 'nifty'));
     assert.ok(out.books.find((b) => b.id === 'crude').sitOut);

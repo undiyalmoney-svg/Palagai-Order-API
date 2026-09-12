@@ -6,6 +6,7 @@
  */
 const { blackScholesPrice, realizedVolAnnualized } = require('./bs-option-pricer');
 const defaultMarket = require('./kite-market');
+const { deskLotsFromCapitalRs } = require('./daily-desk-defaults');
 const { runSrBreakout } = require('./sr-breakout');
 const {
   exitOptsFor,
@@ -370,7 +371,7 @@ async function runSrDesk({ authorization, fromDate, toDate, lots, capitalRs, cap
     err.status = 400;
     throw err;
   }
-  const L = Math.max(1, Math.floor(Number(lots)) || 1);
+  const askedLots = Math.max(1, Math.floor(Number(lots)) || 1);
   const market = deps.market || defaultMarket;
   let kiteFunds = null;
   if (typeof market.fetchUserMargins === 'function' && authorization && !deps.candlesByKey) {
@@ -382,6 +383,7 @@ async function runSrDesk({ authorization, fromDate, toDate, lots, capitalRs, cap
   }
   const resolved = resolveDeskCapital({ capitalRs, capitalSource, liveMoney, kiteFunds });
   const capital = resolved.capital;
+  const L = deskLotsFromCapitalRs(capital) || askedLots;
   const booksOut = [];
   const allTrades = [];
   const keys = ['nifty', 'banknifty'];

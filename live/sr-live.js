@@ -164,6 +164,7 @@ function getSession(userId) {
       openSignal: new Map(),
       lastTickAt: null,
       lastError: null,
+      lastPreflight: null,
       tickTimer: null,
       tickBusy: false,
       broker: null,
@@ -198,6 +199,10 @@ function statusPayload(session) {
     message: session.message,
     lastTickAt: session.lastTickAt,
     lastError: session.lastError,
+    lastPreflight: session.lastPreflight || null,
+    liveAssistant: session.lastError
+      ? { ok: false, checks: [{ id: 'tick', ok: false, detail: session.lastError }] }
+      : session.lastPreflight || undefined,
     config: session.config,
     entered: [...session.entered],
     strategyId: STRATEGY_ID,
@@ -255,9 +260,9 @@ async function start(userId, body = {}) {
     err.status = 400;
     throw err;
   }
-  const auth = await store.getAuthorizationFor(userId);
+  const auth = body.authorization || (await store.getAuthorizationFor(userId));
   if (!auth) {
-    const err = new Error('Push Kite token first, then Start Live.');
+    const err = new Error('Kite token missing — Get Token, then Start live.');
     err.status = 400;
     throw err;
   }
@@ -276,6 +281,7 @@ async function start(userId, body = {}) {
   session.status = 'running';
   session.message = `S/R Live on · ${keys.join('+')} · ${session.config.lots} lot(s) · real MIS`;
   session.lastError = null;
+  session.lastPreflight = body.liveAssistant || null;
   session.entered = new Set();
   session.openSignal = new Map();
   session.broker = new LiveBroker({

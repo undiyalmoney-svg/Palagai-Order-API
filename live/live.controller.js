@@ -1,7 +1,9 @@
 const store = require('./live.store');
 const srLive = require('./sr-live');
 const { runSrDesk } = require('./sr-desk');
+const { preflightLive, firstFail } = require('./live-preflight');
 const { parseTradeBotWindow } = require('./trade-bot-dates');
+const { deskLotsFromCapitalRs } = require('./daily-desk-defaults');
 const { getOptionOhlcAndPrice } = require('./option-ohlc');
 const { findEntryExitWait, getLastFound, parseUniverse } = require('./ee-wait-research');
 const {
@@ -67,17 +69,20 @@ function userId(req) {
 async function status(req, res) {
   const uid = userId(req);
   const sr = srLive.status(uid);
-  if (sr && sr.running) {
-    res.json({
-      ...store.statusFor(uid),
-      ...sr,
-      status: 'running',
-      liveMoney: true,
-      realOrders: true,
-    });
-    return;
-  }
-  res.json(store.statusFor(uid));
+  const storeS = store.statusFor(uid);
+  const running = !!(sr && sr.running);
+  const lastError = sr?.lastError || null;
+  res.json({
+    ...storeS,
+    ...sr,
+    status: running ? 'running' : (storeS.status || 'stopped'),
+    liveMoney: running,
+    realOrders: running,
+    lastError,
+    liveAssistant: lastError
+      ? { ok: false, checks: [{ id: 'tick', ok: false, detail: lastError }] }
+      : sr?.lastPreflight,
+  });
 }
 
 async function events(req, res) {
@@ -167,8 +172,76 @@ function isResearchEngine(engine) {
   return e === 'ee-wait' || e === 'order-flow' || e === 'confluence';
 }
 
+async function persistKiteHeader(req, uid) {
+  const headerAuth = String(
+    req.headers['x-kite-authorization'] || req.headers['x-kite-authorisation'] || '',
+  );
+  const tokenBits = headerAuth.replace(/^token\s+/i, '').split(':');
+  if (tokenBits[0] && tokenBits.slice(1).join(':')) {
+    try {
+      await store.putAuth(uid, {
+        apiKey: tokenBits[0],
+        accessToken: tokenBits.slice(1).join(':'),
+      });
+    } catch {
+      /* stored token optional when header is present */
+    }
+  }
+}
+
 async function start(req, res) {
   const body = req.body || {};
+  const uid = userId(req);
+  const authorization = await kiteAuthorization(req);
+  await persistKiteHeader(req, uid);
+
+  if (body.liveMoney === true || body.liveMoney === 'true') {
+    try {
+      const assistant = await preflightLive(authorization);
+      if (!assistant.ok) {
+        const fail = firstFail(assistant);
+        res.status(400).json({
+          status: 'error',
+          message: fail?.detail || 'Live preflight failed. Get Token and retry.',
+          liveAssistant: assistant,
+        });
+        return;
+      }
+      const cash = Number((assistant.checks || []).find((c) => c.id === 'funds')?.capitalRs) || 0;
+      const lots = deskLotsFromCapitalRs(cash) || 1;
+      await store.stop(uid);
+      const live = await srLive.start(uid, {
+        instruments: ['nifty', 'banknifty'],
+        lots,
+        lotsByInstrument: { nifty: lots, banknifty: lots },
+        authorization,
+        liveAssistant: assistant,
+      });
+      res.json({
+        ...live,
+        status: live.running ? 'running' : live.status,
+        mode: 'live',
+        liveMoney: true,
+        realOrders: true,
+        lots,
+        liveAssistant: assistant,
+        note:
+          'Live is S/R Nifty + Bank. It buys one ATM CE or PE when the engine fires. Lots follow Kite available funds (₹40,000 per lot). Get Token if the assistant turns red.',
+      });
+    } catch (err) {
+      const detail = err.message || String(err);
+      res.status(err.status || 500).json({
+        status: 'error',
+        message: detail,
+        liveAssistant: {
+          ok: false,
+          checks: [{ id: 'start', ok: false, detail }],
+        },
+      });
+    }
+    return;
+  }
+
   const window = parseTradeBotWindow(body);
   const engine = String(body.engine || '').toLowerCase();
   const universe = parseUniverse(body.universe || body.indexType);
@@ -181,7 +254,6 @@ async function start(req, res) {
     });
     return;
   }
-  const authorization = await kiteAuthorization(req);
   if (!authorization) {
     res.status(400).json({
       status: 'error',
@@ -189,53 +261,15 @@ async function start(req, res) {
     });
     return;
   }
-  const headerAuth = String(
-    req.headers['x-kite-authorization'] || req.headers['x-kite-authorisation'] || '',
-  );
-  const tokenBits = headerAuth.replace(/^token\s+/i, '').split(':');
-  if (tokenBits[0] && tokenBits.slice(1).join(':')) {
-    try {
-      await store.putAuth(userId(req), {
-        apiKey: tokenBits[0],
-        accessToken: tokenBits.slice(1).join(':'),
-      });
-    } catch {
-      /* stored token optional when header is present */
-    }
-  }
   const out = await runSrDesk({
     authorization,
     fromDate: window.fromDate,
     toDate: window.toDate,
     lots: body.lots || body.niftyLots || 1,
     capitalRs: body.capitalRs || body.capital,
-    capitalSource: window.liveMoney ? 'actual' : (body.capitalSource || body.fundSource),
-    liveMoney: window.liveMoney,
+    capitalSource: body.capitalSource || body.fundSource,
+    liveMoney: false,
   });
-  if (window.liveMoney) {
-    const lots = body.lots || body.niftyLots || 1;
-    await store.stop(userId(req));
-    const live = await srLive.start(userId(req), {
-      instruments: ['nifty', 'banknifty'],
-      lots,
-      lotsByInstrument: { nifty: lots, banknifty: lots },
-    });
-    res.json({
-      ...out,
-      ...live,
-      status: live.running ? 'running' : live.status,
-      mode: 'live',
-      liveMoney: true,
-      realOrders: true,
-      shadowOf: 'sr-desk',
-      today: window.today,
-      trades: out.trades,
-      totals: out.totals,
-      note:
-        'Live is S/R Nifty + Bank. It buys one ATM CE or PE when the paper engine fires. It does not sell a straddle. Day ±₹3,500. Crude off.',
-    });
-    return;
-  }
   res.json({
     ...out,
     mode: 'paper',

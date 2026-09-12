@@ -14,9 +14,14 @@ function istToday(now = new Date()) {
  */
 function parseTradeBotWindow(body = {}, now = new Date()) {
   const today = istToday(now);
-  const todayFlag = truthy(body.today);
-  const fromDate = todayFlag ? today : String(body.fromDate || '').slice(0, 10);
-  const toDate = todayFlag ? today : String(body.toDate || '').slice(0, 10);
+  const liveMoney = truthy(body.liveMoney);
+  const todayFlag = truthy(body.today) || (liveMoney && !body.fromDate && !body.toDate);
+  let fromDate = todayFlag ? today : String(body.fromDate || '').slice(0, 10);
+  let toDate = todayFlag ? today : String(body.toDate || '').slice(0, 10);
+  if (liveMoney && (!/^\d{4}-\d{2}-\d{2}$/.test(fromDate) || !/^\d{4}-\d{2}-\d{2}$/.test(toDate))) {
+    fromDate = today;
+    toDate = today;
+  }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(fromDate) || !/^\d{4}-\d{2}-\d{2}$/.test(toDate)) {
     const err = new Error('From date and To date are required (YYYY-MM-DD), or check Today');
     err.status = 400;
@@ -27,7 +32,6 @@ function parseTradeBotWindow(body = {}, now = new Date()) {
     err.status = 400;
     throw err;
   }
-  const liveMoney = truthy(body.liveMoney);
   if (liveMoney && (today < fromDate || today > toDate)) {
     const err = new Error(
       'Live money only places orders when the date range includes today. Uncheck Live money for past dates.',
