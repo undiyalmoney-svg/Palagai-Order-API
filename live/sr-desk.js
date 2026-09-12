@@ -277,7 +277,8 @@ function applyKiteOptionOhlc(mapped, pnl) {
 
 async function overlayKiteOptionOhlc(mapped, rawTrade, book, authorization, deps) {
   const injected = typeof deps.optionPnlForTrade === 'function';
-  const canFetch = !!(authorization && !deps.candlesByKey);
+  const wantBars = deps.overlayOptionOhlc !== false;
+  const canFetch = !!(authorization && !deps.candlesByKey && wantBars);
   if (!injected && !canFetch) return mapped;
   try {
     const { pickOption, SPEC } = deps.srLive || require('./sr-live');
@@ -380,7 +381,11 @@ async function runSrDesk({ authorization, fromDate, toDate, lots, capitalRs }, d
       const mapped = [];
       for (const t of trades || []) {
         const row = mapTrade(t, book, L, perPoint, iv);
-        mapped.push(await overlayKiteOptionOhlc(row, t, book, authorization, { ...deps, optionSession }));
+        mapped.push(await overlayKiteOptionOhlc(row, t, book, authorization, {
+          ...deps,
+          optionSession,
+          overlayOptionOhlc: deps.overlayOptionOhlc ?? (fromDate === toDate),
+        }));
       }
       allTrades.push(...mapped);
       booksOut.push({
