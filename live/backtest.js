@@ -452,7 +452,13 @@ function tagPaperTrades(rawTrades, executableTrades) {
         skipReason = 'Live would skip — desk gate';
       }
     }
-    return { ...t, liveWouldTake, skipReason };
+    return {
+      ...t,
+      side: t.side || t.direction,
+      optionSymbol: t.optionSymbol || (t.option && (t.option.tradingSymbol || t.option.symbol)) || null,
+      liveWouldTake,
+      skipReason,
+    };
   });
 }
 

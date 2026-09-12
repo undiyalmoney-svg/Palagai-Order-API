@@ -100,4 +100,11 @@ assert.match(tagged[1].skipReason, /estimated/);
 assert.strictEqual(summarize([kept, skipped]).trades, 2);
 assert.strictEqual(summarize([kept]).trades, 1);
 
+const named = tagPaperTrades(
+  [{ direction: 'BUY', option: { tradingSymbol: 'NIFTY2691523350CE' }, optionPnlRs: -10, netOptionPnlRs: -12 }],
+  [],
+);
+assert.strictEqual(named[0].side, 'BUY');
+assert.strictEqual(named[0].optionSymbol, 'NIFTY2691523350CE');
+
 console.log('trade-bot.selftest: ok');
