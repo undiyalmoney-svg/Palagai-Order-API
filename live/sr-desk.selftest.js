@@ -30,6 +30,10 @@ assert.strictEqual(mapped.optionStrike, 25000);
 assert.strictEqual(mapped.sideLabel, 'CE BUY');
 assert.strictEqual(mapped.entryTime, '2026-09-11T10:15:00+0530');
 assert.strictEqual(mapped.exitTime, '2026-09-11T10:45:00+0530');
+assert.strictEqual(mapped.entryHm, '10:15:00');
+assert.strictEqual(mapped.exitHm, '10:45:00');
+assert.strictEqual(mapped.entryClock, '10:15:00 AM');
+assert.strictEqual(mapped.exitClock, '10:45:00 AM');
 assert.strictEqual(mapped.entryPrice, 25000);
 assert.strictEqual(mapped.exitPrice, 25020);
 assert.strictEqual(mapped.indexEntry, 25000);
@@ -77,6 +81,10 @@ const bankMapped = mapTrade(
 assert.strictEqual(bankMapped.optionStrike, 51200);
 assert.strictEqual(bankMapped.selectedInstrument, 'Bank Nifty 51200 PE');
 assert.strictEqual(bankMapped.sideLabel, 'PE BUY');
+assert.strictEqual(bankMapped.entryClock, '12:05:00 PM');
+assert.strictEqual(bankMapped.exitClock, '12:20:00 PM');
+assert.strictEqual(bankMapped.entryHm, '12:05:00');
+assert.strictEqual(bankMapped.exitHm, '12:20:00');
 
 runSrDesk(
   { authorization: 'token x', fromDate: '2026-09-11', toDate: '2026-09-11', lots: 1, capitalRs: 40000 },

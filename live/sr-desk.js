@@ -96,6 +96,36 @@ function atmStrike(price, step) {
   return Math.round(px / st) * st;
 }
 
+function padClock(hm) {
+  const s = String(hm || '').trim();
+  if (/^\d{1,2}:\d{2}:\d{2}$/.test(s)) {
+    const [h, m, sec] = s.split(':');
+    return `${String(h).padStart(2, '0')}:${m}:${sec}`;
+  }
+  if (/^\d{1,2}:\d{2}$/.test(s)) {
+    const [h, m] = s.split(':');
+    return `${String(h).padStart(2, '0')}:${m}:00`;
+  }
+  return '';
+}
+
+function formatClock12(hm) {
+  const clock = padClock(hm);
+  const m = clock.match(/^(\d{2}):(\d{2}):(\d{2})$/);
+  if (!m) return clock || null;
+  let hour = Number(m[1]);
+  const ampm = hour >= 12 ? 'PM' : 'AM';
+  hour %= 12;
+  if (hour === 0) hour = 12;
+  return `${hour}:${m[2]}:${m[3]} ${ampm}`;
+}
+
+function toIstIso(date, hm) {
+  const clock = padClock(hm);
+  if (!date || !clock) return null;
+  return `${date}T${clock}+0530`;
+}
+
 function mapTrade(t, book, lots, perPoint) {
   const pts = Number(t.points) || 0;
   const optionPnlRs = Math.round(pts * perPoint);
@@ -106,6 +136,8 @@ function mapTrade(t, book, lots, perPoint) {
   const optionStrike = atmStrike(entryPrice, book.strikeStep || (book.id === 'bank' ? 100 : 50));
   const selectedInstrument =
     optionStrike != null ? `${book.name} ${optionStrike} ${direction}` : `${book.name} ATM ${direction}`;
+  const entryHm = padClock(t.entryTime || '09:45');
+  const exitHm = t.exitTime ? padClock(t.exitTime) : '';
   return {
     instrumentName: book.name,
     instrumentId: book.id,
@@ -115,8 +147,12 @@ function mapTrade(t, book, lots, perPoint) {
     sideLabel: `${direction} BUY`,
     direction,
     optionSymbol: `${selectedInstrument} (index×lot)`,
-    entryTime: `${t.date}T${t.entryTime || '09:45'}:00+0530`,
-    exitTime: t.exitTime ? `${t.date}T${t.exitTime}:00+0530` : null,
+    entryHm,
+    exitHm: exitHm || null,
+    entryClock: formatClock12(entryHm),
+    exitClock: exitHm ? formatClock12(exitHm) : null,
+    entryTime: t.entryAt || toIstIso(t.date, entryHm),
+    exitTime: t.exitAt || (exitHm ? toIstIso(t.date, exitHm) : null),
     exitReason: t.exitReason,
     open: t.exitReason === 'CLOSE' && !!t.openAtFill,
     entryPrice,
@@ -308,5 +344,6 @@ module.exports = {
   runSrDesk,
   mapTrade,
   atmStrike,
+  formatClock12,
   summarize,
 };
