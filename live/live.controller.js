@@ -22,7 +22,7 @@ async function health(_req, res) {
   res.json({
     status: 'ok',
     service: 'palagai-live-control',
-    note: 'Trade Bot paper searches opening-range failure (VWAP impulse retired) for the dates you pick. Live money is not attached to that spec yet.',
+    note: 'Trade Bot paper desk: Nifty, Bank Nifty, Crude Mini (Kite 5m) + liquid Nifty-100 stocks (NSE daily). Walk-forward; sit out if no edge.',
     version: APP_VERSION,
     appBuild: APP_BUILD,
     dnaId: LIVE_GREEN_DNA.id,
@@ -154,7 +154,7 @@ async function start(req, res) {
     res.status(400).json({
       status: 'error',
       message:
-        'Live money is not wired to a newly discovered paper spec yet. Uncheck Live money — Run paper searches opening-range failure (VWAP impulse was dropped).',
+        'Live money is not wired to the paper desk yet. Uncheck Live money — Run paper on Nifty, Bank, Crude Mini, and liquid stocks.',
     });
     return;
   }
