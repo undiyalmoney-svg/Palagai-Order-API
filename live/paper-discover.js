@@ -5,19 +5,25 @@
  * Books: Nifty 50 + Bank Nifty 5m (Kite), Crude Oil Mini 5m (Kite MCX),
  * and liquid Nifty-100 cash (free NSE daily).
  *
- * Intraday family: opening-range fade OR hold (walk-forward picks per book).
- * Stocks: inside-day breakout on NSE daily.
- * A book that cannot show a walk-forward edge sits out (no forced trades).
- * After the scan, capital allocates: 2% stop per trade, 6% day stop, up to
- * six trades. A spec whose last walk-forward trade was red sits out.
+ * Intraday: one play per book per session after the opening range
+ * (how discretionary desks actually take daily P&L — not check-all):
+ *   1) VWAP-aligned opening-range breakout (trend window ~9:45–10:30)
+ *   2) fade a failed OR break
+ *   3) VWAP pullback if the range never breaks
+ * Skip tiny OR, skip >1% gaps for ORB, skip Tuesday for the regime play.
+ * Walk-forward still sits a book out when that play has no edge.
+ * Stocks: inside-day on NSE daily.
+ * Capital: 2% per trade, 6% day stop.
  */
 
 const defaultMarket = require('./kite-market');
 const { fetchEquityDaily, fetchNifty100Symbols, mapPool } = require('./nse-equity-history');
 
 const ENGINE = 'paper-desk';
-const STRATEGY_FAMILY = 'or-desk-plus-inside-day';
+const STRATEGY_FAMILY = 'or-regime-plus-inside-day';
 const RETIRED_FAMILIES = ['session-vwap-impulse', 'vwap-impulse'];
+const GAP_SKIP_PCT = 1;
+const REGIME_LAST_ENTRY_CASH = 1030;
 
 const NIFTY_TOKEN = 256265;
 const BANK_TOKEN = 260105;
@@ -145,6 +151,24 @@ function uniqueDates(bars, book) {
 
 function specGrid(book = BOOKS.nifty) {
   const grid = [];
+  for (const minOrWidth of book.minOrWidth) {
+    for (const stopPts of book.stopPts) {
+      grid.push({
+        engine: ENGINE,
+        family: 'or-regime',
+        mode: 'regime',
+        orMinutes: 30,
+        bufferPts: 0,
+        minOrWidth,
+        stopPts,
+        targetR: 1.5,
+        holdBars: 16,
+        beR: BE_R,
+        skipLargeGap: true,
+        skipTuesday: true,
+      });
+    }
+  }
   for (const mode of ['fade', 'hold']) {
     for (const orMinutes of [15, 30]) {
       for (const bufferPts of [0, 5]) {
@@ -186,8 +210,35 @@ function openingRange(bars, spec, book) {
 }
 
 function entryCutoffHm(spec, book) {
+  if (spec?.mode === 'regime') return book.sessionStart >= 1600 ? 1800 : REGIME_LAST_ENTRY_CASH;
   if (spec?.mode !== 'fade') return book.lastEntry;
   return book.sessionStart >= 1600 ? 1800 : 1130;
+}
+
+function isoWeekday(iso) {
+  const [y, m, d] = String(iso).split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+}
+
+function sessionVwap(bars, upto) {
+  let pv = 0;
+  let vol = 0;
+  const end = Math.max(0, Math.min(upto, (bars || []).length - 1));
+  for (let i = 0; i <= end; i += 1) {
+    const b = bars[i];
+    const typical = (Number(b.high) + Number(b.low) + Number(b.close)) / 3;
+    const v = Math.max(1, Number(b.volume) || 1);
+    pv += typical * v;
+    vol += v;
+  }
+  return vol ? pv / vol : Number(bars[end]?.close) || 0;
+}
+
+function overnightGapPct(bars, prevClose) {
+  if (!(Number(prevClose) > 0) || !(bars || []).length) return 0;
+  const open = Number(bars[0].open);
+  if (!(open > 0)) return 0;
+  return (Math.abs(open - Number(prevClose)) / Number(prevClose)) * 100;
 }
 
 function exitPrice(open, exitBar, reason) {
@@ -232,9 +283,103 @@ function closeTrade(open, exitBar, reason, lots, book) {
   };
 }
 
+function manageOpen(open, bar, i, spec, lots, book) {
+  const held = i - open.entryIndex;
+  const adverse = (open.entryClose - Number(bar.close)) * open.dir;
+  const favor = (Number(bar.close) - open.entryClose) * open.dir;
+  if (!open.beArmed && favor >= spec.stopPts * (spec.beR || BE_R)) open.beArmed = true;
+  let reason = null;
+  if (adverse >= spec.stopPts) reason = 'stop';
+  else if (open.beArmed && adverse >= 0) reason = 'breakeven';
+  else if (favor >= spec.stopPts * spec.targetR) reason = `${spec.targetR}R target`;
+  else if (held >= spec.holdBars) reason = 'time stop';
+  else if (barHm(bar) >= book.squareOff) reason = `square-off ${book.squareOff}`;
+  if (!reason) return { open, trade: null };
+  return { open: null, trade: closeTrade(open, bar, reason, lots, book) };
+}
+
+function simulateRegimeDay(bars, spec, lots, book, opts = {}) {
+  const empty = opts.withOpen ? { trades: [], open: null } : [];
+  if (spec.skipTuesday && isoWeekday(barDate(bars[0] || {})) === 2) return empty;
+  const or = openingRange(bars, spec, book);
+  if (!or || !(or.width >= spec.minOrWidth)) return empty;
+  if (spec.skipLargeGap !== false && overnightGapPct(bars, opts.prevClose) > GAP_SKIP_PCT) return empty;
+  const lastEntry = entryCutoffHm(spec, book);
+  const stopPts = Math.max(1, Math.min(spec.stopPts, Math.round(Math.max(spec.stopPts, or.width * 0.45))));
+  const liveSpec = { ...spec, stopPts, targetR: spec.targetR || 1.5 };
+  let broke = 0;
+  let open = null;
+  const trades = [];
+  for (let i = 0; i < bars.length; i += 1) {
+    const bar = bars[i];
+    const hm = barHm(bar);
+    if (open) {
+      const step = manageOpen(open, bar, i, liveSpec, lots, book);
+      open = step.open;
+      if (step.trade) {
+        trades.push(step.trade);
+        break;
+      }
+      continue;
+    }
+    if (hm < or.endHm || hm > lastEntry) continue;
+    const vwap = sessionVwap(bars, i);
+    const close = Number(bar.close);
+    if (!broke) {
+      const up = close > or.high + spec.bufferPts;
+      const down = close < or.low - spec.bufferPts;
+      if (up && close > vwap) {
+        open = { dir: 1, spec: liveSpec, entryClose: close, entryTime: bar.date, entryIndex: i, beArmed: false, play: 'orb-vwap' };
+        continue;
+      }
+      if (down && close < vwap) {
+        open = { dir: -1, spec: liveSpec, entryClose: close, entryTime: bar.date, entryIndex: i, beArmed: false, play: 'orb-vwap' };
+        continue;
+      }
+      if (up) broke = 1;
+      else if (down) broke = -1;
+      else {
+        const prev = bars[i - 1];
+        if (prev) {
+          const prevV = sessionVwap(bars, i - 1);
+          if (Number(prev.close) > prevV && Number(bar.low) <= vwap && close > vwap) {
+            open = { dir: 1, spec: liveSpec, entryClose: close, entryTime: bar.date, entryIndex: i, beArmed: false, play: 'vwap-pullback' };
+          } else if (Number(prev.close) < prevV && Number(bar.high) >= vwap && close < vwap) {
+            open = { dir: -1, spec: liveSpec, entryClose: close, entryTime: bar.date, entryIndex: i, beArmed: false, play: 'vwap-pullback' };
+          }
+        }
+      }
+      continue;
+    }
+    const failed =
+      (broke > 0 && close < or.high) || (broke < 0 && close > or.low);
+    if (!failed) continue;
+    open = {
+      dir: -broke,
+      spec: liveSpec,
+      entryClose: close,
+      entryTime: bar.date,
+      entryIndex: i,
+      beArmed: false,
+      play: 'failed-break',
+    };
+  }
+  if (open && bars.length) {
+    const last = bars[bars.length - 1];
+    const flatten = opts.flattenOpen !== false || barHm(last) >= book.squareOff;
+    if (flatten) {
+      trades.push(closeTrade(open, last, 'session end', lots, book));
+      open = null;
+    }
+  }
+  if (opts.withOpen) return { trades, open };
+  return trades;
+}
+
 function simulateDay(dayBars, spec, lots, book, opts = {}) {
   const bars = dayBars || [];
   const empty = opts.withOpen ? { trades: [], open: null } : [];
+  if (spec?.mode === 'regime') return simulateRegimeDay(bars, spec, lots, book, opts);
   const or = openingRange(bars, spec, book);
   if (!or || !(or.width >= spec.minOrWidth)) return empty;
   if (spec.mode === 'fade' && or.width > spec.stopPts * FADE_OR_STOP_MULT) return empty;
@@ -323,8 +468,14 @@ function simulate(bars, spec, { fromDate, toDate, lots, book } = {}) {
     return true;
   });
   const trades = [];
-  for (const d of dates) {
-    trades.push(...simulateDay(sessionBars(bars, d, profile), spec, lots, profile));
+  for (let i = 0; i < dates.length; i += 1) {
+    const d = dates[i];
+    let prevClose;
+    if (i > 0) {
+      const prevBars = sessionBars(bars, dates[i - 1], profile);
+      if (prevBars.length) prevClose = Number(prevBars[prevBars.length - 1].close);
+    }
+    trades.push(...simulateDay(sessionBars(bars, d, profile), spec, lots, profile, { prevClose }));
   }
   return trades;
 }
@@ -765,6 +916,12 @@ function stampCoreBooks(books, allocation) {
 
 function describeSpec(spec, book) {
   if (!spec) return `${book?.name || 'book'} sit-out (no walk-forward edge)`;
+  if (spec.mode === 'regime') {
+    return (
+      `${book?.name || ''} regime · OR ${spec.orMinutes}m then one play ` +
+      `(VWAP ORB / failed-break fade / VWAP pullback) · stop ${spec.stopPts}pt · ${spec.targetR}R · last entry ${book?.sessionStart >= 1600 ? '18:00' : '10:30'}`
+    ).trim();
+  }
   const kind = spec.mode === 'hold' ? 'OR hold' : 'OR failure fade';
   return (
     `${book?.name || ''} ${kind} · ${spec.orMinutes}m, buffer ${spec.bufferPts}pt, ` +
@@ -1133,7 +1290,7 @@ async function runDiscover({ authorization, fromDate, toDate, lots, capitalRs },
       totals: summarize(books.flatMap((b) => b.trainTrades || [])),
     },
     note:
-      'Always scans Nifty 50, Bank Nifty, and Crude Oil Mini. Bank 1-lot is often skipped at ~₹30k (stop wider than 2%). Crude is an evening book (16:00–21:30 IST), not the cash session. A last-train red sits a book out. Live is the same engine plus Kite orders.',
+      'One play per index/crude book after the opening range: VWAP-aligned ORB, fade a failed break, or VWAP pullback. Skip tiny OR, skip >1% gaps, skip Tuesday. Bank 1-lot is often skipped at ~₹30k. Crude is evening-only. Live is the same engine plus Kite orders.',
     scanTotals: summarize(allTrades),
     totals,
     liveTotals: totals,

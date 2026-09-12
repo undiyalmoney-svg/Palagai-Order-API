@@ -30,6 +30,7 @@ assert.strictEqual(kitePocket.equityCash, 61200);
 assert.strictEqual(kitePocket.equityNet, 81235);
 assert.strictEqual(kitePocket.commodityCash, 1500);
 
+assert.ok(specGrid().some((s) => s.mode === 'regime' && s.family === 'or-regime'));
 assert.ok(specGrid().length > 8);
 assert.strictEqual(ENGINE, 'paper-desk');
 assert.ok(RETIRED_FAMILIES.includes('vwap-impulse'));
@@ -112,6 +113,47 @@ const liveState = simulateDay(morning, found.spec, 1, BOOKS.nifty, { withOpen: t
 assert.ok(Array.isArray(liveState.trades));
 assert.ok(liveState.open, 'mid-session paper/live must keep the same open trade');
 assert.ok(liveState.open.dir < 0);
+
+function trendHoldDay(date) {
+  const out = [];
+  let minutes = 9 * 60 + 15;
+  const end = 15 * 60 + 30;
+  let px = 25000;
+  while (minutes <= end) {
+    const hm = Math.floor(minutes / 60) * 100 + (minutes % 60);
+    let open = px;
+    let close = px;
+    let high = px + 6;
+    let low = px - 6;
+    if (hm < 945) {
+      close = 25005;
+      high = 25018;
+      low = 24988;
+      open = 25000;
+    } else if (hm === 945) {
+      open = 25010;
+      close = 25055;
+      high = 25058;
+      low = 25008;
+    } else {
+      close = px + 12;
+      open = px;
+      high = close + 2;
+      low = px - 1;
+    }
+    out.push(bar(date, hm, open, high, low, close));
+    px = close;
+    minutes += 5;
+  }
+  return out;
+}
+
+const regimeSpec = specGrid().find((s) => s.mode === 'regime');
+const orbTrades = simulateDay(trendHoldDay('2026-09-11'), regimeSpec, 1, BOOKS.nifty);
+assert.ok(orbTrades.length === 1, 'VWAP-aligned ORB takes one continuation trade');
+assert.strictEqual(orbTrades[0].direction, 'CE');
+assert.ok(orbTrades[0].netOptionPnlRs > 0);
+assert.strictEqual(simulateDay(trendHoldDay('2026-09-08'), regimeSpec, 1, BOOKS.nifty).length, 0, 'regime skips Tuesday');
 
 function failThenRun(date) {
   const out = [];
