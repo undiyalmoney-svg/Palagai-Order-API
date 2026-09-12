@@ -380,6 +380,39 @@ async function fetchInstrumentsCsv(authorization, exchange) {
   return String(res.data || '');
 }
 
+function parseKiteFunds(payload) {
+  const root = payload && payload.data && (payload.data.equity || payload.data.commodity) ? payload.data : payload;
+  const eq = (root && root.equity) || {};
+  const com = (root && root.commodity) || {};
+  const pocket = (seg) => {
+    const a = seg.available || {};
+    const live = Number(a.live_balance);
+    if (Number.isFinite(live) && live > 0) return live;
+    const cash = Number(a.cash);
+    if (Number.isFinite(cash) && cash > 0) return cash;
+    const net = Number(seg.net);
+    return Number.isFinite(net) ? net : 0;
+  };
+  const equityCash = pocket(eq);
+  const commodityCash = pocket(com);
+  return {
+    source: 'kite',
+    equityNet: Math.round(Number(eq.net) || 0),
+    equityCash: Math.round(equityCash),
+    commodityNet: Math.round(Number(com.net) || 0),
+    commodityCash: Math.round(commodityCash),
+    capitalRs: Math.max(0, Math.floor(equityCash)),
+  };
+}
+
+async function fetchUserMargins(authorization) {
+  const res = await getWithRetry('/user/margins', { headers: headers(authorization) }, 'margins');
+  if (res.status >= 400 || res.data?.status === 'error') {
+    throw new Error(res.data?.message || `margins HTTP ${res.status}`);
+  }
+  return parseKiteFunds(res.data);
+}
+
 module.exports = {
   fetchInstruments,
   fetchInstrumentsCsv,
@@ -394,4 +427,6 @@ module.exports = {
   findInstrumentInCsv,
   lookupInstrument,
   inferInstrumentExchanges,
+  parseKiteFunds,
+  fetchUserMargins,
 };

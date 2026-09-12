@@ -8,8 +8,8 @@
  * Intraday family: opening-range fade OR hold (walk-forward picks per book).
  * Stocks: inside-day breakout on NSE daily.
  * A book that cannot show a walk-forward edge sits out (no forced trades).
- * After the scan, capital allocates: 2% stop per trade, 4% day stop, max two
- * books. Stops cap at 1R, fade skips wide ORs, stale 5-session edges sit out.
+ * After the scan, capital allocates: 2% stop per trade, 4% day stop, max one
+ * book. A spec with a stop-out in the last 5 sessions sits out (profit or no trade).
  */
 
 const defaultMarket = require('./kite-market');
@@ -26,14 +26,14 @@ const STOCK_LOOKBACK_CAL_DAYS = 90;
 const CHARGE_RS = 20;
 const MAX_STOCK_TRADES = 2;
 const MAX_STOCK_SCAN = 30;
-const MAX_FUNDED_TRADES = 2;
+const MAX_FUNDED_TRADES = 1;
 const DEFAULT_CAPITAL_RS = 40000;
 const RISK_PER_TRADE_PCT = 0.02;
 const DAY_RISK_PCT = 0.04;
 const STOCK_NAME_CAPITAL_FRAC = 0.25;
 const MIN_INDEX_TRAIN_PF = 1.5;
 const MIN_STOCK_TRAIN_PF = 1.2;
-const MIN_WIN_RATE = 0.4;
+const MIN_WIN_RATE = 0.55;
 const RECENT_SESSIONS = 5;
 const BE_R = 0.75;
 const FADE_OR_STOP_MULT = 2.2;
@@ -372,6 +372,7 @@ function scoreTrades(trades) {
   if (s.profitFactor < MIN_INDEX_TRAIN_PF) return Number.NEGATIVE_INFINITY;
   if (s.winRate < MIN_WIN_RATE) return Number.NEGATIVE_INFINITY;
   if (s.optionNetAfterChargesRs <= 0) return Number.NEGATIVE_INFINITY;
+  if (s.losses > 0 && s.losses / s.trades > 0.3) return Number.NEGATIVE_INFINITY;
   return s.optionNetAfterChargesRs * Math.min(3, s.profitFactor) + s.wins * 15 + s.expectancyRs;
 }
 
@@ -432,7 +433,7 @@ function allocateDesk({
   riskPerTradePct = RISK_PER_TRADE_PCT,
   dayRiskPct = DAY_RISK_PCT,
 } = {}) {
-  const capital = Math.max(10_000, Math.floor(Number(capitalRs) || DEFAULT_CAPITAL_RS));
+  const capital = Math.max(1_000, Math.floor(Number(capitalRs) || DEFAULT_CAPITAL_RS));
   const lotCap = Math.max(1, Math.floor(Number(maxLots) || 1));
   const perTrade = capital * riskPerTradePct;
   const dayBudget = capital * dayRiskPct;
@@ -629,8 +630,8 @@ function specStillAlive(bars, spec, { trainFrom, trainTo, lots, book }) {
   for (const d of dates) {
     trades.push(...simulateDay(sessionBars(bars, d, book), spec, lots, book));
   }
-  const s = summarize(trades);
-  return s.trades > 0 && s.optionNetAfterChargesRs > 0;
+  if (!trades.length) return false;
+  return trades.every((t) => String(t.exitReason) !== 'stop' && (Number(t.netOptionPnlRs) || 0) >= 0);
 }
 
 function searchSpecs(bars, { trainFrom, trainTo, lots, book } = {}) {
@@ -741,6 +742,10 @@ function searchInsideDay(bars, { trainFrom, trainTo, lots, symbol } = {}) {
       lots,
       symbol,
     });
+    const recent = trades.slice(-3);
+    if (recent.length && recent.some((t) => String(t.exitReason) === 'stop' || (Number(t.netOptionPnlRs) || 0) < 0)) {
+      continue;
+    }
     const row = { spec, trades, totals: summarize(trades), score: scoreStockTrades(trades), symbol };
     if (!best || row.score > best.score) best = row;
   }
@@ -821,6 +826,23 @@ async function loadStocks(fromDate, toDate, lots, deps) {
 }
 
 
+async function resolvePaperCapital(authorization, capitalRs, deps, market) {
+  const fetchFn = deps.fetchUserMargins || market.fetchUserMargins;
+  let kiteFunds = deps.kiteFunds || null;
+  if (!kiteFunds && typeof fetchFn === 'function' && authorization) {
+    try {
+      kiteFunds = await fetchFn(authorization);
+    } catch (err) {
+      kiteFunds = { source: 'kite', error: err.message || String(err), capitalRs: 0 };
+    }
+  }
+  const fromKite = Math.floor(Number(kiteFunds?.capitalRs) || 0);
+  const fromUi = Math.floor(Number(capitalRs) || 0);
+  const capital =
+    fromKite > 0 ? fromKite : Math.max(10_000, fromUi || DEFAULT_CAPITAL_RS);
+  return { capital, kiteFunds: kiteFunds || null };
+}
+
 async function runDiscover({ authorization, fromDate, toDate, lots, capitalRs }, deps = {}) {
   if (!fromDate || !toDate || fromDate > toDate) {
     const err = new Error('Valid fromDate ≤ toDate (YYYY-MM-DD) required');
@@ -829,7 +851,7 @@ async function runDiscover({ authorization, fromDate, toDate, lots, capitalRs },
   }
   const market = deps.market || defaultMarket;
   const maxLots = Math.max(1, Math.floor(Number(lots)) || 1);
-  const capital = Math.max(10_000, Math.floor(Number(capitalRs) || DEFAULT_CAPITAL_RS));
+  const { capital, kiteFunds } = await resolvePaperCapital(authorization, capitalRs, deps, market);
   const L = 1;
   const warmFrom = addDaysIso(fromDate, -LOOKBACK_CAL_DAYS);
   const trainTo = addDaysIso(fromDate, -1);
@@ -962,6 +984,7 @@ async function runDiscover({ authorization, fromDate, toDate, lots, capitalRs },
     skipped: RETIRED_FAMILIES,
     capitalRs: capital,
     maxLots,
+    kiteFunds,
     allocation,
     specText: allocation.taken.length
       ? allocation.taken.map((t) => `${t.instrumentName} ×${t.lots}`).join(' · ')
@@ -974,7 +997,7 @@ async function runDiscover({ authorization, fromDate, toDate, lots, capitalRs },
       totals: summarize(books.flatMap((b) => b.trainTrades || [])),
     },
     note:
-      'Paper is the shadow of live: same scan, same spec, same 5m entries/exits. Live money is the same desk with Kite ATM MIS orders. Stocks stay paper (daily cash). Start live at the session open if you want fills to match paper — late start does not chase a printed signal. Not a profit guarantee.',
+      'Kite funds size the desk when the token is live. Paper sits out unless the last 5 sessions of the chosen spec have no stop-outs (profit or no trade). That cuts false setups; it cannot erase every future loss. Live is the same engine plus Kite orders.',
     scanTotals: summarize(allTrades),
     totals,
     liveTotals: totals,
@@ -1010,6 +1033,7 @@ module.exports = {
   allocateDesk,
   scaleClosedTrade,
   runDiscover,
+  resolvePaperCapital,
   describeSpec,
   pickCrudeMiniFromCsv,
 };

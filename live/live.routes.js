@@ -24,6 +24,7 @@ router.use(requireSiteUser);
 router.use(requireAutoModule);
 router.get('/status', asyncHandler(ctrl.status));
 router.get('/events', asyncHandler(ctrl.events));
+router.get('/funds', asyncHandler(ctrl.funds));
 router.post('/start', asyncHandler(ctrl.start));
 router.post('/stop', asyncHandler(ctrl.stop));
 router.post('/backtest', asyncHandler(ctrl.backtest));

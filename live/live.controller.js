@@ -72,6 +72,24 @@ async function events(req, res) {
   res.json({ events: s.events || [] });
 }
 
+async function funds(req, res) {
+  const authorization = await kiteAuthorization(req);
+  if (!authorization) {
+    res.status(400).json({
+      status: 'error',
+      message: 'Kite session required — Get Token, then retry.',
+    });
+    return;
+  }
+  const { fetchUserMargins } = require('./kite-market');
+  try {
+    const out = await fetchUserMargins(authorization);
+    res.json({ status: 'ok', ...out });
+  } catch (err) {
+    res.status(400).json({ status: 'error', message: err.message || String(err) });
+  }
+}
+
 async function defaults(_req, res) {
   res.json({
     version: APP_VERSION,
@@ -299,4 +317,4 @@ async function lastEeWait(_req, res) {
   res.json({ status: 'ok', found: getLastFound() });
 }
 
-module.exports = { health, status, events, defaults, start, stop, putAuth, backtest, optionOhlc, findEeWait, lastEeWait };
+module.exports = { health, status, events, funds, defaults, start, stop, putAuth, backtest, optionOhlc, findEeWait, lastEeWait };

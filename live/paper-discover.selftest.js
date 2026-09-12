@@ -14,6 +14,17 @@ const {
   RETIRED_FAMILIES,
   BOOKS,
 } = require('./paper-discover');
+const { parseKiteFunds } = require('./kite-market');
+
+const kitePocket = parseKiteFunds({
+  status: 'success',
+  data: {
+    equity: { net: 81234.5, available: { cash: 50000, live_balance: 61200.4 } },
+    commodity: { net: 1500, available: { cash: 1500 } },
+  },
+});
+assert.strictEqual(kitePocket.capitalRs, 61200);
+assert.strictEqual(kitePocket.equityCash, 61200);
 
 assert.ok(specGrid().length > 8);
 assert.strictEqual(ENGINE, 'paper-desk');
@@ -245,7 +256,7 @@ const smallCap = allocateDesk({
 assert.ok(smallCap.skipped.some((s) => s.bookId === 'nifty' && s.reason === 'stop-too-wide'));
 assert.ok(smallCap.skipped.some((s) => s.bookId === 'bank' && s.reason === 'stop-too-wide'));
 assert.ok(smallCap.taken.some((t) => t.bookId === 'crude'));
-assert.ok(smallCap.taken.some((t) => t.bookId === 'stocks'));
+assert.strictEqual(smallCap.taken.length, 1);
 assert.ok(!smallCap.taken.some((t) => t.bookId === 'nifty'));
 
 const bigCap = allocateDesk({
@@ -268,7 +279,7 @@ const crowded = allocateDesk({
     { id: 'stocks', label: 'stocks', train: { optionNetAfterChargesRs: 1500, profitFactor: 1.4 }, trades: [cheapStock] },
   ],
 });
-assert.strictEqual(crowded.taken.length, 2);
+assert.strictEqual(crowded.taken.length, 1);
 assert.ok(crowded.skipped.some((s) => s.reason === 'not-top-edge'));
 
 const correlated = allocateDesk({
@@ -294,6 +305,7 @@ runDiscover(
   {
     candlesByBook: { nifty: candles, bank: [], crude: [] },
     stockSeries: [{ symbol: 'RELIANCE', historical: daily }],
+    fetchUserMargins: async () => ({ capitalRs: 0 }),
   },
 )
   .then((out) => {
@@ -313,10 +325,29 @@ runDiscover(
         out.trades.every((t) => t.instrumentId === 'stock'),
     );
     assert.ok(out.trades.every((t) => t.allocated));
+    return runDiscover(
+      {
+        authorization: 'token x',
+        fromDate: '2026-09-11',
+        toDate: '2026-09-11',
+        lots: 1,
+        capitalRs: 40000,
+      },
+      {
+        candlesByBook: { nifty: candles, bank: [], crude: [] },
+        stockSeries: [{ symbol: 'RELIANCE', historical: daily }],
+        fetchUserMargins: async () => ({ capitalRs: 61200, source: 'kite' }),
+      },
+    );
+  })
+  .then((out) => {
+    assert.strictEqual(out.capitalRs, 61200);
+    assert.strictEqual(out.kiteFunds.source, 'kite');
     console.log(
       'paper-discover.selftest: ok',
       out.totals,
       out.allocation.taken.map((t) => `${t.bookId}x${t.lots}`).join(','),
+      `capital=${out.capitalRs}`,
       out.books.map((b) => `${b.id}:${b.sitOut ? 'sit' : b.totals.trades}`).join(','),
     );
   })
