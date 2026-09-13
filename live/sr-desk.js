@@ -535,7 +535,7 @@ async function runSrDesk({ authorization, fromDate, toDate, capitalRs, capitalSo
     books: booksOut,
     coreBooks: booksOut.filter((b) => b.id === 'nifty' || b.id === 'bank' || b.id === 'crude'),
     note:
-      'This desk trades only Nifty 50 and Bank Nifty (S/R wall-break, with-trend). No Crude, no stocks. Paper ₹ is index points × lot. Entry/exit prices are the NSE 5-minute option OHLC close when available, otherwise the modeled ATM weekly premium — never the index. Day brake ±₹3,500. Live buys one ATM CE or PE. Crude stays off.',
+      'This desk trades only Nifty 50 and Bank Nifty (S/R wall-break, with-trend). No Crude, no stocks. Paper ₹ is index points × lot. Entry/exit prices are the NSE 5-minute option OHLC close when available, otherwise the modeled ATM weekly premium — never the index. SL ₹ is the option-premium stop Live rests on Kite (paper uses the same trigger). Day brake ±₹3,500. Live buys one ATM CE or PE. Crude stays off.',
     instruments: booksOut
       .filter((b) => b.id === 'nifty' || b.id === 'bank')
       .map((b) => instrumentRow({ id: b.id, name: b.label }, b.trades || [])),
