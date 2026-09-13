@@ -78,6 +78,14 @@ assert.strictEqual(lotsFromAvailableFunds(80000), 2);
 assert.strictEqual(lotsFromAvailableFunds(120000), 3);
 assert.strictEqual(lotsFromAvailableFunds(200000), 5);
 assert.strictEqual(lotsFromAvailableFunds(999999), 10);
+const { crudeLotsFromAvailableFunds } = require('./daily-desk-defaults');
+assert.strictEqual(crudeLotsFromAvailableFunds(0), 1);
+assert.strictEqual(crudeLotsFromAvailableFunds(4999), 1);
+assert.strictEqual(crudeLotsFromAvailableFunds(5000), 1);
+assert.strictEqual(crudeLotsFromAvailableFunds(28816), 5);
+assert.strictEqual(crudeLotsFromAvailableFunds(25000), 5);
+assert.strictEqual(crudeLotsFromAvailableFunds(50000), 10);
+assert.strictEqual(crudeLotsFromAvailableFunds(999999), 10);
 
 const ctrl = fs.readFileSync(path.join(__dirname, 'live.controller.js'), 'utf8');
 assert.match(ctrl, /runSrDesk/);

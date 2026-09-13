@@ -102,7 +102,7 @@ assert.ok(!isOptionPrem(8864, 8864));
   );
   assert.strictEqual(paper.engine, 'crude-desk');
   assert.strictEqual(paper.strategy, 'crude-retest');
-  assert.strictEqual(paper.instruments[0].id, 'crude');
+  assert.strictEqual(paper.maxLots, 8);
   assert.ok(paper.trades.length >= 1);
   assert.match(paper.note, /retest/i);
   assert.match(paper.note, /ATM CE\/PE/i);

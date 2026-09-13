@@ -4,7 +4,7 @@ const { runSrDesk } = require('./sr-desk');
 const crudeBot = require('./crude-bot-desk');
 const { preflightLive, firstFail } = require('./live-preflight');
 const { parseTradeBotWindow } = require('./trade-bot-dates');
-const { lotsFromAvailableFunds } = require('./daily-desk-defaults');
+const { lotsFromAvailableFunds, crudeLotsFromAvailableFunds } = require('./daily-desk-defaults');
 const { getOptionOhlcAndPrice } = require('./option-ohlc');
 const { findEntryExitWait, getLastFound, parseUniverse } = require('./ee-wait-research');
 const {
@@ -215,11 +215,11 @@ async function startCrudeDesk(req, res) {
         return;
       }
       const cash = Number((assistant.checks || []).find((c) => c.id === 'funds')?.capitalRs) || 0;
-      const lots = lotsFromAvailableFunds(cash);
+      const lots = crudeLotsFromAvailableFunds(cash);
       assistant.checks.push({
         id: 'lots',
         ok: true,
-        detail: `Lots ${lots} from Kite funds (₹40,000 per lot). Crude Mini ATM CE/PE.`,
+        detail: `Lots ${lots} from Kite funds (₹5,000 per Crude Mini lot). ATM CE/PE.`,
         lots,
       });
       const live = await crudeBot.startLive(uid, { authorization, lots, liveAssistant: assistant });

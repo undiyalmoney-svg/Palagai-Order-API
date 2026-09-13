@@ -12,7 +12,7 @@
  */
 const defaultMarket = require('./kite-market');
 const store = require('./live.store');
-const { lotsFromAvailableFunds } = require('./daily-desk-defaults');
+const { crudeLotsFromAvailableFunds } = require('./daily-desk-defaults');
 const { resolveDeskCapital } = require('./sr-desk');
 const { LiveBroker } = require('./live-broker');
 const { runSrBreakout } = require('./sr-breakout');
@@ -474,7 +474,7 @@ async function runCrudeDesk({ authorization, fromDate, toDate, capitalRs, capita
   }
   const resolved = resolveDeskCapital({ capitalRs, capitalSource, liveMoney, kiteFunds });
   const capital = resolved.capital;
-  const L = lotsFromAvailableFunds(capital);
+  const L = crudeLotsFromAvailableFunds(capital);
   const today = todayIso();
   let symbol = 'CRUDEOILM FUT';
   let candles = deps.candles || [];

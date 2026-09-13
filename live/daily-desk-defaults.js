@@ -57,6 +57,8 @@ const CRUDE_RS_PER_POINT = 10;
 const MAX_DESK_LOTS = 10;
 /** One Nifty/Bank lot per ₹40,000 of available funds. Paper and live both use this. */
 const CAPITAL_RS_PER_LOT = 40000;
+/** Crude Mini is ₹10/pt (Nifty ₹65). Size ~5 lots at ₹25k so the desk is not stuck at 1. */
+const CAPITAL_RS_PER_CRUDE_LOT = 5000;
 const BANK_BASE_LOTS = 1;
 
 /**
@@ -115,6 +117,13 @@ function deskLotsFromCapitalRs(capitalRs) {
 /** Always an integer lot count. Paper and live size from funds, not the UI box. */
 function lotsFromAvailableFunds(capitalRs) {
   return deskLotsFromCapitalRs(capitalRs) || 1;
+}
+
+/** Crude Bot only — Nifty/Bank keep ₹40,000 per lot. */
+function crudeLotsFromAvailableFunds(capitalRs) {
+  const c = Math.max(0, Number(capitalRs) || 0);
+  if (!(c > 0)) return 1;
+  return Math.min(MAX_DESK_LOTS, Math.max(1, Math.floor(c / CAPITAL_RS_PER_CRUDE_LOT)));
 }
 
 function lotsFromCapitalRs(capitalRs) {
@@ -444,11 +453,13 @@ module.exports = {
   capLotsToCapital,
   deskLotsFromCapitalRs,
   lotsFromAvailableFunds,
+  crudeLotsFromAvailableFunds,
   resolveBookLots,
   resolveDeskLots,
   resolveTradeCounts,
   MAX_DESK_LOTS,
   CAPITAL_RS_PER_LOT,
+  CAPITAL_RS_PER_CRUDE_LOT,
   AUTOBOT_ALLOW_CRUDE,
   AUTOBOT_ALLOW_BANK,
   DAY_PROFIT_LOCK_RS,
