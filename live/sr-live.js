@@ -188,6 +188,9 @@ function statusPayload(session) {
         status: p.status,
         entryTime: p.entryTime,
         quantity: p.quantity,
+        slTrigger: p.slTrigger || null,
+        slOrderId: p.slOrderId || null,
+        slOn: !!(p.slOrderId && p.status === 'open'),
       });
     }
   }
