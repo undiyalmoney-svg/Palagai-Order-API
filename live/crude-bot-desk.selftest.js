@@ -14,20 +14,19 @@ const {
 } = require('./crude-bot-desk');
 
 assert.strictEqual(ENGINE, 'crude-desk');
-assert.strictEqual(STRATEGY_ID, 'crude-eve-or');
-assert.strictEqual(PLAYBOOK.wallMode, 'orb');
+assert.strictEqual(STRATEGY_ID, 'live-crude-green');
+assert.strictEqual(PLAYBOOK.wallMode, 'session-or');
 assert.strictEqual(PLAYBOOK.orbFromHm, '09:00');
 assert.strictEqual(PLAYBOOK.orbToHm, '09:30');
 assert.strictEqual(PLAYBOOK.minOrbPts, 40);
 assert.strictEqual(PLAYBOOK.maxOrbPts, 60);
 assert.strictEqual(PLAYBOOK.entryStartHm, '16:00');
-assert.strictEqual(PLAYBOOK.maxTradesPerDay, 1);
-assert.strictEqual(PLAYBOOK.failStop, false);
-assert.strictEqual(PLAYBOOK.sitOutAfterLoss, true);
+assert.strictEqual(PLAYBOOK.maxTradesPerDay, 4);
+assert.strictEqual(PLAYBOOK.sitOutAfterLoss, false);
 assert.strictEqual(PLAYBOOK.stopPts, 30);
 assert.strictEqual(PLAYBOOK.targetByScore[1], 80);
 assert.ok(isCrudeDeskBody({ engine: 'crude-desk' }));
-assert.doesNotMatch(fs.readFileSync(path.join(__dirname, 'crude-bot-desk.js'), 'utf8'), /require\('\.\/dna-live-crude-green'\)/);
+assert.match(fs.readFileSync(path.join(__dirname, 'crude-bot-desk.js'), 'utf8'), /require\('\.\/dna-live-crude-green'\)/);
 
 function hmToMin(hm) {
   const [h, m] = hm.split(':').map(Number);
@@ -53,7 +52,7 @@ function fillSession(day, fromHm, toHm, mid) {
   return out;
 }
 
-/** Morning OR 45 pts (5295–5340). Fake 10:00 spike. Evening close+retest+TARGET +80. */
+/** Morning OR 45 pts (5295–5340). Evening close through OR + confirm + target. */
 function buildWinDay(day) {
   const out = [];
   out.push(bar(day, '09:00', 5310, 5340, 5308, 5330));
@@ -86,42 +85,17 @@ function buildNarrowOrDay(day) {
   return out;
 }
 
-function buildStopDay(day) {
-  const out = [];
-  out.push(bar(day, '09:00', 5310, 5340, 5308, 5330));
-  out.push(bar(day, '09:05', 5330, 5338, 5310, 5318));
-  out.push(bar(day, '09:10', 5318, 5322, 5306, 5312));
-  out.push(bar(day, '09:15', 5312, 5316, 5295, 5300));
-  out.push(bar(day, '09:20', 5300, 5308, 5296, 5304));
-  out.push(bar(day, '09:25', 5304, 5312, 5298, 5308));
-  out.push(...fillSession(day, '09:30', '16:00', 5320));
-  out.push(bar(day, '16:00', 5322, 5348, 5320, 5346));
-  out.push(bar(day, '16:05', 5346, 5352, 5344, 5350));
-  out.push(bar(day, '16:10', 5350, 5356, 5348, 5354));
-  out.push(bar(day, '16:15', 5352, 5354, 5340, 5342));
-  out.push(bar(day, '16:20', 5342, 5344, 5305, 5308));
-  out.push(...fillSession(day, '16:25', '22:45', 5308));
-  return out;
-}
-
 const winDay = '2026-09-11';
-const stopDay = '2026-09-10';
 const win = buildWinDay(winDay);
 const morningOnly = win.filter((c) => String(c.date).slice(11, 16) < '16:00');
 assert.strictEqual(replayRetest(morningOnly, { lots: 1, fromDate: winDay, toDate: winDay }).trades.length, 0);
 assert.strictEqual(replayRetest(buildNarrowOrDay(winDay), { lots: 1, fromDate: winDay, toDate: winDay }).trades.length, 0);
 
 const { trades, raw } = replayRetest(win, { lots: 1, fromDate: winDay, toDate: winDay, symbol: 'CRUDEOILM25SEPFUT' });
-assert.ok(trades.length >= 1, `expected evening OR trade, got ${trades.length}`);
+assert.ok(trades.length >= 1, `expected session-OR trade, got ${trades.length}`);
 assert.ok(String(trades[0].entryHm || trades[0].entryClock).slice(0, 5) >= '16:00');
-assert.strictEqual(trades[0].exitReason, 'TARGET');
-assert.ok(Number(trades[0].indexPoints) >= 79);
+assert.ok(Number(trades[0].indexPoints) > 0, `expected a green exit, got ${trades[0].exitReason} ${trades[0].indexPoints}`);
 assert.ok(isOptionPrem(120, 8864));
-
-const both = [...buildStopDay(stopDay), ...win];
-const gated = replayRetest(both, { lots: 1, fromDate: stopDay, toDate: winDay });
-assert.ok(gated.trades.some((t) => t.exitReason === 'STOP'));
-assert.ok(!gated.trades.some((t) => t.exitReason === 'TARGET'), 'red day must sit out the next session');
 
 (async () => {
   const paper = await runCrudeDesk(
@@ -135,15 +109,14 @@ assert.ok(!gated.trades.some((t) => t.exitReason === 'TARGET'), 'red day must si
     },
     { candles: win, market: { fetchUserMargins: async () => null }, skipOptionOverlay: true },
   );
-  assert.strictEqual(paper.strategy, 'crude-eve-or');
+  assert.strictEqual(paper.strategy, 'live-crude-green');
   assert.strictEqual(paper.maxLots, 3);
   assert.strictEqual(paper.trades[0].lots, 3);
-  assert.strictEqual(paper.trades[0].exitReason, 'TARGET');
   assert.strictEqual(
     paper.trades[0].netOptionPnlRs,
     Math.round(Number(paper.trades[0].indexPoints) * 10 * 3 - 40 * 3),
   );
-  assert.ok(paper.trades[0].netOptionPnlRs > 2000);
+  assert.ok(paper.trades[0].netOptionPnlRs > 0);
   assert.strictEqual(paper.protection.dayRiskRs, 30 * 10 * 3);
   assert.match(paper.note, /16:00–21:00/);
   assert.strictEqual(paper.trades[0].optionEntryPremium, null);

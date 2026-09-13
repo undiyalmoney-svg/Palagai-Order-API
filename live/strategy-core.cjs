@@ -2866,6 +2866,7 @@ function runCrudeSessionOr(params) {
   const orStart = params.orStart ?? CRUDE_SOR_OR_START;
   const orEnd = params.orEnd ?? CRUDE_SOR_OR_END;
   const maxOrWidth = params.maxOrWidth ?? CRUDE_SOR_MAX_OR_WIDTH;
+  const minOrWidth = params.minOrWidth ?? 0;
   const maxTradesDay = params.maxTradesDay ?? CRUDE_SOR_MAX_TRADES_DAY;
   const tradingDate = extractTradeDate(candle.date);
   const month = tradingDate.slice(0, 7);
@@ -2948,6 +2949,9 @@ function runCrudeSessionOr(params) {
     return wait5(candle, "Session OR not ready");
   }
   const width = orb.high - orb.low;
+  if (minOrWidth > 0 && width < minOrWidth) {
+    return wait5(candle, `OR too narrow (${width.toFixed(1)}<${minOrWidth})`);
+  }
   if (maxOrWidth > 0 && width > maxOrWidth) {
     return wait5(candle, `OR too wide (${width.toFixed(1)}>${maxOrWidth})`);
   }
@@ -3661,6 +3665,7 @@ function replayPaperOnCrude(params) {
           orStart: tradeParams.sessionOrStart,
           orEnd: tradeParams.sessionOrEnd,
           maxOrWidth: tradeParams.maxOrWidth,
+          minOrWidth: tradeParams.minOrWidth,
           maxTradesDay: tradeParams.maxEveningTradesDay
         });
         if (afternoon.action === "BUY" || afternoon.action === "SELL") {
