@@ -657,4 +657,6 @@ module.exports = {
   summarize,
   overlayOptionPrices,
   isOptionPrem,
+  resolveCrudeFuture,
+  parseMcxFuts,
 };
