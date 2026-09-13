@@ -1,17 +1,14 @@
 'use strict';
 /**
- * Crude Bot — MCX Crude Oil Mini (CRUDEOILM) US-session opening-range desk.
+ * Crude Bot — evening continuation of the morning Crude Mini opening range.
  *
- * Public MCX crude playbooks (session liquidity, ORB, close-confirm, retest)
- * agree on one structure that Nifty hours do not have:
- *   - Trade the US overlap (≈18:30–23:15 IST), not the quiet Indian afternoon.
- *   - Mark the first 30 minutes after that overlap as the opening range.
- *   - Enter only after a 15m close beyond the range, then a pullback (retest).
- *   - Stop ~15 Mini points (≈1R); target 2R (+30); fail the trade if the OR
- *     does not hold; square off before the MCX MIS window.
- * Vehicle is one ATM Crude Mini CE or PE. Signals still come from the
- * CRUDEOILM future 5m. Paper ₹ is Mini points × ₹10 × lots. This is not the
- * old fee-negative crude S/R book and not live-crude-green DNA.
+ * The US 30m ORB (18:30) over-traded and lost on 2026-08-13→09-13
+ * (profit ₹3,120 / loss ₹7,680 / net ₹−4,560). This book cuts that bleed:
+ *   - Morning OR 09:00–09:30 IST only if width is 40–60 pts (skip chop + spikes).
+ *   - No entries until 16:00 (after NSE cash). Max 1 trade/day.
+ *   - Stop 30 Mini pts (1R), target 80 (≈2.7R). No fail-stop (it dumped Bank).
+ *   - Day brake = 1R. A red day sits out the next session.
+ * Paper ₹ = points × ₹10 × lots. Vehicle is one ATM CE/PE. Not Autobot DNA.
  */
 const defaultMarket = require('./kite-market');
 const store = require('./live.store');
@@ -33,42 +30,42 @@ const {
 const optionStore = require('./sr-option-store');
 
 const ENGINE = 'crude-desk';
-const STRATEGY_ID = 'crude-us-orb';
-const STRATEGY_VERSION = '2026.09-us-orb';
+const STRATEGY_ID = 'crude-eve-or';
+const STRATEGY_VERSION = '2026.09-eve-or';
 const BOOK_ID = 'crude-oil-mini';
 const RS_PER_POINT = 10;
 const CHARGE_RS = 40;
-const DAY_LOSS_STOP_RS = 3500;
-const DAY_PROFIT_TARGET_RS = 3500;
 const TICK_MS = Number(process.env.CRUDE_BOT_INTERVAL_MS || 60_000);
 
 const PLAYBOOK = {
   wallMode: 'orb',
-  orbFromHm: '18:30',
-  orbToHm: '19:00',
-  minOrbPts: 10,
+  orbFromHm: '09:00',
+  orbToHm: '09:30',
+  minOrbPts: 40,
+  maxOrbPts: 60,
   retest: true,
-  maxRetestBars: 2,
-  timeStopBars: 12,
-  lockArmPts: 30,
-  lockAtPts: 18,
+  maxRetestBars: 3,
+  timeStopBars: 24,
+  lockArmPts: 40,
+  lockAtPts: 20,
   giveUpBar: 0,
   giveUpMinPts: 0,
   minScore: 1,
-  failStop: true,
+  failStop: false,
+  sitOutAfterLoss: true,
   capStopToDayBudget: true,
-  stopPts: 15,
-  targetByScore: { 1: 30, 2: 30, 3: 30 },
+  stopPts: 30,
+  targetByScore: { 1: 80, 2: 80, 3: 80 },
   entryPts: 8,
   minBodyPts: 8,
-  maxBodyPts: 80,
+  maxBodyPts: 0,
   trendBars: 20,
   gapLo: 22,
   gapHi: 80,
-  entryStartHm: '19:00',
-  entryEndHm: '22:00',
-  squareOffHm: '23:15',
-  maxTradesPerDay: 2,
+  entryStartHm: '16:00',
+  entryEndHm: '21:00',
+  squareOffHm: '22:45',
+  maxTradesPerDay: 1,
 };
 
 const RULES = PLAYBOOK;
@@ -181,14 +178,36 @@ async function resolveCrudeFuture(market, authorization, today) {
 }
 
 function engineOpts(lots) {
-  const L = Math.max(1, Number(lots) || 1);
-  const perPoint = RS_PER_POINT * L;
   return {
     ...PLAYBOOK,
     stopPts: PLAYBOOK.stopPts,
-    dayLossStop: DAY_LOSS_STOP_RS / perPoint,
-    dayProfitTarget: DAY_PROFIT_TARGET_RS / perPoint,
+    dayLossStop: PLAYBOOK.stopPts,
+    dayProfitTarget: PLAYBOOK.targetByScore[1],
   };
+}
+
+function dayRiskRs(lots) {
+  return PLAYBOOK.stopPts * RS_PER_POINT * Math.max(1, Number(lots) || 1);
+}
+
+function nextIso(d) {
+  const x = new Date(`${d}T00:00:00Z`);
+  x.setUTCDate(x.getUTCDate() + 1);
+  return x.toISOString().slice(0, 10);
+}
+
+function applySitOutAfterLoss(raw) {
+  if (!PLAYBOOK.sitOutAfterLoss) return raw || [];
+  const skip = new Set();
+  const out = [];
+  for (const t of raw || []) {
+    if (skip.has(t.date)) continue;
+    out.push(t);
+    const pts = Number(t.points) || 0;
+    if (t.openAtFill || t.open) continue;
+    if (pts * RS_PER_POINT - CHARGE_RS < 0) skip.add(nextIso(t.date));
+  }
+  return out;
 }
 
 function atmStrike(px, step = 50) {
@@ -439,11 +458,11 @@ function replayRetest(candles, { lots = 1, fromDate, toDate, symbol } = {}) {
     ...engineOpts(lots),
     reportFromDate: fromDate || '',
   });
-  const raw = (rawAll || []).filter((t) => {
+  const raw = applySitOutAfterLoss((rawAll || []).filter((t) => {
     if (fromDate && t.date < fromDate) return false;
     if (toDate && t.date > toDate) return false;
     return true;
-  });
+  }));
   const trades = raw.map((t) => mapRow(t, lots, symbol));
   return { trades, raw, rules: PLAYBOOK };
 }
@@ -455,7 +474,7 @@ function instrumentRow(trades) {
     instrumentName: 'Crude Oil Mini',
     status: tot.trades ? 'taken' : 'not-taken',
     ...tot,
-    why: tot.trades ? 'Taken' : 'No US-session opening-range trade.',
+    why: tot.trades ? 'Taken' : 'No evening continuation of the morning 40–60 pt opening range.',
   };
 }
 
@@ -505,7 +524,7 @@ async function runCrudeDesk({ authorization, fromDate, toDate, capitalRs, capita
     label: 'Crude Oil Mini',
     sitOut: false,
     spec: { engine: ENGINE, strategy: STRATEGY_ID },
-    specText: `CRUDEOILM ATM CE/PE · US-session 30m ORB + retest · ${PLAYBOOK.orbFromHm}–${PLAYBOOK.orbToHm} IST · day ±₹${DAY_LOSS_STOP_RS}`,
+    specText: `CRUDEOILM ATM CE/PE · morning OR ${PLAYBOOK.minOrbPts}–${PLAYBOOK.maxOrbPts} · 16:00–21:00 · SL${PLAYBOOK.stopPts}/TP${PLAYBOOK.targetByScore[1]} · 1/day · sit-out after red`,
     totals,
     trades,
     status: 'on',
@@ -522,7 +541,7 @@ async function runCrudeDesk({ authorization, fromDate, toDate, capitalRs, capita
     kiteFunds,
     maxLots: L,
     allocation: {
-      taken: [{ instrumentName: 'Crude Oil Mini', bookId: 'crude', direction: 'US-ORB', lots: L }],
+      taken: [{ instrumentName: 'Crude Oil Mini', bookId: 'crude', direction: 'EVE-OR', lots: L }],
       trades,
       totals,
     },
@@ -530,16 +549,16 @@ async function runCrudeDesk({ authorization, fromDate, toDate, capitalRs, capita
     books: [book],
     coreBooks: [book],
     note:
-      `Crude Bot trades only Crude Oil Mini ATM CE/PE (MIS), ${L} Mini lot(s) (3 per ₹40,000). Playbook is the US-session 30-minute opening range (18:30–19:00 IST), 15m close through the range, then a 2-bar retest. Paper ₹ = Mini points × ₹10 × lots. Stop ${PLAYBOOK.stopPts} pts / target ${PLAYBOOK.targetByScore[1]} pts (2R). Live quantity is ${L} (1 qty per Mini lot).`,
+      `Crude Bot trades only Crude Oil Mini ATM CE/PE (MIS), ${L} Mini lot(s). Morning opening range 09:00–09:30 (width ${PLAYBOOK.minOrbPts}–${PLAYBOOK.maxOrbPts} pts), first entry 16:00–21:00 after NSE, 1 trade/day. Stop ${PLAYBOOK.stopPts} pts (₹${dayRiskRs(L)} at this size) / target ${PLAYBOOK.targetByScore[1]} pts. A red day sits out the next session. Paper ₹ = Mini points × ₹10 × lots.`,
     instruments: [instrumentRow(trades)],
     protection: {
       fundsRs: capital,
       capitalRs: capital,
-      riskPerTradeRs: Math.round(L * PLAYBOOK.stopPts * RS_PER_POINT),
-      dayRiskRs: DAY_LOSS_STOP_RS,
+      riskPerTradeRs: dayRiskRs(L),
+      dayRiskRs: dayRiskRs(L),
       dayRiskUsedRs: Math.max(0, -Math.min(0, totals.netRs)),
-      stillProtectedRs: Math.max(0, capital - DAY_LOSS_STOP_RS),
-      protectedFloorRs: Math.max(0, capital - DAY_LOSS_STOP_RS),
+      stillProtectedRs: Math.max(0, capital - dayRiskRs(L)),
+      protectedFloorRs: Math.max(0, capital - dayRiskRs(L)),
       monthMtdRs: totals.netRs,
     },
     totals,
@@ -547,7 +566,7 @@ async function runCrudeDesk({ authorization, fromDate, toDate, capitalRs, capita
     trades,
     message: trades.length
       ? undefined
-      : 'No US-session opening-range trade (need the 18:30–19:00 IST range, a 15m close through it after 19:00, then a pullback within 2 bars).',
+      : 'No evening continuation of the morning 40–60 pt opening range (need OR 09:00–09:30, then a 16:00–21:00 close through it and a retest).',
   };
 }
 
@@ -595,7 +614,7 @@ function statusPayload(session) {
     trades: session.trades || [],
     positions: brokerPos,
     lastPreflight: session.lastPreflight,
-    note: 'Crude Bot live buys one ATM Crude Mini CE or PE on Kite (MIS) on the US-session 30m ORB. Stop live on this tab stops only Crude Bot.',
+    note: 'Crude Bot live buys one ATM Crude Mini CE or PE after NSE close (morning OR 40–60). A red day sits out tomorrow. Stop live on this tab stops only Crude Bot.',
   };
 }
 
@@ -612,7 +631,7 @@ async function startLive(userId, { authorization, lots, liveAssistant }) {
   }
   session.lots = Math.max(1, Number(lots) || 1);
   session.status = 'running';
-  session.message = `Crude Bot on · CRUDEOILM ATM CE/PE · ${session.lots} lot(s) · US 30m ORB + retest`;
+  session.message = `Crude Bot on · CRUDEOILM ATM CE/PE · ${session.lots} lot(s) · eve OR 40–60 · SL30/TP80 · 1/day`;
   session.lastError = null;
   session.lastPreflight = liveAssistant || null;
   session.enteredKeys = new Set();
@@ -749,7 +768,7 @@ async function onTick(session) {
         },
       });
       session.enteredKeys.add(liveOpen.entryTime);
-      pushEvent(session, 'SIGNAL', `BUY ${opt.tradingSymbol} US-ORB retest @ ${opt.optionEntryPremium || liveOpen.optionEntryPremium || liveOpen.indexEntry}`);
+      pushEvent(session, 'SIGNAL', `BUY ${opt.tradingSymbol} eve-OR retest @ ${opt.optionEntryPremium || liveOpen.optionEntryPremium || liveOpen.indexEntry}`);
     }
   } finally {
     session.tickBusy = false;

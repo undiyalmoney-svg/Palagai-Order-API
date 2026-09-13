@@ -74,6 +74,7 @@ function runSrBreakout(bars5, opts) {
   const orbFromHm = opts.orbFromHm || '';
   const orbToHm = opts.orbToHm || '';
   const minOrbPts = num(opts.minOrbPts, 0);
+  const maxOrbPts = num(opts.maxOrbPts, 0);
   const failStop = !!opts.failStop;               // exit if the broken level fails to hold
   // HARD LOSS CUT-OFF, in points. 0 = off (default), so nothing changes unless a
   // caller opts in. Checked BEFORE the target on each bar: when one 5-min bar
@@ -172,6 +173,7 @@ function runSrBreakout(bars5, opts) {
       const or = orbOf(b.d);
       if (!or) continue;
       if (minOrbPts > 0 && (or.hi - or.lo) < minOrbPts) continue;
+      if (maxOrbPts > 0 && (or.hi - or.lo) > maxOrbPts) continue;
       wallHi = or.hi;
       wallLo = or.lo;
     } else if (wallMode === 'intraday') {

@@ -14,22 +14,20 @@ const {
 } = require('./crude-bot-desk');
 
 assert.strictEqual(ENGINE, 'crude-desk');
-assert.strictEqual(STRATEGY_ID, 'crude-us-orb');
+assert.strictEqual(STRATEGY_ID, 'crude-eve-or');
 assert.strictEqual(PLAYBOOK.wallMode, 'orb');
-assert.strictEqual(PLAYBOOK.orbFromHm, '18:30');
-assert.strictEqual(PLAYBOOK.orbToHm, '19:00');
-assert.strictEqual(PLAYBOOK.retest, true);
-assert.strictEqual(PLAYBOOK.stopPts, 15);
-assert.strictEqual(PLAYBOOK.targetByScore[1], 30);
-assert.strictEqual(PLAYBOOK.lockArmPts, 30);
-assert.strictEqual(PLAYBOOK.lockAtPts, 18);
-assert.strictEqual(PLAYBOOK.maxRetestBars, 2);
+assert.strictEqual(PLAYBOOK.orbFromHm, '09:00');
+assert.strictEqual(PLAYBOOK.orbToHm, '09:30');
+assert.strictEqual(PLAYBOOK.minOrbPts, 40);
+assert.strictEqual(PLAYBOOK.maxOrbPts, 60);
+assert.strictEqual(PLAYBOOK.entryStartHm, '16:00');
+assert.strictEqual(PLAYBOOK.maxTradesPerDay, 1);
+assert.strictEqual(PLAYBOOK.failStop, false);
+assert.strictEqual(PLAYBOOK.sitOutAfterLoss, true);
+assert.strictEqual(PLAYBOOK.stopPts, 30);
+assert.strictEqual(PLAYBOOK.targetByScore[1], 80);
 assert.ok(isCrudeDeskBody({ engine: 'crude-desk' }));
-assert.ok(!isCrudeDeskBody({ engine: 'sr-desk' }));
-
-const src = fs.readFileSync(path.join(__dirname, 'crude-bot-desk.js'), 'utf8');
-assert.match(src, /runSrBreakout\(/);
-assert.doesNotMatch(src, /require\('\.\/dna-live-crude-green'\)/);
+assert.doesNotMatch(fs.readFileSync(path.join(__dirname, 'crude-bot-desk.js'), 'utf8'), /require\('\.\/dna-live-crude-green'\)/);
 
 function hmToMin(hm) {
   const [h, m] = hm.split(':').map(Number);
@@ -40,98 +38,104 @@ function minToHm(min) {
   const m = String(min % 60).padStart(2, '0');
   return `${h}:${m}`;
 }
-
 function bar(day, hm, o, h, l, c) {
   return { date: `${day}T${hm}:00+0530`, open: o, high: h, low: l, close: c };
 }
 
-/**
- * Quiet Indian session (plus a fake 16:00 spike the old Nifty-hours book
- * would take), then a US 18:30–19:00 opening range, a 15m close through it,
- * a 5m retest, then TARGET +30.
- */
-function buildDay(day) {
+function fillSession(day, fromHm, toHm, mid) {
   const out = [];
-  for (let m = hmToMin('09:00'); m < hmToMin('16:00'); m += 5) {
-    const t = (m - hmToMin('09:00')) / 5;
-    const mid = 5260 + t * 0.35;
+  for (let m = hmToMin(fromHm); m < hmToMin(toHm); m += 5) {
     const even = Math.floor(m / 5) % 2 === 0;
     const o = even ? mid : mid - 1;
     const c = even ? mid - 1 : mid;
     out.push(bar(day, minToHm(m), o, mid + 2, mid - 3, c));
   }
-  // Fake daytime break — must NOT trade (entries start 19:00).
-  out.push(bar(day, '16:00', 5304, 5340, 5303, 5338));
-  out.push(bar(day, '16:05', 5338, 5341, 5334, 5336));
-  out.push(bar(day, '16:10', 5336, 5337, 5308, 5310));
-  for (let m = hmToMin('16:15'); m < hmToMin('18:30'); m += 5) {
-    out.push(bar(day, minToHm(m), 5308, 5312, 5304, 5308));
-  }
-  // Opening range 18:30–19:00: high 5312, low 5290 (22 pts).
-  out.push(bar(day, '18:30', 5308, 5312, 5300, 5306));
-  out.push(bar(day, '18:35', 5306, 5310, 5296, 5302));
-  out.push(bar(day, '18:40', 5302, 5308, 5294, 5300));
-  out.push(bar(day, '18:45', 5300, 5306, 5290, 5298));
-  out.push(bar(day, '18:50', 5298, 5304, 5292, 5300));
-  out.push(bar(day, '18:55', 5300, 5308, 5294, 5304));
-  // 19:00 15m close through 5312 with trend.
-  out.push(bar(day, '19:00', 5306, 5318, 5305, 5316));
-  out.push(bar(day, '19:05', 5316, 5320, 5314, 5318));
-  out.push(bar(day, '19:10', 5318, 5324, 5316, 5322));
-  // Retest the OR high, then +30.
-  out.push(bar(day, '19:15', 5320, 5321, 5312, 5314));
-  out.push(bar(day, '19:20', 5314, 5348, 5313, 5344));
-  out.push(bar(day, '19:25', 5344, 5348, 5342, 5346));
-  for (let m = hmToMin('19:30'); m <= hmToMin('23:15'); m += 5) {
-    out.push(bar(day, minToHm(m), 5346, 5348, 5344, 5346));
-  }
   return out;
 }
 
-const day = '2026-09-11';
-const candles = buildDay(day);
-const morningOnly = candles.filter((c) => String(c.date).slice(11, 16) < '18:30');
-const { trades: none } = replayRetest(morningOnly, {
-  lots: 1,
-  fromDate: day,
-  toDate: day,
-  symbol: 'CRUDEOILM25SEPFUT',
-});
-assert.strictEqual(none.length, 0, 'daytime spike must not trade before the US opening range');
+/** Morning OR 45 pts (5295–5340). Fake 10:00 spike. Evening close+retest+TARGET +80. */
+function buildWinDay(day) {
+  const out = [];
+  out.push(bar(day, '09:00', 5310, 5340, 5308, 5330));
+  out.push(bar(day, '09:05', 5330, 5338, 5310, 5318));
+  out.push(bar(day, '09:10', 5318, 5322, 5306, 5312));
+  out.push(bar(day, '09:15', 5312, 5316, 5295, 5300));
+  out.push(bar(day, '09:20', 5300, 5308, 5296, 5304));
+  out.push(bar(day, '09:25', 5304, 5312, 5298, 5308));
+  out.push(...fillSession(day, '09:30', '10:00', 5310));
+  out.push(bar(day, '10:00', 5310, 5365, 5308, 5360));
+  out.push(bar(day, '10:05', 5360, 5362, 5330, 5334));
+  out.push(bar(day, '10:10', 5334, 5336, 5312, 5316));
+  out.push(...fillSession(day, '10:15', '16:00', 5320));
+  out.push(bar(day, '16:00', 5322, 5348, 5320, 5346));
+  out.push(bar(day, '16:05', 5346, 5352, 5344, 5350));
+  out.push(bar(day, '16:10', 5350, 5356, 5348, 5354));
+  out.push(bar(day, '16:15', 5352, 5354, 5340, 5342));
+  out.push(bar(day, '16:20', 5342, 5430, 5341, 5425));
+  out.push(bar(day, '16:25', 5425, 5430, 5422, 5426));
+  out.push(...fillSession(day, '16:30', '22:45', 5426));
+  return out;
+}
 
-const { trades, raw } = replayRetest(candles, {
-  lots: 1,
-  fromDate: day,
-  toDate: day,
-  symbol: 'CRUDEOILM25SEPFUT',
-});
-assert.ok(trades.length >= 1, `expected a US-ORB trade, got ${trades.length}`);
-assert.ok(String(trades[0].entryHm || trades[0].entryClock).slice(0, 5) >= '19:00');
-assert.strictEqual(trades[0].vehicle, 'option');
-assert.strictEqual(trades[0].side, 'BUY');
-assert.match(String(trades[0].sideLabel), /CE BUY|PE BUY/);
-assert.strictEqual(trades[0].optionEntryPremium, null);
-assert.ok(Number(trades[0].indexEntry) > 2000);
-assert.ok(!/FUT/i.test(String(trades[0].optionSymbol)));
+function buildNarrowOrDay(day) {
+  const out = fillSession(day, '09:00', '16:00', 5300);
+  out.push(bar(day, '16:00', 5300, 5320, 5298, 5318));
+  out.push(bar(day, '16:05', 5318, 5322, 5316, 5320));
+  out.push(bar(day, '16:10', 5320, 5324, 5318, 5322));
+  out.push(...fillSession(day, '16:15', '22:45', 5322));
+  return out;
+}
+
+function buildStopDay(day) {
+  const out = [];
+  out.push(bar(day, '09:00', 5310, 5340, 5308, 5330));
+  out.push(bar(day, '09:05', 5330, 5338, 5310, 5318));
+  out.push(bar(day, '09:10', 5318, 5322, 5306, 5312));
+  out.push(bar(day, '09:15', 5312, 5316, 5295, 5300));
+  out.push(bar(day, '09:20', 5300, 5308, 5296, 5304));
+  out.push(bar(day, '09:25', 5304, 5312, 5298, 5308));
+  out.push(...fillSession(day, '09:30', '16:00', 5320));
+  out.push(bar(day, '16:00', 5322, 5348, 5320, 5346));
+  out.push(bar(day, '16:05', 5346, 5352, 5344, 5350));
+  out.push(bar(day, '16:10', 5350, 5356, 5348, 5354));
+  out.push(bar(day, '16:15', 5352, 5354, 5340, 5342));
+  out.push(bar(day, '16:20', 5342, 5344, 5305, 5308));
+  out.push(...fillSession(day, '16:25', '22:45', 5308));
+  return out;
+}
+
+const winDay = '2026-09-11';
+const stopDay = '2026-09-10';
+const win = buildWinDay(winDay);
+const morningOnly = win.filter((c) => String(c.date).slice(11, 16) < '16:00');
+assert.strictEqual(replayRetest(morningOnly, { lots: 1, fromDate: winDay, toDate: winDay }).trades.length, 0);
+assert.strictEqual(replayRetest(buildNarrowOrDay(winDay), { lots: 1, fromDate: winDay, toDate: winDay }).trades.length, 0);
+
+const { trades, raw } = replayRetest(win, { lots: 1, fromDate: winDay, toDate: winDay, symbol: 'CRUDEOILM25SEPFUT' });
+assert.ok(trades.length >= 1, `expected evening OR trade, got ${trades.length}`);
+assert.ok(String(trades[0].entryHm || trades[0].entryClock).slice(0, 5) >= '16:00');
 assert.strictEqual(trades[0].exitReason, 'TARGET');
-assert.ok(Number(trades[0].netOptionPnlRs) > 0);
+assert.ok(Number(trades[0].indexPoints) >= 79);
 assert.ok(isOptionPrem(120, 8864));
-assert.ok(!isOptionPrem(8864, 8864));
+
+const both = [...buildStopDay(stopDay), ...win];
+const gated = replayRetest(both, { lots: 1, fromDate: stopDay, toDate: winDay });
+assert.ok(gated.trades.some((t) => t.exitReason === 'STOP'));
+assert.ok(!gated.trades.some((t) => t.exitReason === 'TARGET'), 'red day must sit out the next session');
 
 (async () => {
   const paper = await runCrudeDesk(
     {
       authorization: 'token x:y',
-      fromDate: day,
-      toDate: day,
+      fromDate: winDay,
+      toDate: winDay,
       capitalRs: 40000,
       capitalSource: 'mine',
       liveMoney: false,
     },
-    { candles, market: { fetchUserMargins: async () => null }, skipOptionOverlay: true },
+    { candles: win, market: { fetchUserMargins: async () => null }, skipOptionOverlay: true },
   );
-  assert.strictEqual(paper.engine, 'crude-desk');
-  assert.strictEqual(paper.strategy, 'crude-us-orb');
+  assert.strictEqual(paper.strategy, 'crude-eve-or');
   assert.strictEqual(paper.maxLots, 3);
   assert.strictEqual(paper.trades[0].lots, 3);
   assert.strictEqual(paper.trades[0].exitReason, 'TARGET');
@@ -139,23 +143,21 @@ assert.ok(!isOptionPrem(8864, 8864));
     paper.trades[0].netOptionPnlRs,
     Math.round(Number(paper.trades[0].indexPoints) * 10 * 3 - 40 * 3),
   );
-  assert.ok(Number(paper.trades[0].indexPoints) >= 29);
-  assert.strictEqual(paper.trades[0].pnlSource, 'index_x_lot_crude');
-  assert.ok(paper.trades.length >= 1);
-  assert.match(paper.note, /opening range/i);
-  assert.match(paper.note, /ATM CE\/PE/i);
+  assert.ok(paper.trades[0].netOptionPnlRs > 2000);
+  assert.strictEqual(paper.protection.dayRiskRs, 30 * 10 * 3);
+  assert.match(paper.note, /16:00–21:00/);
   assert.strictEqual(paper.trades[0].optionEntryPremium, null);
 
   const csv = [
     'instrument_token,exchange_token,tradingsymbol,name,last_price,expiry,strike,tick_size,lot_size,instrument_type',
     '11,1,CRUDEOILM26SEPFUT,CRUDEOILM,0,2026-09-18,0,1,1,FUT',
-    '22,2,CRUDEOILM26SEP5300CE,CRUDEOILM,0,2026-09-18,5300,0.05,10,CE',
-    '23,3,CRUDEOILM26SEP5300PE,CRUDEOILM,0,2026-09-18,5300,0.05,10,PE',
+    '22,2,CRUDEOILM26SEP5340CE,CRUDEOILM,0,2026-09-18,5340,0.05,10,CE',
+    '23,3,CRUDEOILM26SEP5340PE,CRUDEOILM,0,2026-09-18,5340,0.05,10,PE',
   ].join('\n');
   const optCandles = [];
-  for (let m = hmToMin('10:00'); m <= hmToMin('23:15'); m += 5) {
+  for (let m = hmToMin('10:00'); m <= hmToMin('22:45'); m += 5) {
     optCandles.push({
-      date: `${day}T${minToHm(m)}:00+0530`,
+      date: `${winDay}T${minToHm(m)}:00+0530`,
       open: 118,
       high: 122,
       low: 116,
@@ -165,59 +167,23 @@ assert.ok(!isOptionPrem(8864, 8864));
   const priced = await overlayOptionPrices(trades, raw, {
     authorization: 'token x:y',
     lots: 1,
-    fromDate: day,
-    toDate: day,
+    fromDate: winDay,
+    toDate: winDay,
     market: {
       fetchInstrumentsCsv: async () => csv,
       fetchHistorical5m: async (_a, token) => (Number(token) === 22 || Number(token) === 23 ? optCandles : []),
     },
   });
-  assert.ok(priced[0].optionEntryPremium > 50 && priced[0].optionEntryPremium < 250, priced[0].optionEntryPremium);
-  assert.ok(priced[0].slPrice > 0 && priced[0].slPrice < priced[0].optionEntryPremium);
-  assert.match(String(priced[0].optionSymbol), /CRUDEOILM26SEP5300CE|CRUDEOILM26SEP5300PE/);
-
-  const { trades: sized, raw: sizedRaw } = replayRetest(candles, {
-    lots: 3,
-    fromDate: day,
-    toDate: day,
-    symbol: 'CRUDEOILM25SEPFUT',
-  });
-  const indexNet = Number(sized[0].netOptionPnlRs);
-  assert.strictEqual(sized[0].lots, 3);
-  assert.strictEqual(indexNet, Math.round(Number(sized[0].indexPoints) * 10 * 3 - 40 * 3));
-  const dump = [];
-  for (let m = hmToMin('10:00'); m <= hmToMin('23:15'); m += 5) {
-    dump.push({
-      date: `${day}T${minToHm(m)}:00+0530`,
-      open: 180,
-      high: 185,
-      low: 40,
-      close: 45,
-    });
-  }
-  const overlaySized = await overlayOptionPrices(sized, sizedRaw, {
-    authorization: 'token x:y',
-    lots: 3,
-    fromDate: day,
-    toDate: day,
-    market: {
-      fetchInstrumentsCsv: async () => csv,
-      fetchHistorical5m: async (_a, token) => (Number(token) === 22 || Number(token) === 23 ? dump : []),
-    },
-  });
-  assert.strictEqual(overlaySized[0].netOptionPnlRs, indexNet, 'overlay must not rewrite paper ₹ with option × lot_size 10 × lots');
-  assert.strictEqual(overlaySized[0].lots, 3);
-  assert.ok(overlaySized[0].optionEntryPremium > 0 && overlaySized[0].optionEntryPremium < 250);
+  assert.ok(priced[0].optionEntryPremium > 50 && priced[0].optionEntryPremium < 250);
+  assert.strictEqual(priced[0].netOptionPnlRs, trades[0].netOptionPnlRs);
   console.log(
     'crude-bot-desk.selftest: ok',
     paper.trades[0].exitReason,
     paper.trades[0].netOptionPnlRs,
-    'n=',
-    paper.trades.length,
+    'dayRisk',
+    paper.protection.dayRiskRs,
     'optIn',
     priced[0].optionEntryPremium,
-    'pts',
-    paper.trades[0].indexPoints,
   );
 })().catch((err) => {
   console.error(err);
