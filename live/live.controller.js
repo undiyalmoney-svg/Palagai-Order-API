@@ -233,7 +233,7 @@ async function startCrudeDesk(req, res) {
         liveAssistant: assistant,
         engine: crudeBot.ENGINE,
         note:
-          'Crude Bot live buys one ATM Crude Mini CE or PE on Kite (MIS). Same retest playbook as Nifty/Bank. It does not touch Nifty or Bank. Stop live on this tab stops only Crude Bot.',
+          'Crude Bot live buys one ATM Crude Mini CE or PE on Kite (MIS). US-session 30m opening range + retest (not the Nifty/Bank daytime wall). It does not touch Nifty or Bank. Stop live on this tab stops only Crude Bot.',
       });
     } catch (err) {
       const detail = err.message || String(err);
