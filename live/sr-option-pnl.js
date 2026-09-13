@@ -40,11 +40,42 @@ function hmAdd(hm, deltaMin) {
   return `${h}:${m}`;
 }
 
+function barDay(bar) {
+  return String(bar?.date || '').slice(0, 10);
+}
+
+function clockOf(hm) {
+  const s = String(hm || '');
+  const iso = /T(\d{2}:\d{2})/.exec(s);
+  if (iso) return iso[1];
+  const hmOnly = /^(\d{2}:\d{2})/.exec(s);
+  return hmOnly ? hmOnly[1] : s.slice(0, 5);
+}
+
+function dayOfStamp(hm, day) {
+  if (day && /^\d{4}-\d{2}-\d{2}$/.test(String(day))) return String(day);
+  const s = String(hm || '');
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  return null;
+}
+
+function candlesOnDay(candles, day) {
+  if (!day) return candles || [];
+  return (candles || []).filter((c) => barDay(c) === day);
+}
+
 /** Prefer the exact 5m stamp; else the next/prev 5m (Kite option bars often sit on :10 when the index fill is :05). */
-function pickBarFlex(candles, hm) {
-  return pickBar(candles, hm)
-    || pickBar(candles, hmAdd(hm, 5))
-    || pickBar(candles, hmAdd(hm, -5));
+function pickBarFlex(candles, hm, day) {
+  const d = dayOfStamp(hm, day);
+  const list = candlesOnDay(candles, d);
+  return pickBar(list, hm)
+    || pickBar(list, hmAdd(hm, 5))
+    || pickBar(list, hmAdd(hm, -5));
+}
+
+function lastBarOnDay(candles, day) {
+  const list = candlesOnDay(candles, day);
+  return list.length ? list[list.length - 1] : null;
 }
 
 function ohlcOf(bar) {
@@ -63,7 +94,7 @@ function ohlcOf(bar) {
 }
 
 function pickBar(candles, hm) {
-  const want = String(hm || '').slice(0, 5);
+  const want = clockOf(hm);
   if (!Array.isArray(candles) || !want) return null;
   let last = null;
   for (const c of candles) {
@@ -75,11 +106,12 @@ function pickBar(candles, hm) {
   return last;
 }
 
-function barsInHold(candles, entryHm, exitHm) {
-  const a = hmToMin(entryHm);
-  const b = hmToMin(exitHm);
+function barsInHold(candles, entryHm, exitHm, day) {
+  const a = hmToMin(clockOf(entryHm));
+  const b = hmToMin(clockOf(exitHm));
   if (a == null || b == null) return [];
-  return (candles || []).filter((c) => {
+  const d = dayOfStamp(entryHm, day) || dayOfStamp(exitHm, day);
+  return candlesOnDay(candles, d).filter((c) => {
     const m = hmToMin(hmOf(c.date));
     return m != null && m >= a && m <= b;
   });
@@ -198,8 +230,8 @@ async function optionPnlForTrade({ authorization, spec, trade, lots, session, pi
   const day = trade.date;
   const { candles: rawBars, barsSource } = await loadOptionCandles(authorization, pick, day, cache._optHist);
   const candles = Array.isArray(rawBars) ? rawBars : [];
-  const entryBar = pickBarFlex(candles, trade.entryTime);
-  const exitBar = pickBarFlex(candles, trade.exitTime) || (candles.length ? candles[candles.length - 1] : null);
+  const entryBar = pickBarFlex(candles, trade.entryTime, day);
+  const exitBar = pickBarFlex(candles, trade.exitTime, day) || lastBarOnDay(candles, day);
   const entryOhlc = ohlcOf(entryBar);
   const exitOhlc = ohlcOf(exitBar);
   const friction = liveFriction();
@@ -219,7 +251,7 @@ async function optionPnlForTrade({ authorization, spec, trade, lots, session, pi
       maxLossRs: (OPTION_SL_MAX_RS[spec.key] || 0) * Math.max(1, Number(lots) || 1),
     lotUnits: qty,
   });
-  for (const bar of barsInHold(candles, trade.entryTime, trade.exitTime)) {
+  for (const bar of barsInHold(candles, trade.entryTime, trade.exitTime, day)) {
     const low = Number(bar.low) || Number(bar.close) || 0;
     const fill = slLimitFill(slTrigger, low);
     if (fill != null) {
@@ -308,5 +340,5 @@ function summarizeOptionTrades(trades) {
 
 module.exports = {
   optionRupees, pickBar, pickBarFlex, ohlcOf, optionPnlForTrade, summarizeOptionTrades, summarizeSidecar, hmOf,
-  liveLikeEntryPrem, liveLikeExitPrem, slLimitFill, markOneOpenLeg, barsInHold,
+  liveLikeEntryPrem, liveLikeExitPrem, slLimitFill, markOneOpenLeg, barsInHold, lastBarOnDay,
 };

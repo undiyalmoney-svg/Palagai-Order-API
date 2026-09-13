@@ -351,8 +351,8 @@ async function overlayNseOptionOhlc(mapped, rawTrade, book, deps = {}) {
       toDate: day,
       session: deps.optionSession,
     });
-    const entryBar = pickBarFlex(candles, rawTrade.entryTime || mapped.entryHm);
-    const exitBar = pickBarFlex(candles, rawTrade.exitTime || mapped.exitHm);
+    const entryBar = pickBarFlex(candles, rawTrade.entryTime || mapped.entryHm, day);
+    const exitBar = pickBarFlex(candles, rawTrade.exitTime || mapped.exitHm, day);
     const entryOhlc = ohlcOf(entryBar);
     const exitOhlc = ohlcOf(exitBar);
     if (!entryOhlc) return mapped;

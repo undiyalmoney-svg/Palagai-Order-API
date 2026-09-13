@@ -32,6 +32,7 @@ const {
   liveLikeExitPrem,
   barsInHold,
   slLimitFill,
+  lastBarOnDay,
 } = require('./sr-option-pnl');
 const optionStore = require('./sr-option-store');
 
@@ -153,7 +154,7 @@ function parseMcxInstruments(csv) {
       tradingSymbol: sym,
       name: 'CRUDEOILM',
       expiry,
-      strike: Number(p[6]) || 0,
+      strike: Number(p[6]) > 0 ? Number(p[6]) : (strikeFromSymbol(sym) || 0),
       lotSize: Number(p[8]) || 1,
       instrumentType: type,
       exchange: 'MCX',
@@ -220,6 +221,12 @@ function atmStrike(px, step = 50) {
   return Math.round(n / step) * step;
 }
 
+function strikeFromSymbol(sym) {
+  const m = String(sym || '').match(/(\d{3,5})(CE|PE)$/i);
+  const n = m ? Number(m[1]) : 0;
+  return n > 0 ? n : null;
+}
+
 function isOptionPrem(px, indexPx) {
   const n = Number(px);
   if (!(n > 0) || n >= 2500) return false;
@@ -261,6 +268,10 @@ function applyOptionPnl(row, pnl, lots) {
   row.entryOhlc = pnl.entryOhlc || null;
   row.premiumSource = pnl.barsSource === 'kite' || pnl.rupeesSource === 'option-live' ? 'kite-5m' : (pnl.rupeesSource || 'option-5m');
   row.optionSymbol = pnl.optionSymbol || row.optionSymbol;
+  const strike = Number(pnl.strike) > 0
+    ? Number(pnl.strike)
+    : (strikeFromSymbol(row.optionSymbol) || (Number(row.optionStrike) > 0 ? Number(row.optionStrike) : null));
+  if (strike > 0) row.optionStrike = strike;
   row.option = {
     tradingSymbol: pnl.optionSymbol || row.optionSymbol,
     symbol: pnl.optionSymbol || row.optionSymbol,
@@ -367,10 +378,14 @@ function resolveListedCrudeOption(instruments, rawTrade) {
   });
   const inst = hit?.instrument;
   if (!inst || hit.source === 'synthetic' || !(Number(inst.instrumentToken) > 0)) return null;
+  const strike = Number(inst.strike) > 0
+    ? Number(inst.strike)
+    : strikeFromSymbol(inst.tradingSymbol);
+  if (!(strike > 0)) return null;
   return {
     tradingSymbol: inst.tradingSymbol,
     instrumentToken: Number(inst.instrumentToken) || 0,
-    strike: Number(inst.strike) || 0,
+    strike,
     expiry: inst.expiry,
     lotSize: 1,
     instrumentType: inst.instrumentType,
@@ -416,8 +431,8 @@ async function overlayOptionPrices(trades, raw, {
         candles: candles.filter((c) => String(c.date || '').slice(0, 10) === t.date),
       });
     }
-    const entryBar = pickBarFlex(candles, t.entryTime);
-    const exitBar = pickBarFlex(candles, t.exitTime) || (candles.length ? candles[candles.length - 1] : null);
+    const entryBar = pickBarFlex(candles, t.entryTime, t.date);
+    const exitBar = pickBarFlex(candles, t.exitTime, t.date) || lastBarOnDay(candles, t.date);
     const entryOhlc = ohlcOf(entryBar);
     const exitOhlc = ohlcOf(exitBar);
     const entryPrem = liveLikeEntryPrem(entryBar, 0.5);
@@ -433,7 +448,7 @@ async function overlayOptionPrices(trades, raw, {
       maxLossRs: (OPTION_SL_MAX_RS.crude || 0) * lotsN,
       lotUnits: (LOT_UNITS.crude || 10) * lotsN,
     });
-    for (const bar of barsInHold(candles, t.entryTime, t.exitTime)) {
+    for (const bar of barsInHold(candles, t.entryTime, t.exitTime, t.date)) {
       const fill = slLimitFill(slTrigger, Number(bar.low) || Number(bar.close) || 0);
       if (fill != null) {
         exitPrem = fill;
@@ -443,6 +458,7 @@ async function overlayOptionPrices(trades, raw, {
     return applyOptionPnl(row, {
       optionSymbol: pick.tradingSymbol,
       instrumentToken: pick.instrumentToken,
+      strike: pick.strike,
       lotSize: 1,
       optionEntryPremium: entryPrem,
       optionExitPremium: exitPrem,

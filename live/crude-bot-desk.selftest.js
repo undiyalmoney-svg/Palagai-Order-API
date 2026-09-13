@@ -158,6 +158,37 @@ assert.ok(isOptionPrem(120, 8864));
   });
   assert.ok(priced[0].optionEntryPremium > 50 && priced[0].optionEntryPremium < 250);
   assert.strictEqual(priced[0].netOptionPnlRs, trades[0].netOptionPnlRs);
+
+  const otherDay = '2026-09-12';
+  const mixedBars = [
+    ...optCandles,
+    {
+      date: `${otherDay}T16:40:00+0530`,
+      open: 645.05,
+      high: 645.05,
+      low: 645.05,
+      close: 645.05,
+    },
+  ];
+  const csvZero = [
+    'instrument_token,exchange_token,tradingsymbol,name,last_price,expiry,strike,tick_size,lot_size,instrument_type',
+    '11,1,CRUDEOILM26SEPFUT,CRUDEOILM,0,2026-09-18,0,1,1,FUT',
+    '23,3,CRUDEOILM26SEP5300PE,CRUDEOILM,0,2026-09-18,0,0.05,10,PE',
+  ].join('\n');
+  const isolated = await overlayOptionPrices(trades, raw, {
+    authorization: 'token x:y',
+    lots: 1,
+    fromDate: winDay,
+    toDate: otherDay,
+    market: {
+      fetchInstrumentsCsv: async () => csvZero,
+      fetchHistorical5m: async () => mixedBars,
+    },
+  });
+  assert.strictEqual(isolated[0].optionStrike, 5300);
+  assert.ok(isolated[0].optionEntryPremium !== 645.05, 'must not use another day\'s option print');
+  assert.notStrictEqual(isolated[0].entryOhlc && isolated[0].entryOhlc.close, 645.05);
+
   console.log(
     'crude-bot-desk.selftest: ok',
     paper.trades[0].exitReason,
