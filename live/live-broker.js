@@ -203,6 +203,8 @@ class LiveBroker {
         entryPremium: entry || null,
         exitPremium: exitPx || null,
         lastLtp: lastLtp || null,
+        slTrigger: Number(p?.slTrigger) > 0 ? Number(p.slTrigger) : null,
+        slOn: !!(p?.slOrderId && p?.status === 'open'),
         pnlRs: pnlRs != null ? Math.round(pnlRs) : null,
       });
     }
