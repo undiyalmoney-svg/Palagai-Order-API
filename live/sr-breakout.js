@@ -5,7 +5,8 @@
  * Pure function over candle data. Imports nothing from the broker order path.
  *
  * Rules (from scripts/p43–p57 on NIFTY / Bank Nifty / Crude Oil Mini):
- *   - S/R = last CONFIRMED pivot high/low (pivotLen 5) on 15-min candles (causal).
+ *   - WALL: 'pivot' (default), 'intraday' (prior N 15m high/low), or 'orb'
+ *       (fixed session opening range between orbFromHm and orbToHm).
  *   - ENTRY: 15-min body >= entryPts closing beyond the level, IN THE TREND
  *       direction (trend = close vs close[trendBars] on 15-min).
  *       close>resistance & up-trend -> BUY (CE); close<support & down-trend -> SELL (PE).
@@ -66,9 +67,13 @@ function runSrBreakout(bars5, opts) {
   // trades. Lets a single-day / live-today run see signals from the open.
   const reportFromDate = opts.reportFromDate || '';
   // Wall mode: 'pivot' = confirmed multi-day pivot (default); 'intraday' = the
-  // break of the prior N 15-min candles' high/low (the intraday range breakout).
-  const wallMode = opts.wallMode === 'intraday' ? 'intraday' : 'pivot';
+  // break of the prior N 15-min candles' high/low (the intraday range breakout);
+  // 'orb' = fixed session opening-range high/low (does not roll with each bar).
+  const wallMode = opts.wallMode === 'intraday' ? 'intraday' : opts.wallMode === 'orb' ? 'orb' : 'pivot';
   const intradayLookback = num(opts.intradayLookback, 3);
+  const orbFromHm = opts.orbFromHm || '';
+  const orbToHm = opts.orbToHm || '';
+  const minOrbPts = num(opts.minOrbPts, 0);
   const failStop = !!opts.failStop;               // exit if the broken level fails to hold
   // HARD LOSS CUT-OFF, in points. 0 = off (default), so nothing changes unless a
   // caller opts in. Checked BEFORE the target on each bar: when one 5-min bar
@@ -120,6 +125,23 @@ function runSrBreakout(bars5, opts) {
   const maxBodyPts = num(opts.maxBodyPts, 0);
 
   const bars15 = to15(bars5);
+  const orbByDay = new Map();
+  function orbOf(day) {
+    if (orbByDay.has(day)) return orbByDay.get(day);
+    let hi = -Infinity;
+    let lo = Infinity;
+    let n = 0;
+    for (const x of bars15) {
+      if (x.d !== day) continue;
+      if (x.hm < orbFromHm || x.hm >= orbToHm) continue;
+      hi = Math.max(hi, x.h);
+      lo = Math.min(lo, x.l);
+      n += 1;
+    }
+    const v = n ? { hi, lo } : null;
+    orbByDay.set(day, v);
+    return v;
+  }
   const day5 = new Map();
   for (const b of bars5) { const d = ymd(b.date); if (!day5.has(d)) day5.set(d, []); day5.get(d).push(b); }
 
@@ -145,7 +167,14 @@ function runSrBreakout(bars5, opts) {
 
     // Resolve the wall(s) for this bar per mode.
     let wallHi = lastRes, wallLo = lastSup;
-    if (wallMode === 'intraday') {
+    if (wallMode === 'orb') {
+      if (!(orbFromHm && orbToHm) || b.hm < orbToHm) continue;
+      const or = orbOf(b.d);
+      if (!or) continue;
+      if (minOrbPts > 0 && (or.hi - or.lo) < minOrbPts) continue;
+      wallHi = or.hi;
+      wallLo = or.lo;
+    } else if (wallMode === 'intraday') {
       // prior N 15-min candles on the SAME day (need them, else skip)
       if (i < intradayLookback || bars15[i - intradayLookback].d !== b.d) continue;
       wallHi = -Infinity; wallLo = Infinity;
@@ -166,7 +195,7 @@ function runSrBreakout(bars5, opts) {
     //            intraday range breakout — a big body is not required, the range
     //            break IS the signal).
     let dir = 0, level = null;
-    if (wallMode === 'intraday') {
+    if (wallMode === 'intraday' || wallMode === 'orb') {
       if (b.c > wallHi && trend > 0) { dir = 1; level = wallHi; }
       else if (b.c < wallLo && trend < 0) { dir = -1; level = wallLo; }
     } else {
@@ -189,7 +218,10 @@ function runSrBreakout(bars5, opts) {
 
     const breakoutPrice = b.c, breakoutTime = b.hm;
     let entry = b.c, entryTime = b.hm, retestTime = null, entryAt = null;
-    let after = (day5.get(b.d) || []).filter(x => hhmm(x.date) > b.hm && hhmm(x.date) <= squareOffHm);
+    // ORB 15m close is only known at +10 minutes. Do not scan the signal bar's
+    // own 5m prints for a retest (that is look-ahead into the confirmation).
+    const afterHm = wallMode === 'orb' ? addHm(b.hm, 10) : b.hm;
+    let after = (day5.get(b.d) || []).filter(x => hhmm(x.date) > afterHm && hhmm(x.date) <= squareOffHm);
     if (!after.length) continue;
     if (retest) {
       // Wait CAUSALLY for price to pull back to the broken level, then enter there.
@@ -301,5 +333,11 @@ function runSrBreakout(bars5, opts) {
 
 function num(v, d) { const n = Number(v); return Number.isFinite(n) ? n : d; }
 function round2(x) { return Math.round((Number(x) || 0) * 100) / 100; }
+function addHm(hm, addMin) {
+  const [H, M] = String(hm || '00:00').split(':').map(Number);
+  const x = (H || 0) * 60 + (M || 0) + addMin;
+  const wrap = ((x % (24 * 60)) + 24 * 60) % (24 * 60);
+  return String(Math.floor(wrap / 60)).padStart(2, '0') + ':' + String(wrap % 60).padStart(2, '0');
+}
 
 module.exports = { runSrBreakout, to15 };
