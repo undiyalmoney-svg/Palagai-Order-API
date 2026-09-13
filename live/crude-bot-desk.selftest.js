@@ -18,10 +18,10 @@ assert.strictEqual(STRATEGY_ID, 'live-crude-green');
 assert.strictEqual(PLAYBOOK.wallMode, 'session-or');
 assert.strictEqual(PLAYBOOK.orbFromHm, '09:00');
 assert.strictEqual(PLAYBOOK.orbToHm, '09:30');
-assert.strictEqual(PLAYBOOK.minOrbPts, 40);
+assert.strictEqual(PLAYBOOK.minOrbPts, 0);
 assert.strictEqual(PLAYBOOK.maxOrbPts, 60);
 assert.strictEqual(PLAYBOOK.entryStartHm, '16:00');
-assert.strictEqual(PLAYBOOK.maxTradesPerDay, 4);
+assert.strictEqual(PLAYBOOK.maxTradesPerDay, 2);
 assert.strictEqual(PLAYBOOK.sitOutAfterLoss, false);
 assert.strictEqual(PLAYBOOK.stopPts, 30);
 assert.strictEqual(PLAYBOOK.targetByScore[1], 80);
@@ -76,12 +76,18 @@ function buildWinDay(day) {
   return out;
 }
 
-function buildNarrowOrDay(day) {
-  const out = fillSession(day, '09:00', '16:00', 5300);
-  out.push(bar(day, '16:00', 5300, 5320, 5298, 5318));
-  out.push(bar(day, '16:05', 5318, 5322, 5316, 5320));
-  out.push(bar(day, '16:10', 5320, 5324, 5318, 5322));
-  out.push(...fillSession(day, '16:15', '22:45', 5322));
+function buildWideOrDay(day) {
+  const out = [];
+  out.push(bar(day, '09:00', 5310, 5410, 5280, 5400));
+  out.push(bar(day, '09:05', 5400, 5412, 5380, 5390));
+  out.push(bar(day, '09:10', 5390, 5395, 5370, 5375));
+  out.push(bar(day, '09:15', 5375, 5380, 5360, 5365));
+  out.push(bar(day, '09:20', 5365, 5370, 5350, 5355));
+  out.push(bar(day, '09:25', 5355, 5360, 5340, 5345));
+  out.push(...fillSession(day, '09:30', '16:00', 5350));
+  out.push(bar(day, '16:00', 5350, 5420, 5348, 5418));
+  out.push(bar(day, '16:05', 5418, 5422, 5416, 5420));
+  out.push(...fillSession(day, '16:10', '22:45', 5420));
   return out;
 }
 
@@ -89,7 +95,7 @@ const winDay = '2026-09-11';
 const win = buildWinDay(winDay);
 const morningOnly = win.filter((c) => String(c.date).slice(11, 16) < '16:00');
 assert.strictEqual(replayRetest(morningOnly, { lots: 1, fromDate: winDay, toDate: winDay }).trades.length, 0);
-assert.strictEqual(replayRetest(buildNarrowOrDay(winDay), { lots: 1, fromDate: winDay, toDate: winDay }).trades.length, 0);
+assert.strictEqual(replayRetest(buildWideOrDay(winDay), { lots: 1, fromDate: winDay, toDate: winDay }).trades.length, 0);
 
 const { trades, raw } = replayRetest(win, { lots: 1, fromDate: winDay, toDate: winDay, symbol: 'CRUDEOILM25SEPFUT' });
 assert.ok(trades.length >= 1, `expected session-OR trade, got ${trades.length}`);

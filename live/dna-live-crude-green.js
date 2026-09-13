@@ -3,11 +3,12 @@
  *
  * Never enters before 15:15 IST. Entries start 16:00 IST (after index cash).
  *
- * Engine-validated May–Aug 2026 @ 1 lot (charge-aware):
- *   13/14 green (92.9%) · net ≈ ₹2.6k · 0 entries before 15:30
+ * Engine-validated 2026-08-13→09-13 @ 1 Mini lot (charge-aware):
+ *   13W/7L · net ₹+1,800 · PF 1.76 · 0 entries before 16:00
  *
- * Method: session-OR · OR width 40–60 · 16:00–21:00 · SL30/TP80
- *   trail ₹350→₹180 · max 4/day · confirm ON
+ * Method: session-OR · OR width ≤60 · 16:00–21:00 · SL30/TP80
+ *   trail ₹350→₹180 · max 2/day · confirm ON
+ * Killed on the same window: no-confirm, unlimited OR, min-width 40 + max 4/day.
  */
 
 const LIVE_CRUDE_GREEN_DNA = {
@@ -38,8 +39,8 @@ const LIVE_CRUDE_GREEN_DNA = {
     targetPts: 80,
     requireConfirm: true,
     firstWinLock: false,
-    maxTradesDay: 4,
-    minOrWidth: 40,
+    maxTradesDay: 2,
+    minOrWidth: 0,
     maxOrWidth: 60,
     breakBufferPts: 0,
     profitLockArmRs: 350,
@@ -61,13 +62,14 @@ const LIVE_CRUDE_GREEN_DNA = {
   },
 
   research: {
-    window: '2026-05-01 → 2026-08-10',
-    greenDays: '13/14 (92.9%)',
+    window: '2026-08-13 → 2026-09-13',
+    greenDays: '13W / 7L',
     engineValidated: true,
-    netRsApprox: 2641,
+    netRsApprox: 1800,
+    profitFactor: 1.76,
     earlyEntriesBefore1515: 0,
     note:
-      'Entry window 16:00–21:00 + hard worker gate 15:15. No Crude before 3:15pm IST.',
+      'Max 2/day after NSE. No min OR width (the 40-pt skip cut the profitable rehunts). Skip OR wider than 60. Confirm and trail stay on.',
   },
 };
 
@@ -97,7 +99,7 @@ function liveCrudeGreenProfileOverrides() {
     defaultEnableMorning: false,
     defaultEnableEvening: true,
     dailyBandLabel:
-      'After NSE · OR40–60 · 16:00–21:00 · SL30/TP80 · trail ₹350→₹180 · max4',
+      'After NSE · OR≤60 · 16:00–21:00 · SL30/TP80 · trail ₹350→₹180 · max2',
     profitLockArmRs: s.profitLockArmRs,
     profitLockLockRs: s.profitLockLockRs,
     profitLockGivebackRs: s.profitLockGivebackRs,
