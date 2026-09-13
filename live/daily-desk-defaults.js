@@ -57,8 +57,12 @@ const CRUDE_RS_PER_POINT = 10;
 const MAX_DESK_LOTS = 10;
 /** One Nifty/Bank lot per ₹40,000 of available funds. Paper and live both use this. */
 const CAPITAL_RS_PER_LOT = 40000;
-/** Crude Mini is ₹10/pt (Nifty ₹65). Size ~5 lots at ₹25k so the desk is not stuck at 1. */
-const CAPITAL_RS_PER_CRUDE_LOT = 5000;
+/**
+ * Crude Bot only. Same ₹40,000 fund bands as Nifty, but 3 Crude Mini lots per
+ * band: below ₹40k → 3, ₹80k → 6, ₹1.2L → 9. Nifty/Bank stay 1 per band.
+ */
+const CRUDE_LOTS_PER_BAND = 3;
+const MAX_CRUDE_LOTS = MAX_DESK_LOTS * CRUDE_LOTS_PER_BAND;
 const BANK_BASE_LOTS = 1;
 
 /**
@@ -119,11 +123,10 @@ function lotsFromAvailableFunds(capitalRs) {
   return deskLotsFromCapitalRs(capitalRs) || 1;
 }
 
-/** Crude Bot only — Nifty/Bank keep ₹40,000 per lot. */
+/** Crude Bot only. Nifty/Bank keep 1 lot per ₹40,000. */
 function crudeLotsFromAvailableFunds(capitalRs) {
-  const c = Math.max(0, Number(capitalRs) || 0);
-  if (!(c > 0)) return 1;
-  return Math.min(MAX_DESK_LOTS, Math.max(1, Math.floor(c / CAPITAL_RS_PER_CRUDE_LOT)));
+  const niftyLots = lotsFromAvailableFunds(capitalRs);
+  return Math.min(MAX_CRUDE_LOTS, Math.max(CRUDE_LOTS_PER_BAND, niftyLots * CRUDE_LOTS_PER_BAND));
 }
 
 function lotsFromCapitalRs(capitalRs) {
@@ -458,8 +461,9 @@ module.exports = {
   resolveDeskLots,
   resolveTradeCounts,
   MAX_DESK_LOTS,
+  MAX_CRUDE_LOTS,
   CAPITAL_RS_PER_LOT,
-  CAPITAL_RS_PER_CRUDE_LOT,
+  CRUDE_LOTS_PER_BAND,
   AUTOBOT_ALLOW_CRUDE,
   AUTOBOT_ALLOW_BANK,
   DAY_PROFIT_LOCK_RS,

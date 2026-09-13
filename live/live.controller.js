@@ -219,7 +219,7 @@ async function startCrudeDesk(req, res) {
       assistant.checks.push({
         id: 'lots',
         ok: true,
-        detail: `Lots ${lots} from Kite funds (₹5,000 per Crude Mini lot). ATM CE/PE.`,
+        detail: `Lots ${lots} from Kite funds (3 Crude Mini lots per ₹40,000 band). ATM CE/PE.`,
         lots,
       });
       const live = await crudeBot.startLive(uid, { authorization, lots, liveAssistant: assistant });
