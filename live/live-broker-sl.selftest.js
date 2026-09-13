@@ -1,6 +1,19 @@
 'use strict';
 const assert = require('assert');
-const { LiveBroker } = require('./live-broker');
+const { LiveBroker, crudeMiniOrderLotSize } = require('./live-broker');
+
+assert.strictEqual(
+  crudeMiniOrderLotSize({ tradingSymbol: 'CRUDEOILM26SEP5300CE', exchange: 'MCX', lotSize: 10 }),
+  1,
+);
+assert.strictEqual(
+  crudeMiniOrderLotSize({ tradingSymbol: 'CRUDEOILM26SEPFUT', exchange: 'MCX', lotSize: 10 }),
+  1,
+);
+assert.strictEqual(
+  crudeMiniOrderLotSize({ tradingSymbol: 'NIFTY26SEP25000CE', exchange: 'NFO', lotSize: 65 }),
+  65,
+);
 
 const broker = new LiveBroker({ pushEvent() {}, realOrders: false });
 broker.setLots('nifty-50', 1);
