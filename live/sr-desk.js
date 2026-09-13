@@ -224,6 +224,7 @@ function attachProtectiveSl(mapped, book) {
   if (!(trigger > 0) && fill > 0) trigger = roundOptionTick(fill * 0.9);
   if (fill > 0 && trigger >= fill) trigger = roundOptionTick(Math.max(0.05, fill * 0.9));
   mapped.slTrigger = trigger > 0 ? trigger : null;
+  mapped.slPrice = mapped.slTrigger;
   return mapped;
 }
 

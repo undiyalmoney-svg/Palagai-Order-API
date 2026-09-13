@@ -62,6 +62,7 @@ assert.strictEqual(mapped.premiumSource, 'bs_atm_weekly');
 assert.ok(mapped.stopPts > 0, 'Nifty paper must carry the ₹5,000 index cut as stopPts');
 assert.ok(mapped.indexStop < mapped.indexEntry, 'Nifty CE SL sits below index entry');
 assert.ok(mapped.slTrigger > 0 && mapped.slTrigger < mapped.optionEntryPremium, `Nifty option SL ${mapped.slTrigger}`);
+assert.strictEqual(mapped.slPrice, mapped.slTrigger);
 
 const withSeconds = mapTrade(
   {

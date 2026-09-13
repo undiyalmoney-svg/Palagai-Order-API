@@ -75,6 +75,8 @@ async function status(req, res) {
   res.json({
     ...storeS,
     ...sr,
+    trades: Array.isArray(sr?.trades) ? sr.trades : [],
+    positions: Array.isArray(sr?.positions) ? sr.positions : [],
     status: running ? 'running' : (storeS.status || 'stopped'),
     liveMoney: running,
     realOrders: running,

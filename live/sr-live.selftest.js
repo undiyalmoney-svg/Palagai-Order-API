@@ -256,6 +256,7 @@ assert.strictEqual(summarizeOptionTrades([
   const rows = liveTradesFromBroker({ broker });
   assert.strictEqual(rows.length, 1);
   assert.strictEqual(rows[0].slTrigger, 121.1);
+  assert.strictEqual(rows[0].slPrice, 121.1);
   assert.strictEqual(rows[0].slOn, true);
   assert.strictEqual(rows[0].instrumentName, 'Nifty 50');
   assert.strictEqual(rows[0].sideLabel, 'CE BUY');

@@ -224,6 +224,7 @@ function liveTradesFromBroker(session) {
         : (Number(p.exitPremium) > 0 ? Number(p.exitPremium) : null),
       optionExitPremium: Number(p.exitPremium) > 0 ? Number(p.exitPremium) : null,
       slTrigger,
+      slPrice: slTrigger,
       slOn,
       slOrderId: p.slOrderId || null,
       lots,
