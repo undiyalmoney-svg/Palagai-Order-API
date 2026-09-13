@@ -6,7 +6,9 @@
  * This desk does not use those. It copies the measured Nifty + Bank rules:
  *   intraday wall, 2-bar retest, +20 target, lock 20→12,
  *   time stop 6 bars, give-up off (Bank: give-up cost net), day ±₹3,500.
- * Vehicle is the mini future (₹10/pt), not ATM options.
+ * Vehicle is one ATM Crude Mini CE or PE (same as Nifty/Bank). Signals still
+ * come from the CRUDEOILM future 5m. Paper In/Out are option 5m OHLC (Kite
+ * listed; NSE charting has no MCX crude options). Live buys the Kite contract.
  */
 const defaultMarket = require('./kite-market');
 const store = require('./live.store');
@@ -14,6 +16,10 @@ const { lotsFromAvailableFunds } = require('./daily-desk-defaults');
 const { resolveDeskCapital } = require('./sr-desk');
 const { LiveBroker } = require('./live-broker');
 const { runSrBreakout } = require('./sr-breakout');
+const { optionPnlForTrade } = require('./sr-option-pnl');
+const srLive = require('./sr-live');
+const { OPTION_SL_MAX_RS, LOT_UNITS } = require('./sr-strategy-config');
+const { computeProtectiveSlTrigger } = require('./strategy-core.cjs');
 
 const ENGINE = 'crude-desk';
 const STRATEGY_ID = 'crude-retest';
@@ -152,6 +158,80 @@ function engineOpts(lots) {
   };
 }
 
+function atmStrike(px, step = 50) {
+  const n = Number(px);
+  if (!(n > 0)) return null;
+  return Math.round(n / step) * step;
+}
+
+function isOptionPrem(px, indexPx) {
+  const n = Number(px);
+  if (!(n > 0) || n >= 2500) return false;
+  const idx = Number(indexPx);
+  if (idx > 0 && n > idx * 0.35) return false;
+  return true;
+}
+
+function attachOptionSl(row, lots) {
+  const fill = Number(row.optionEntryPremium) || 0;
+  const lotsN = Math.max(1, Number(lots) || 1);
+  const indexRisk = row.indexStop != null && row.indexEntry != null
+    ? Math.abs(Number(row.indexEntry) - Number(row.indexStop))
+    : Number(row.stopPts) || 0;
+  let trigger = fill > 0
+    ? computeProtectiveSlTrigger({
+      fillPremium: fill,
+      indexRiskPts: Math.max(0, Number(indexRisk) || 0),
+      exchange: 'MCX',
+      tradingSymbol: row.optionSymbol,
+      ltp: fill,
+      maxLossRs: (OPTION_SL_MAX_RS.crude || 0) * lotsN,
+      lotUnits: (LOT_UNITS.crude || 10) * lotsN,
+    })
+    : 0;
+  if (!(trigger > 0) && fill > 0) trigger = round2(Math.max(0.05, Math.round((fill * 0.9) / 0.05) * 0.05));
+  if (fill > 0 && trigger >= fill) trigger = round2(Math.max(0.05, Math.round((fill * 0.9) / 0.05) * 0.05));
+  row.slTrigger = trigger > 0 ? trigger : null;
+  row.slPrice = row.slTrigger;
+  row.slOn = !!(row.slTrigger > 0);
+  return row;
+}
+
+function applyOptionPnl(row, pnl, lots) {
+  const entry = Number(pnl?.optionEntryPremium || pnl?.entryClose);
+  if (!isOptionPrem(entry, row.indexEntry)) return row;
+  row.entryPrice = entry;
+  row.optionEntryPremium = entry;
+  row.entryOhlc = pnl.entryOhlc || null;
+  row.premiumSource = pnl.barsSource === 'kite' || pnl.rupeesSource === 'option-live' ? 'kite-5m' : (pnl.rupeesSource || 'option-5m');
+  row.optionSymbol = pnl.optionSymbol || row.optionSymbol;
+  row.option = {
+    tradingSymbol: pnl.optionSymbol || row.optionSymbol,
+    symbol: pnl.optionSymbol || row.optionSymbol,
+    strike: row.optionStrike,
+    instrumentToken: pnl.instrumentToken || 0,
+    exchange: 'MCX',
+    lotSize: pnl.lotSize || LOT_UNITS.crude,
+  };
+  row.selectedInstrument = row.option.tradingSymbol;
+  const x = Number(pnl?.optionExitPremium || pnl?.exitClose);
+  if (isOptionPrem(x, row.indexEntry) && row.exitHm && !row.open) {
+    row.exitPrice = x;
+    row.optionExitPremium = x;
+    row.exitOhlc = pnl.exitOhlc || null;
+  }
+  if (Number.isFinite(Number(pnl.rupees))) {
+    row.netOptionPnlRs = Math.round(Number(pnl.rupees));
+    row.optionPnlRs = Math.round(Number(pnl.rupees) + (Number(pnl.chargesRs) || 0));
+    row.chargesRs = Number(pnl.chargesRs) || 0;
+  }
+  if (pnl.slTrigger > 0 && isOptionPrem(pnl.slTrigger, row.indexEntry)) {
+    row.slTrigger = round2(pnl.slTrigger);
+    row.slPrice = row.slTrigger;
+  }
+  return attachOptionSl(row, lots);
+}
+
 function mapRow(t, lots, symbol) {
   const perPoint = RS_PER_POINT * lots;
   const pts = Number(t.points) || 0;
@@ -163,57 +243,91 @@ function mapRow(t, lots, symbol) {
   const stop = Number(t.entryPrice) - dir * stopPts;
   const entryHm = padHm(t.entryTime);
   const exitHm = t.exitTime ? padHm(t.exitTime) : null;
+  const direction = t.option || (t.side === 'BUY' ? 'CE' : 'PE');
+  const strike = atmStrike(t.entryPrice, 50);
+  const label = strike != null ? `Crude Oil Mini ${strike} ${direction}` : `Crude Oil Mini ATM ${direction}`;
   return {
     instrumentName: 'Crude Oil Mini',
     instrumentId: BOOK_ID,
-    selectedInstrument: symbol || 'CRUDEOILM FUT',
-    optionSymbol: symbol || 'CRUDEOILM FUT',
-    option: { tradingSymbol: symbol || 'CRUDEOILM FUT', symbol: symbol || 'CRUDEOILM FUT' },
-    side: t.side,
-    sideLabel: t.side === 'SELL' ? 'FUT SELL' : 'FUT BUY',
-    direction: t.side,
+    selectedInstrument: label,
+    optionSymbol: label,
+    option: { tradingSymbol: label, symbol: label, strike },
+    optionStrike: strike,
+    side: 'BUY',
+    sideLabel: `${direction} BUY`,
+    direction,
     entryTime: `${t.date}T${entryHm}+0530`,
     exitTime: t.exitTime ? `${t.date}T${exitHm}+0530` : null,
     entryHm,
     exitHm,
     entryClock: entryHm,
     exitClock: exitHm,
-    entryPrice: t.entryPrice,
-    exitPrice: t.exitPrice,
+    entryPrice: null,
+    exitPrice: null,
     indexEntry: t.entryPrice,
     indexExit: t.exitPrice,
     indexStop: round2(stop),
     indexTarget: Number(t.entryPrice) + dir * (Number(t.target) || 20),
     stopPts,
-    slTrigger: round2(stop),
-    slPrice: round2(stop),
-    slOn: true,
-    optionEntryPremium: t.entryPrice,
-    optionExitPremium: t.exitPrice,
+    slTrigger: null,
+    slPrice: null,
+    slOn: false,
+    optionEntryPremium: null,
+    optionExitPremium: null,
     optionPnlRs: Math.round(gross),
     netOptionPnlRs: Math.round(net),
     indexPoints: round2(pts),
     exitReason: t.exitReason,
     open,
     lots,
-    premiumSource: 'mcx_fut',
-    vehicle: 'fut',
+    premiumSource: null,
+    vehicle: 'option',
+    futSymbol: symbol || 'CRUDEOILM FUT',
   };
 }
 
+async function overlayOptionPrices(trades, raw, { authorization, lots, session } = {}) {
+  if (!authorization || !raw?.length) return trades;
+  const optSess = session || {};
+  const spec = { ...srLive.SPEC.crude, vehicle: 'option', opts: engineOpts(lots) };
+  const out = [];
+  for (let i = 0; i < trades.length; i += 1) {
+    let row = trades[i];
+    const t = raw[i];
+    if (!t) {
+      out.push(row);
+      continue;
+    }
+    try {
+      const pnl = await optionPnlForTrade({
+        authorization,
+        spec,
+        trade: t,
+        lots,
+        session: optSess,
+        pickOption: srLive.pickOption,
+      });
+      row = applyOptionPnl(row, pnl, lots);
+    } catch {
+      /* listed option 5m missing — leave In/Out blank, keep index×lot ₹ */
+    }
+    out.push(row);
+  }
+  return out;
+}
+
 function replayRetest(candles, { lots = 1, fromDate, toDate, symbol } = {}) {
-  const { trades: raw } = runSrBreakout(candles || [], {
+  const { trades: rawAll } = runSrBreakout(candles || [], {
     ...engineOpts(lots),
     reportFromDate: fromDate || '',
   });
-  const trades = (raw || [])
-    .filter((t) => {
-      if (fromDate && t.date < fromDate) return false;
-      if (toDate && t.date > toDate) return false;
-      return true;
-    })
-    .map((t) => mapRow(t, lots, symbol));
-  return { trades, rules: PLAYBOOK };
+  const raw = (rawAll || []).filter((t) => {
+    if (fromDate && t.date < fromDate) return false;
+    if (toDate && t.date > toDate) return false;
+    return true;
+  });
+  const trades = raw.map((t) => mapRow(t, lots, symbol));
+  return { trades, raw, rules: PLAYBOOK };
 }
 
 function instrumentRow(trades) {
@@ -258,14 +372,19 @@ async function runCrudeDesk({ authorization, fromDate, toDate, capitalRs, capita
     symbol = fut.symbol;
     candles = await market.fetchHistorical5m(authorization, fut.token, shiftDays(fromDate, -5), toDate);
   }
-  const { trades } = replayRetest(candles, { lots: L, fromDate, toDate, symbol });
+  const { trades: mapped, raw } = replayRetest(candles, { lots: L, fromDate, toDate, symbol });
+  const trades = await overlayOptionPrices(mapped, raw, {
+    authorization: deps.skipOptionOverlay ? null : authorization,
+    lots: L,
+    session: {},
+  });
   const totals = summarize(trades);
   const book = {
     id: 'crude',
     label: 'Crude Oil Mini',
     sitOut: false,
     spec: { engine: ENGINE, strategy: STRATEGY_ID },
-    specText: `CRUDEOILM FUT · Nifty/Bank retest playbook · day ±₹${DAY_LOSS_STOP_RS}`,
+    specText: `CRUDEOILM ATM CE/PE · Nifty/Bank retest playbook · day ±₹${DAY_LOSS_STOP_RS}`,
     totals,
     trades,
     status: 'on',
@@ -290,7 +409,7 @@ async function runCrudeDesk({ authorization, fromDate, toDate, capitalRs, capita
     books: [book],
     coreBooks: [book],
     note:
-      'Crude Bot trades only Crude Oil Mini futures (MIS). Same playbook as the paying Nifty/Bank desk: intraday wall, 2-bar retest, +20 pts, lock 20→12, day ±₹3,500. Not the old crude S/R book and not live-crude-green. Paper ₹ is points × ₹10 × lots (Nifty is ×65, so 1 crude lot is smaller rupees per point). SL ₹ is the futures stop.',
+      'Crude Bot trades only Crude Oil Mini ATM CE/PE (MIS). Same playbook as Nifty/Bank: intraday wall, 2-bar retest, +20 pts, lock 20→12, day ±₹3,500. Signals come from the mini future; In/Out/SL ₹ are the option premium (Kite 5m on listed MCX options). NSE charting is used for Nifty/Bank paper. Live buys one ATM CE or PE from Kite — it does not trade the future print.',
     instruments: [instrumentRow(trades)],
     protection: {
       fundsRs: capital,
@@ -355,7 +474,7 @@ function statusPayload(session) {
     trades: session.trades || [],
     positions: brokerPos,
     lastPreflight: session.lastPreflight,
-    note: 'Crude Bot live is MCX CRUDEOILM futures with the Nifty/Bank retest playbook. Stop live on this tab stops only Crude Bot.',
+    note: 'Crude Bot live buys one ATM Crude Mini CE or PE on Kite (MIS). Stop live on this tab stops only Crude Bot.',
   };
 }
 
@@ -372,7 +491,7 @@ async function startLive(userId, { authorization, lots, liveAssistant }) {
   }
   session.lots = Math.max(1, Number(lots) || 1);
   session.status = 'running';
-  session.message = `Crude Bot on · CRUDEOILM FUT · ${session.lots} lot(s) · retest playbook`;
+  session.message = `Crude Bot on · CRUDEOILM ATM CE/PE · ${session.lots} lot(s) · retest playbook`;
   session.lastError = null;
   session.lastPreflight = liveAssistant || null;
   session.enteredKeys = new Set();
@@ -444,15 +563,21 @@ async function onTick(session) {
       shiftDays(today, -5),
       today,
     );
-    const { trades } = replayRetest(candles, {
+    const { trades: mapped, raw } = replayRetest(candles, {
       lots: session.lots,
       fromDate: today,
       toDate: today,
       symbol: session.fut.symbol,
     });
+    const trades = await overlayOptionPrices(mapped, raw, {
+      authorization,
+      lots: session.lots,
+      session,
+    });
     session.trades = trades;
     const pos = session.broker.positions.get(BOOK_ID);
-    const liveOpen = trades.find((t) => engineTradeStillOpen(t, hm) && String(t.entryTime || '').slice(0, 10) === today);
+    const liveOpenIdx = trades.findIndex((t) => engineTradeStillOpen(t, hm) && String(t.entryTime || '').slice(0, 10) === today);
+    const liveOpen = liveOpenIdx >= 0 ? trades[liveOpenIdx] : null;
     const done = trades.find((t) => !engineTradeStillOpen(t, hm) && String(t.entryTime || '').slice(0, 10) === today);
 
     if (pos?.status === 'open') {
@@ -468,27 +593,39 @@ async function onTick(session) {
 
     if (liveOpen && !(session.enteredKeys instanceof Set ? session.enteredKeys.has(liveOpen.entryTime) : false)) {
       if (!(session.enteredKeys instanceof Set)) session.enteredKeys = new Set();
-      const side = liveOpen.side === 'SELL' ? 'SELL' : 'BUY';
+      const rawT = raw[liveOpenIdx] || {
+        date: today,
+        entryPrice: liveOpen.indexEntry,
+        side: liveOpen.direction === 'PE' ? 'SELL' : 'BUY',
+        option: liveOpen.direction === 'PE' ? 'PE' : 'CE',
+      };
+      const spec = { ...srLive.SPEC.crude, vehicle: 'option' };
+      const opt = await srLive.pickOption(authorization, spec, rawT, session);
+      if (!opt || !(Number(opt.instrumentToken) > 0)) {
+        pushEvent(session, 'SKIP', 'No listed Crude Mini ATM CE/PE on Kite yet');
+        return;
+      }
       await session.broker.placeEntry(authorization, BOOK_ID, 'Crude Oil Mini', {
-        direction: side,
-        vehicle: 'fut',
+        direction: 'BUY',
+        vehicle: 'option',
         skipChargeGate: true,
         premiumEstimated: false,
-        optionEntryPremium: liveOpen.entryPrice,
-        indexEntry: liveOpen.entryPrice,
-        indexStop: liveOpen.slPrice || liveOpen.slTrigger,
+        optionEntryPremium: opt.optionEntryPremium || liveOpen.optionEntryPremium,
+        indexEntry: liveOpen.indexEntry,
+        indexStop: liveOpen.indexStop,
         indexTarget: liveOpen.indexTarget,
         entryTime: liveOpen.entryTime,
         option: {
-          tradingSymbol: session.fut.symbol,
-          instrumentToken: Number(session.fut.token) || 0,
+          tradingSymbol: opt.tradingSymbol,
+          instrumentToken: Number(opt.instrumentToken) || 0,
           exchange: 'MCX',
-          lotSize: 1,
+          lotSize: Math.max(1, Number(opt.lotSize) || 1),
+          strike: opt.strike,
           source: 'listed',
         },
       });
       session.enteredKeys.add(liveOpen.entryTime);
-      pushEvent(session, 'SIGNAL', `${side} CRUDEOILM retest @ ${liveOpen.entryPrice}`);
+      pushEvent(session, 'SIGNAL', `BUY ${opt.tradingSymbol} retest @ ${opt.optionEntryPremium || liveOpen.optionEntryPremium || liveOpen.indexEntry}`);
     }
   } finally {
     session.tickBusy = false;
@@ -518,6 +655,6 @@ module.exports = {
   status,
   isCrudeDeskBody,
   summarize,
-  resolveCrudeFuture,
-  parseMcxFuts,
+  overlayOptionPrices,
+  isOptionPrem,
 };

@@ -499,6 +499,8 @@ async function pickOption(authorization, spec, trade, session) {
         exchange: 'MCX',
         lotSize: Math.max(1, Number(pick.lotSize) || 1),
         optionEntryPremium: null,
+        strike: Number(pick.strike) || atm,
+        instrumentType: type,
         expiry: fut.expiry,
         expiryRolled: parseMcxCsv(fut.csv || '').some((r) => r.type === 'FUT' && r.expiry === today),
       };

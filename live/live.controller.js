@@ -219,7 +219,7 @@ async function startCrudeDesk(req, res) {
       assistant.checks.push({
         id: 'lots',
         ok: true,
-        detail: `Lots ${lots} from Kite funds (₹40,000 per lot). Crude Mini futures.`,
+        detail: `Lots ${lots} from Kite funds (₹40,000 per lot). Crude Mini ATM CE/PE.`,
         lots,
       });
       const live = await crudeBot.startLive(uid, { authorization, lots, liveAssistant: assistant });
@@ -233,7 +233,7 @@ async function startCrudeDesk(req, res) {
         liveAssistant: assistant,
         engine: crudeBot.ENGINE,
         note:
-          'Crude Bot live trades MCX CRUDEOILM futures (MIS). Same retest playbook as Nifty/Bank. It does not touch Nifty or Bank. Stop live on this tab stops only Crude Bot.',
+          'Crude Bot live buys one ATM Crude Mini CE or PE on Kite (MIS). Same retest playbook as Nifty/Bank. It does not touch Nifty or Bank. Stop live on this tab stops only Crude Bot.',
       });
     } catch (err) {
       const detail = err.message || String(err);

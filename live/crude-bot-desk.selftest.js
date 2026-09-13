@@ -9,6 +9,7 @@ const {
   replayRetest,
   runCrudeDesk,
   isCrudeDeskBody,
+  isOptionPrem,
 } = require('./crude-bot-desk');
 
 assert.strictEqual(ENGINE, 'crude-desk');
@@ -75,11 +76,16 @@ const { trades } = replayRetest(candles, {
   symbol: 'CRUDEOILM25SEPFUT',
 });
 assert.ok(trades.length >= 1, `expected a retest trade, got ${trades.length}`);
-assert.strictEqual(trades[0].vehicle, 'fut');
-assert.ok(trades[0].slPrice > 0);
-assert.match(String(trades[0].optionSymbol), /CRUDEOILM/);
+assert.strictEqual(trades[0].vehicle, 'option');
+assert.strictEqual(trades[0].side, 'BUY');
+assert.match(String(trades[0].sideLabel), /CE BUY|PE BUY/);
+assert.strictEqual(trades[0].optionEntryPremium, null);
+assert.ok(Number(trades[0].indexEntry) > 2000);
+assert.ok(!/FUT/i.test(String(trades[0].optionSymbol)));
 assert.strictEqual(trades[0].exitReason, 'TARGET');
 assert.ok(Number(trades[0].netOptionPnlRs) > 0);
+assert.ok(isOptionPrem(120, 8864));
+assert.ok(!isOptionPrem(8864, 8864));
 
 (async () => {
   const paper = await runCrudeDesk(
@@ -91,14 +97,15 @@ assert.ok(Number(trades[0].netOptionPnlRs) > 0);
       capitalSource: 'mine',
       liveMoney: false,
     },
-    { candles, market: { fetchUserMargins: async () => null } },
+    { candles, market: { fetchUserMargins: async () => null }, skipOptionOverlay: true },
   );
   assert.strictEqual(paper.engine, 'crude-desk');
   assert.strictEqual(paper.strategy, 'crude-retest');
   assert.strictEqual(paper.instruments[0].id, 'crude');
   assert.ok(paper.trades.length >= 1);
   assert.match(paper.note, /retest/i);
-  assert.match(paper.note, /Nifty\/Bank/);
+  assert.match(paper.note, /ATM CE\/PE/i);
+  assert.strictEqual(paper.trades[0].optionEntryPremium, null);
   console.log(
     'crude-bot-desk.selftest: ok',
     paper.trades[0].exitReason,
