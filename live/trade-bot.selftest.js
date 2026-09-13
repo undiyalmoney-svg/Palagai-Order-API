@@ -81,6 +81,8 @@ assert.strictEqual(lotsFromAvailableFunds(999999), 10);
 
 const ctrl = fs.readFileSync(path.join(__dirname, 'live.controller.js'), 'utf8');
 assert.match(ctrl, /runSrDesk/);
+assert.match(ctrl, /crudeBot|crude-bot-desk/);
+assert.match(ctrl, /startCrudeDesk/);
 assert.doesNotMatch(ctrl, /runBacktest/);
 assert.match(ctrl, /sr-desk|sr-breakout|S\/R/);
 assert.match(ctrl, /preflightLive/);

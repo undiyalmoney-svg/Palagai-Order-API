@@ -1,6 +1,7 @@
 const store = require('./live.store');
 const srLive = require('./sr-live');
 const { runSrDesk } = require('./sr-desk');
+const crudeBot = require('./crude-bot-desk');
 const { preflightLive, firstFail } = require('./live-preflight');
 const { parseTradeBotWindow } = require('./trade-bot-dates');
 const { lotsFromAvailableFunds } = require('./daily-desk-defaults');
@@ -68,6 +69,10 @@ function userId(req) {
 
 async function status(req, res) {
   const uid = userId(req);
+  if (crudeBot.isCrudeDeskBody(req.body || {}, req.query || {})) {
+    res.json(crudeBot.status(uid));
+    return;
+  }
   const sr = srLive.status(uid);
   const storeS = store.statusFor(uid);
   const running = !!(sr && sr.running);
@@ -191,11 +196,93 @@ async function persistKiteHeader(req, uid) {
   }
 }
 
+async function startCrudeDesk(req, res) {
+  const body = req.body || {};
+  const uid = userId(req);
+  const authorization = await kiteAuthorization(req);
+  await persistKiteHeader(req, uid);
+
+  if (body.liveMoney === true || body.liveMoney === 'true') {
+    try {
+      const assistant = await preflightLive(authorization);
+      if (!assistant.ok) {
+        const fail = firstFail(assistant);
+        res.status(400).json({
+          status: 'error',
+          message: fail?.detail || 'Live preflight failed. Get Token and retry.',
+          liveAssistant: assistant,
+        });
+        return;
+      }
+      const cash = Number((assistant.checks || []).find((c) => c.id === 'funds')?.capitalRs) || 0;
+      const lots = lotsFromAvailableFunds(cash);
+      assistant.checks.push({
+        id: 'lots',
+        ok: true,
+        detail: `Lots ${lots} from Kite funds (₹40,000 per lot). Crude Mini futures.`,
+        lots,
+      });
+      const live = await crudeBot.startLive(uid, { authorization, lots, liveAssistant: assistant });
+      res.json({
+        ...live,
+        status: live.running ? 'running' : live.status,
+        mode: 'live',
+        liveMoney: true,
+        realOrders: true,
+        lots,
+        liveAssistant: assistant,
+        engine: crudeBot.ENGINE,
+        note:
+          'Crude Bot live trades MCX CRUDEOILM futures (MIS squeeze-break). It does not touch Nifty or Bank. Stop live on this tab stops only Crude Bot.',
+      });
+    } catch (err) {
+      const detail = err.message || String(err);
+      res.status(err.status || 500).json({
+        status: 'error',
+        message: detail,
+        liveAssistant: {
+          ok: false,
+          checks: [{ id: 'start', ok: false, detail }],
+        },
+      });
+    }
+    return;
+  }
+
+  const window = parseTradeBotWindow(body);
+  if (!authorization) {
+    res.status(400).json({
+      status: 'error',
+      message: 'Kite session required — Get Token, then Run (or push the token).',
+    });
+    return;
+  }
+  const out = await crudeBot.runCrudeDesk({
+    authorization,
+    fromDate: window.fromDate,
+    toDate: window.toDate,
+    capitalRs: body.capitalRs || body.capital,
+    capitalSource: body.capitalSource || body.fundSource,
+    liveMoney: false,
+  });
+  res.json({
+    ...out,
+    mode: 'paper',
+    liveMoney: false,
+    realOrders: false,
+    today: window.today,
+  });
+}
+
 async function start(req, res) {
   const body = req.body || {};
   const uid = userId(req);
   const authorization = await kiteAuthorization(req);
   await persistKiteHeader(req, uid);
+
+  if (crudeBot.isCrudeDeskBody(body, req.query || {})) {
+    return startCrudeDesk(req, res);
+  }
 
   if (body.liveMoney === true || body.liveMoney === 'true') {
     try {
@@ -288,6 +375,10 @@ async function start(req, res) {
 
 async function stop(req, res) {
   const uid = userId(req);
+  if (crudeBot.isCrudeDeskBody(req.body || {}, req.query || {})) {
+    res.json(await crudeBot.stop(uid));
+    return;
+  }
   const sr = await srLive.stop(uid);
   const storeOut = await store.stop(uid);
   const running = !!(sr && sr.running);
