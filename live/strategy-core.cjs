@@ -2868,6 +2868,8 @@ function runCrudeSessionOr(params) {
   const maxOrWidth = params.maxOrWidth ?? CRUDE_SOR_MAX_OR_WIDTH;
   const minOrWidth = params.minOrWidth ?? 0;
   const maxTradesDay = params.maxTradesDay ?? CRUDE_SOR_MAX_TRADES_DAY;
+  const allowBuy = params.allowBuy !== false;
+  const allowSell = params.allowSell !== false;
   const tradingDate = extractTradeDate(candle.date);
   const month = tradingDate.slice(0, 7);
   const time = extractHhMm(candle.date);
@@ -2912,8 +2914,8 @@ function runCrudeSessionOr(params) {
     if (time < entryStart || time > entryEnd) {
       return wait5(candle, "Confirm outside entry window");
     }
-    const bullOk = p.dir === 1 && candle.close > candle.open && candle.close > p.signalClose;
-    const bearOk = p.dir === -1 && candle.close < candle.open && candle.close < p.signalClose;
+    const bullOk = p.dir === 1 && allowBuy && candle.close > candle.open && candle.close > p.signalClose;
+    const bearOk = p.dir === -1 && allowSell && candle.close < candle.open && candle.close < p.signalClose;
     if (!bullOk && !bearOk) {
       return wait5(candle, "Session OR confirm failed");
     }
@@ -2963,6 +2965,12 @@ function runCrudeSessionOr(params) {
   }
   if (!action) {
     return wait5(candle, `Waiting OR break (${orb.low.toFixed(1)}\u2013${orb.high.toFixed(1)})`);
+  }
+  if (action === "BUY" && !allowBuy) {
+    return wait5(candle, "Longs off \u2014 PE only");
+  }
+  if (action === "SELL" && !allowSell) {
+    return wait5(candle, "Shorts off \u2014 CE only");
   }
   if (requireConfirm) {
     state.pendingConfirm = {
@@ -3666,7 +3674,9 @@ function replayPaperOnCrude(params) {
           orEnd: tradeParams.sessionOrEnd,
           maxOrWidth: tradeParams.maxOrWidth,
           minOrWidth: tradeParams.minOrWidth,
-          maxTradesDay: tradeParams.maxEveningTradesDay
+          maxTradesDay: tradeParams.maxEveningTradesDay,
+          allowBuy: tradeParams.allowBuy,
+          allowSell: tradeParams.allowSell
         });
         if (afternoon.action === "BUY" || afternoon.action === "SELL") {
           signal = afternoon;

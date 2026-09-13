@@ -22,6 +22,8 @@ assert.strictEqual(PLAYBOOK.minOrbPts, 0);
 assert.strictEqual(PLAYBOOK.maxOrbPts, 60);
 assert.strictEqual(PLAYBOOK.entryStartHm, '16:00');
 assert.strictEqual(PLAYBOOK.maxTradesPerDay, 2);
+assert.strictEqual(PLAYBOOK.allowBuy, false);
+assert.strictEqual(PLAYBOOK.allowSell, true);
 assert.strictEqual(PLAYBOOK.sitOutAfterLoss, false);
 assert.strictEqual(PLAYBOOK.stopPts, 30);
 assert.strictEqual(PLAYBOOK.targetByScore[1], 80);
@@ -66,13 +68,13 @@ function buildWinDay(day) {
   out.push(bar(day, '10:05', 5360, 5362, 5330, 5334));
   out.push(bar(day, '10:10', 5334, 5336, 5312, 5316));
   out.push(...fillSession(day, '10:15', '16:00', 5320));
-  out.push(bar(day, '16:00', 5322, 5348, 5320, 5346));
-  out.push(bar(day, '16:05', 5346, 5352, 5344, 5350));
-  out.push(bar(day, '16:10', 5350, 5356, 5348, 5354));
-  out.push(bar(day, '16:15', 5352, 5354, 5340, 5342));
-  out.push(bar(day, '16:20', 5342, 5430, 5341, 5425));
-  out.push(bar(day, '16:25', 5425, 5430, 5422, 5426));
-  out.push(...fillSession(day, '16:30', '22:45', 5426));
+  out.push(bar(day, '16:00', 5318, 5320, 5286, 5288));
+  out.push(bar(day, '16:05', 5288, 5290, 5276, 5278));
+  out.push(bar(day, '16:10', 5278, 5280, 5270, 5272));
+  out.push(bar(day, '16:15', 5272, 5274, 5264, 5266));
+  out.push(bar(day, '16:20', 5266, 5268, 5200, 5208));
+  out.push(bar(day, '16:25', 5208, 5212, 5204, 5206));
+  out.push(...fillSession(day, '16:30', '22:45', 5206));
   return out;
 }
 
@@ -100,6 +102,7 @@ assert.strictEqual(replayRetest(buildWideOrDay(winDay), { lots: 1, fromDate: win
 const { trades, raw } = replayRetest(win, { lots: 1, fromDate: winDay, toDate: winDay, symbol: 'CRUDEOILM25SEPFUT' });
 assert.ok(trades.length >= 1, `expected session-OR trade, got ${trades.length}`);
 assert.ok(String(trades[0].entryHm || trades[0].entryClock).slice(0, 5) >= '16:00');
+assert.strictEqual(trades[0].direction, 'PE');
 assert.ok(Number(trades[0].indexPoints) > 0, `expected a green exit, got ${trades[0].exitReason} ${trades[0].indexPoints}`);
 assert.ok(isOptionPrem(120, 8864));
 
@@ -130,8 +133,8 @@ assert.ok(isOptionPrem(120, 8864));
   const csv = [
     'instrument_token,exchange_token,tradingsymbol,name,last_price,expiry,strike,tick_size,lot_size,instrument_type',
     '11,1,CRUDEOILM26SEPFUT,CRUDEOILM,0,2026-09-18,0,1,1,FUT',
-    '22,2,CRUDEOILM26SEP5340CE,CRUDEOILM,0,2026-09-18,5340,0.05,10,CE',
-    '23,3,CRUDEOILM26SEP5340PE,CRUDEOILM,0,2026-09-18,5340,0.05,10,PE',
+    '22,2,CRUDEOILM26SEP5300CE,CRUDEOILM,0,2026-09-18,5300,0.05,10,CE',
+    '23,3,CRUDEOILM26SEP5300PE,CRUDEOILM,0,2026-09-18,5300,0.05,10,PE',
   ].join('\n');
   const optCandles = [];
   for (let m = hmToMin('10:00'); m <= hmToMin('22:45'); m += 5) {

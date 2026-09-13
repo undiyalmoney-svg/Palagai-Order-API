@@ -8,8 +8,8 @@
  *
  *   - Morning OR 09:00–09:30 IST, skip only if wider than 60 pts.
  *   - Bullish/bearish close through the range, then a confirm bar (required).
- *   - Entries 16:00–21:00 IST only. Max 2 trades/day. Day stop 30 pts.
- *   - Stop 30 Mini pts, target 80, trail ₹350→₹180.
+ *   - Entries 16:00–21:00 IST. PE only (short the Mini). Afternoon CE was the bleed.
+ *   - Max 2 trades/day. Day stop 30 pts. Stop 30 / target 80 / trail ₹350→₹180.
  * Paper ₹ = Mini points × ₹10 × lots. Live buys one ATM CE/PE (qty = Mini lots).
  */
 const defaultMarket = require('./kite-market');
@@ -63,6 +63,8 @@ const PLAYBOOK = {
   dayProfitLockPts: PROFILE.dayProfitLockPts,
   trailArmRs: PROFILE.profitLockArmRs,
   trailLockRs: PROFILE.profitLockLockRs,
+  allowBuy: PROFILE.allowBuy !== false,
+  allowSell: PROFILE.allowSell !== false,
 };
 
 const RULES = PLAYBOOK;
@@ -498,7 +500,7 @@ function instrumentRow(trades) {
     instrumentName: 'Crude Oil Mini',
     status: tot.trades ? 'taken' : 'not-taken',
     ...tot,
-    why: tot.trades ? 'Taken' : 'No session-OR break after NSE (OR ≤60, confirm, 16:00–21:00, max 2/day).',
+    why: tot.trades ? 'Taken' : 'No PE session-OR break after NSE (OR ≤60, confirm, 16:00–21:00, max 2/day).',
   };
 }
 
@@ -548,7 +550,7 @@ async function runCrudeDesk({ authorization, fromDate, toDate, capitalRs, capita
     label: 'Crude Oil Mini',
     sitOut: false,
     spec: { engine: ENGINE, strategy: STRATEGY_ID },
-    specText: `CRUDEOILM ATM CE/PE · session OR ≤${PLAYBOOK.maxOrbPts} · confirm · 16:00–21:00 · SL${PLAYBOOK.stopPts}/TP${PLAYBOOK.targetByScore[1]} · trail ₹${PLAYBOOK.trailArmRs}→₹${PLAYBOOK.trailLockRs} · max ${PLAYBOOK.maxTradesPerDay}/day`,
+    specText: `CRUDEOILM ATM PE · session OR ≤${PLAYBOOK.maxOrbPts} · confirm · 16:00–21:00 · SL${PLAYBOOK.stopPts}/TP${PLAYBOOK.targetByScore[1]} · trail ₹${PLAYBOOK.trailArmRs}→₹${PLAYBOOK.trailLockRs} · max ${PLAYBOOK.maxTradesPerDay}/day`,
     totals,
     trades,
     status: 'on',
@@ -573,7 +575,7 @@ async function runCrudeDesk({ authorization, fromDate, toDate, capitalRs, capita
     books: [book],
     coreBooks: [book],
     note:
-      `Crude Bot trades only Crude Oil Mini ATM CE/PE (MIS), ${L} Mini lot(s). Session OR 09:00–09:30 (skip if wider than ${PLAYBOOK.maxOrbPts} pts), confirm bar, entries 16:00–21:00 after NSE, max ${PLAYBOOK.maxTradesPerDay}/day. Stop ${PLAYBOOK.stopPts} pts (₹${dayRiskRs(L)} at this size) / target ${PLAYBOOK.targetByScore[1]} pts · trail ₹${PLAYBOOK.trailArmRs}→₹${PLAYBOOK.trailLockRs}. Day stop ${PLAYBOOK.dayLossStopPts} Mini pts. Paper ₹ = Mini points × ₹10 × lots.`,
+      `Crude Bot trades only Crude Oil Mini ATM PE (MIS), ${L} Mini lot(s). Session OR 09:00–09:30 (skip if wider than ${PLAYBOOK.maxOrbPts} pts), confirm bar, entries 16:00–21:00 after NSE, max ${PLAYBOOK.maxTradesPerDay}/day. Afternoon CE is off. Stop ${PLAYBOOK.stopPts} pts (₹${dayRiskRs(L)} at this size) / target ${PLAYBOOK.targetByScore[1]} pts · trail ₹${PLAYBOOK.trailArmRs}→₹${PLAYBOOK.trailLockRs}. Day stop ${PLAYBOOK.dayLossStopPts} Mini pts. Paper ₹ = Mini points × ₹10 × lots.`,
     instruments: [instrumentRow(trades)],
     protection: {
       fundsRs: capital,
@@ -590,7 +592,7 @@ async function runCrudeDesk({ authorization, fromDate, toDate, capitalRs, capita
     trades,
     message: trades.length
       ? undefined
-      : 'No session-OR break after NSE (need morning OR ≤60 pts, a 16:00–21:00 close through it, then a confirm bar).',
+      : 'No PE session-OR after NSE (need morning OR ≤60 pts, a 16:00–21:00 close through the low, then a confirm bar).',
   };
 }
 
@@ -638,7 +640,7 @@ function statusPayload(session) {
     trades: session.trades || [],
     positions: brokerPos,
     lastPreflight: session.lastPreflight,
-    note: 'Crude Bot live buys one ATM Crude Mini CE or PE after NSE close (session OR ≤60, confirm, max 2/day). Stop live on this tab stops only Crude Bot.',
+    note: 'Crude Bot live buys one ATM Crude Mini PE after NSE close (session OR ≤60, confirm, max 2/day). Afternoon CE is off. Stop live on this tab stops only Crude Bot.',
   };
 }
 
@@ -655,7 +657,7 @@ async function startLive(userId, { authorization, lots, liveAssistant }) {
   }
   session.lots = Math.max(1, Number(lots) || 1);
   session.status = 'running';
-  session.message = `Crude Bot on · CRUDEOILM ATM CE/PE · ${session.lots} lot(s) · session OR ≤60 · confirm · SL30/TP80 · max 2/day`;
+  session.message = `Crude Bot on · CRUDEOILM ATM PE · ${session.lots} lot(s) · session OR ≤60 · confirm · SL30/TP80 · max 2/day`;
   session.lastError = null;
   session.lastPreflight = liveAssistant || null;
   session.enteredKeys = new Set();

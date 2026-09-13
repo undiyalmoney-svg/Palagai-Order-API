@@ -42,6 +42,9 @@ const LIVE_CRUDE_GREEN_DNA = {
     maxTradesDay: 2,
     minOrWidth: 0,
     maxOrWidth: 60,
+    /** Afternoon CE (long Mini) was the −₹1,020 bleed on 13 Aug–13 Sep. PE only. */
+    allowBuy: false,
+    allowSell: true,
     breakBufferPts: 0,
     profitLockArmRs: 350,
     profitLockLockRs: 180,
@@ -63,13 +66,13 @@ const LIVE_CRUDE_GREEN_DNA = {
 
   research: {
     window: '2026-08-13 → 2026-09-13',
-    greenDays: '13W / 7L',
+    greenDays: '9W / 3L @ 3 lots',
     engineValidated: true,
-    netRsApprox: 1800,
-    profitFactor: 1.76,
+    netRsApprox: 2040,
+    profitFactor: 3,
     earlyEntriesBefore1515: 0,
     note:
-      'Max 2/day after NSE. No min OR width (the 40-pt skip cut the profitable rehunts). Skip OR wider than 60. Confirm and trail stay on.',
+      'PE only (short Mini). Afternoon CE was the −₹1,020 bleed. Max 2/day, OR ≤60, confirm, trail.',
   },
 };
 
@@ -96,10 +99,12 @@ function liveCrudeGreenProfileOverrides() {
     maxOrWidth: s.maxOrWidth,
     breakBufferPts: s.breakBufferPts,
     maxEveningTradesDay: s.maxTradesDay,
+    allowBuy: s.allowBuy !== false,
+    allowSell: s.allowSell !== false,
     defaultEnableMorning: false,
     defaultEnableEvening: true,
     dailyBandLabel:
-      'After NSE · OR≤60 · 16:00–21:00 · SL30/TP80 · trail ₹350→₹180 · max2',
+      'After NSE · OR≤60 · PE only · 16:00–21:00 · SL30/TP80 · trail ₹350→₹180 · max2',
     profitLockArmRs: s.profitLockArmRs,
     profitLockLockRs: s.profitLockLockRs,
     profitLockGivebackRs: s.profitLockGivebackRs,
