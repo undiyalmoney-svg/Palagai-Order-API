@@ -16,10 +16,19 @@ const { lotsFromAvailableFunds } = require('./daily-desk-defaults');
 const { resolveDeskCapital } = require('./sr-desk');
 const { LiveBroker } = require('./live-broker');
 const { runSrBreakout } = require('./sr-breakout');
-const { optionPnlForTrade } = require('./sr-option-pnl');
 const srLive = require('./sr-live');
 const { OPTION_SL_MAX_RS, LOT_UNITS } = require('./sr-strategy-config');
-const { computeProtectiveSlTrigger } = require('./strategy-core.cjs');
+const { computeProtectiveSlTrigger, resolveAtmCrudeMiniOption } = require('./strategy-core.cjs');
+const {
+  pickBarFlex,
+  ohlcOf,
+  liveLikeEntryPrem,
+  liveLikeExitPrem,
+  optionRupees,
+  barsInHold,
+  slLimitFill,
+} = require('./sr-option-pnl');
+const optionStore = require('./sr-option-store');
 
 const ENGINE = 'crude-desk';
 const STRATEGY_ID = 'crude-retest';
@@ -124,7 +133,7 @@ function summarize(trades) {
   };
 }
 
-function parseMcxFuts(csv) {
+function parseMcxInstruments(csv) {
   const lines = String(csv || '').trim().split('\n');
   const rows = [];
   for (let i = 1; i < lines.length; i += 1) {
@@ -133,10 +142,25 @@ function parseMcxFuts(csv) {
     const sym = String(p[2] || '').replace(/"/g, '');
     const expiry = String(p[5] || '').replace(/"/g, '');
     const type = String(p[9] || '').replace(/"/g, '');
-    if (!/^CRUDEOILM/.test(sym) || type !== 'FUT') continue;
-    rows.push({ token, sym, expiry });
+    if (!/^CRUDEOILM/.test(sym)) continue;
+    rows.push({
+      instrumentToken: Number(token) || 0,
+      tradingSymbol: sym,
+      name: 'CRUDEOILM',
+      expiry,
+      strike: Number(p[6]) || 0,
+      lotSize: Number(p[8]) || 1,
+      instrumentType: type,
+      exchange: 'MCX',
+    });
   }
   return rows;
+}
+
+function parseMcxFuts(csv) {
+  return parseMcxInstruments(csv)
+    .filter((r) => r.instrumentType === 'FUT')
+    .map((r) => ({ token: String(r.instrumentToken), sym: r.tradingSymbol, expiry: r.expiry }));
 }
 
 async function resolveCrudeFuture(market, authorization, today) {
@@ -286,34 +310,126 @@ function mapRow(t, lots, symbol) {
   };
 }
 
-async function overlayOptionPrices(trades, raw, { authorization, lots, session } = {}) {
-  if (!authorization || !raw?.length) return trades;
-  const optSess = session || {};
-  const spec = { ...srLive.SPEC.crude, vehicle: 'option', opts: engineOpts(lots) };
-  const out = [];
-  for (let i = 0; i < trades.length; i += 1) {
-    let row = trades[i];
-    const t = raw[i];
-    if (!t) {
-      out.push(row);
-      continue;
-    }
+async function fetchOptionBarsByToken(market, authorization, tokens, fromDate, toDate) {
+  const map = new Map();
+  const mkt = market || defaultMarket;
+  for (const token of tokens) {
+    if (!token || map.has(token)) continue;
     try {
-      const pnl = await optionPnlForTrade({
-        authorization,
-        spec,
-        trade: t,
-        lots,
-        session: optSess,
-        pickOption: srLive.pickOption,
+      const bars = await mkt.fetchHistorical5m(authorization, token, fromDate, toDate, {
+        oi: 1,
+        chunkGapMs: 0,
       });
-      row = applyOptionPnl(row, pnl, lots);
+      map.set(token, bars || []);
     } catch {
-      /* listed option 5m missing — leave In/Out blank, keep index×lot ₹ */
+      map.set(token, []);
     }
-    out.push(row);
   }
-  return out;
+  return map;
+}
+
+function resolveListedCrudeOption(instruments, rawTrade) {
+  const dir = rawTrade.option === 'PE' || rawTrade.side === 'SELL' ? 'SELL' : 'BUY';
+  const hit = resolveAtmCrudeMiniOption({
+    instruments,
+    direction: dir,
+    spot: rawTrade.entryPrice,
+    asOfDateTime: `${rawTrade.date}T${padHm(rawTrade.entryTime)}+05:30`,
+  });
+  const inst = hit?.instrument;
+  if (!inst || hit.source === 'synthetic' || !(Number(inst.instrumentToken) > 0)) return null;
+  return {
+    tradingSymbol: inst.tradingSymbol,
+    instrumentToken: Number(inst.instrumentToken) || 0,
+    strike: Number(inst.strike) || 0,
+    expiry: inst.expiry,
+    lotSize: Math.max(1, Number(inst.lotSize) || 10),
+    instrumentType: inst.instrumentType,
+    exchange: 'MCX',
+    source: hit.source,
+  };
+}
+
+async function overlayOptionPrices(trades, raw, {
+  authorization,
+  lots,
+  market,
+  fromDate,
+  toDate,
+  instruments: injected,
+} = {}) {
+  if (!raw?.length) return trades;
+  const mkt = market || defaultMarket;
+  let instruments = injected;
+  if (!instruments) {
+    if (!authorization || typeof mkt.fetchInstrumentsCsv !== 'function') return trades;
+    const csv = await mkt.fetchInstrumentsCsv(authorization, 'MCX');
+    instruments = parseMcxInstruments(csv);
+  }
+  const picks = raw.map((t) => resolveListedCrudeOption(instruments, t));
+  const windowFrom = fromDate || raw[0].date;
+  const windowTo = toDate || raw[raw.length - 1].date;
+  const tokens = [...new Set(picks.filter(Boolean).map((p) => p.instrumentToken))];
+  const barsByToken = authorization && typeof mkt.fetchHistorical5m === 'function'
+    ? await fetchOptionBarsByToken(mkt, authorization, tokens, windowFrom, windowTo)
+    : new Map();
+
+  return trades.map((row, i) => {
+    const pick = picks[i];
+    const t = raw[i];
+    if (!pick || !t) return row;
+    const candles = barsByToken.get(pick.instrumentToken) || [];
+    if (candles.length) {
+      optionStore.saveBars({
+        instrumentToken: pick.instrumentToken,
+        tradingSymbol: pick.tradingSymbol,
+        date: t.date,
+        candles: candles.filter((c) => String(c.date || '').slice(0, 10) === t.date),
+      });
+    }
+    const entryBar = pickBarFlex(candles, t.entryTime);
+    const exitBar = pickBarFlex(candles, t.exitTime) || (candles.length ? candles[candles.length - 1] : null);
+    const entryOhlc = ohlcOf(entryBar);
+    const exitOhlc = ohlcOf(exitBar);
+    const entryPrem = liveLikeEntryPrem(entryBar, 0.5);
+    let exitPrem = liveLikeExitPrem(exitBar, 0.5);
+    const lotSize = pick.lotSize;
+    const qty = lotSize * Math.max(1, Number(lots) || 1);
+    const indexRisk = Math.abs(Number(t.entryPrice) - (Number(t.entryPrice) - (Number(engineOpts(lots).stopPts) || 0)));
+    const slTrigger = computeProtectiveSlTrigger({
+      fillPremium: entryPrem,
+      indexRiskPts: indexRisk,
+      exchange: 'MCX',
+      tradingSymbol: pick.tradingSymbol,
+      ltp: entryPrem,
+      maxLossRs: (OPTION_SL_MAX_RS.crude || 0) * Math.max(1, Number(lots) || 1),
+      lotUnits: qty,
+    });
+    for (const bar of barsInHold(candles, t.entryTime, t.exitTime)) {
+      const fill = slLimitFill(slTrigger, Number(bar.low) || Number(bar.close) || 0);
+      if (fill != null) {
+        exitPrem = fill;
+        break;
+      }
+    }
+    const gross = optionRupees(entryPrem, exitPrem, lotSize, lots);
+    return applyOptionPnl(row, {
+      optionSymbol: pick.tradingSymbol,
+      instrumentToken: pick.instrumentToken,
+      lotSize,
+      optionEntryPremium: entryPrem,
+      optionExitPremium: exitPrem,
+      entryClose: entryOhlc ? entryOhlc.close : null,
+      exitClose: exitOhlc ? exitOhlc.close : null,
+      entryOhlc,
+      exitOhlc,
+      rupees: gross,
+      chargesRs: 0,
+      slTrigger,
+      barsSource: candles.length ? 'kite' : 'empty',
+      rupeesSource: candles.length ? 'option-live' : 'unavailable',
+    }, lots);
+  });
 }
 
 function replayRetest(candles, { lots = 1, fromDate, toDate, symbol } = {}) {
@@ -376,7 +492,10 @@ async function runCrudeDesk({ authorization, fromDate, toDate, capitalRs, capita
   const trades = await overlayOptionPrices(mapped, raw, {
     authorization: deps.skipOptionOverlay ? null : authorization,
     lots: L,
-    session: {},
+    market,
+    fromDate,
+    toDate,
+    instruments: deps.optionInstruments,
   });
   const totals = summarize(trades);
   const book = {
@@ -572,7 +691,9 @@ async function onTick(session) {
     const trades = await overlayOptionPrices(mapped, raw, {
       authorization,
       lots: session.lots,
-      session,
+      market,
+      fromDate: today,
+      toDate: today,
     });
     session.trades = trades;
     const pos = session.broker.positions.get(BOOK_ID);

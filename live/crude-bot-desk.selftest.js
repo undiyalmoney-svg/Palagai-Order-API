@@ -10,6 +10,7 @@ const {
   runCrudeDesk,
   isCrudeDeskBody,
   isOptionPrem,
+  overlayOptionPrices,
 } = require('./crude-bot-desk');
 
 assert.strictEqual(ENGINE, 'crude-desk');
@@ -69,7 +70,7 @@ function buildDay(day) {
 
 const day = '2026-09-11';
 const candles = buildDay(day);
-const { trades } = replayRetest(candles, {
+const { trades, raw } = replayRetest(candles, {
   lots: 1,
   fromDate: day,
   toDate: day,
@@ -106,12 +107,44 @@ assert.ok(!isOptionPrem(8864, 8864));
   assert.match(paper.note, /retest/i);
   assert.match(paper.note, /ATM CE\/PE/i);
   assert.strictEqual(paper.trades[0].optionEntryPremium, null);
+
+  const csv = [
+    'instrument_token,exchange_token,tradingsymbol,name,last_price,expiry,strike,tick_size,lot_size,instrument_type',
+    '11,1,CRUDEOILM26SEPFUT,CRUDEOILM,0,2026-09-18,0,1,1,FUT',
+    '22,2,CRUDEOILM26SEP5300CE,CRUDEOILM,0,2026-09-18,5300,0.05,10,CE',
+    '23,3,CRUDEOILM26SEP5300PE,CRUDEOILM,0,2026-09-18,5300,0.05,10,PE',
+  ].join('\n');
+  const optCandles = [];
+  for (let m = hmToMin('10:00'); m <= hmToMin('22:45'); m += 5) {
+    optCandles.push({
+      date: `${day}T${minToHm(m)}:00+0530`,
+      open: 118,
+      high: 122,
+      low: 116,
+      close: 118,
+    });
+  }
+  const priced = await overlayOptionPrices(trades, raw, {
+    authorization: 'token x:y',
+    lots: 1,
+    fromDate: day,
+    toDate: day,
+    market: {
+      fetchInstrumentsCsv: async () => csv,
+      fetchHistorical5m: async (_a, token) => (Number(token) === 22 || Number(token) === 23 ? optCandles : []),
+    },
+  });
+  assert.ok(priced[0].optionEntryPremium > 50 && priced[0].optionEntryPremium < 250, priced[0].optionEntryPremium);
+  assert.ok(priced[0].slPrice > 0 && priced[0].slPrice < priced[0].optionEntryPremium);
+  assert.match(String(priced[0].optionSymbol), /CRUDEOILM26SEP5300CE|CRUDEOILM26SEP5300PE/);
   console.log(
     'crude-bot-desk.selftest: ok',
     paper.trades[0].exitReason,
     paper.trades[0].netOptionPnlRs,
     'n=',
     paper.trades.length,
+    'optIn',
+    priced[0].optionEntryPremium,
   );
 })().catch((err) => {
   console.error(err);
