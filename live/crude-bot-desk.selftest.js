@@ -24,6 +24,8 @@ assert.strictEqual(PLAYBOOK.entryStartHm, '16:00');
 assert.strictEqual(PLAYBOOK.maxTradesPerDay, 2);
 assert.strictEqual(PLAYBOOK.allowBuy, false);
 assert.strictEqual(PLAYBOOK.allowSell, true);
+assert.strictEqual(PLAYBOOK.skipFadePriorDay, true);
+assert.strictEqual(PLAYBOOK.fadeBufferPts, 10);
 assert.strictEqual(PLAYBOOK.sitOutAfterLoss, false);
 assert.strictEqual(PLAYBOOK.stopPts, 30);
 assert.strictEqual(PLAYBOOK.targetByScore[1], 80);
@@ -98,6 +100,24 @@ const win = buildWinDay(winDay);
 const morningOnly = win.filter((c) => String(c.date).slice(11, 16) < '16:00');
 assert.strictEqual(replayRetest(morningOnly, { lots: 1, fromDate: winDay, toDate: winDay }).trades.length, 0);
 assert.strictEqual(replayRetest(buildWideOrDay(winDay), { lots: 1, fromDate: winDay, toDate: winDay }).trades.length, 0);
+
+/** Prior session high 5200 — a 5288 short is a fade into PDH and must not fill. */
+function buildPriorDay(day, high) {
+  const out = [];
+  out.push(bar(day, '09:00', high - 40, high, high - 50, high - 20));
+  out.push(bar(day, '09:05', high - 20, high - 5, high - 30, high - 10));
+  out.push(...fillSession(day, '09:10', '22:45', high - 25));
+  return out;
+}
+const fadeSeries = [...buildPriorDay('2026-09-10', 5200), ...win];
+assert.strictEqual(
+  replayRetest(fadeSeries, { lots: 1, fromDate: '2026-09-10', toDate: winDay }).trades.filter((t) => String(t.entryTime).slice(0, 10) === winDay).length,
+  0,
+  'must skip SELL into prior-day high',
+);
+const okPrior = [...buildPriorDay('2026-09-10', 5400), ...win];
+const okTrades = replayRetest(okPrior, { lots: 1, fromDate: '2026-09-10', toDate: winDay }).trades.filter((t) => String(t.entryTime).slice(0, 10) === winDay);
+assert.ok(okTrades.length >= 1, 'short well below prior-day high must still fill');
 
 const { trades, raw } = replayRetest(win, { lots: 1, fromDate: winDay, toDate: winDay, symbol: 'CRUDEOILM25SEPFUT' });
 assert.ok(trades.length >= 1, `expected session-OR trade, got ${trades.length}`);

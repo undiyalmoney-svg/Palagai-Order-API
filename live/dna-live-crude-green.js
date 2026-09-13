@@ -14,7 +14,7 @@
 const LIVE_CRUDE_GREEN_DNA = {
   id: 'live-crude-green-v3',
   label: 'Live Crude Green · after NSE close',
-  version: '2026.08.10-after-nse',
+  version: '2026.09-no-fade-pdh',
   profileId: 'live-crude-green',
 
   enableNifty: false,
@@ -45,6 +45,15 @@ const LIVE_CRUDE_GREEN_DNA = {
     /** Afternoon CE (long Mini) was the −₹1,020 bleed on 13 Aug–13 Sep. PE only. */
     allowBuy: false,
     allowSell: true,
+    /**
+     * Do not short into/above the prior day's high (ORB: that is a fade into
+     * resistance, not a breakdown). Buffer 10 pts also skips shorts hugging PDH.
+     * 6 Aug–13 Sep @ 3 lots (engine, later same-day fill allowed):
+     *   loss ₹6,120 → ₹5,100, net ₹3,780 → ₹5,220.
+     * 13 Aug–13 Sep: loss ₹3,060 → ₹2,040, net ₹6,120 → ₹7,140.
+     */
+    skipFadePriorDay: true,
+    fadeBufferPts: 10,
     breakBufferPts: 0,
     profitLockArmRs: 350,
     profitLockLockRs: 180,
@@ -66,13 +75,13 @@ const LIVE_CRUDE_GREEN_DNA = {
 
   research: {
     window: '2026-08-13 → 2026-09-13',
-    greenDays: '9W / 3L @ 3 lots',
+    greenDays: '9W / 2L @ 3 lots',
     engineValidated: true,
-    netRsApprox: 2040,
-    profitFactor: 3,
+    netRsApprox: 7140,
+    profitFactor: 4.5,
     earlyEntriesBefore1515: 0,
     note:
-      'PE only (short Mini). Afternoon CE was the −₹1,020 bleed. Max 2/day, OR ≤60, confirm, trail.',
+      'PE only (short Mini). Skip shorts into prior-day high. Afternoon CE was the −₹1,020 bleed. Max 2/day, OR ≤60, confirm, trail.',
   },
 };
 
@@ -101,10 +110,12 @@ function liveCrudeGreenProfileOverrides() {
     maxEveningTradesDay: s.maxTradesDay,
     allowBuy: s.allowBuy !== false,
     allowSell: s.allowSell !== false,
+    skipFadePriorDay: s.skipFadePriorDay === true,
+    fadeBufferPts: s.fadeBufferPts || 0,
     defaultEnableMorning: false,
     defaultEnableEvening: true,
     dailyBandLabel:
-      'After NSE · OR≤60 · PE only · 16:00–21:00 · SL30/TP80 · trail ₹350→₹180 · max2',
+      'After NSE · OR≤60 · PE only · no fade PDH · 16:00–21:00 · SL30/TP80 · trail ₹350→₹180 · max2',
     profitLockArmRs: s.profitLockArmRs,
     profitLockLockRs: s.profitLockLockRs,
     profitLockGivebackRs: s.profitLockGivebackRs,

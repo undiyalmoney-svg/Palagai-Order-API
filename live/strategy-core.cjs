@@ -2844,6 +2844,54 @@ function sessionOr(candles, tradingDate, orStart, orEnd) {
   }
   return { high, low };
 }
+/** Prior completed session high/low. Used to skip fades into yesterday's extreme. */
+function priorDayHighLow(series, tradingDate) {
+  const days = [];
+  for (const c of series) {
+    const d = extractTradeDate(c.date);
+    if (d >= tradingDate) {
+      break;
+    }
+    if (days[days.length - 1] !== d) {
+      days.push(d);
+    }
+  }
+  const prev = days[days.length - 1];
+  if (!prev) {
+    return null;
+  }
+  let high = -Infinity;
+  let low = Infinity;
+  for (const c of series) {
+    if (extractTradeDate(c.date) !== prev) {
+      continue;
+    }
+    high = Math.max(high, c.high);
+    low = Math.min(low, c.low);
+  }
+  if (!Number.isFinite(high) || !Number.isFinite(low)) {
+    return null;
+  }
+  return { high, low };
+}
+function isFadePriorDay(action, price, pd, bufferPts) {
+  if (!pd || !Number.isFinite(price)) {
+    return false;
+  }
+  const buf = Math.max(0, Number(bufferPts) || 0);
+  if (action === "SELL" && price > pd.high - buf) {
+    return true;
+  }
+  if (action === "BUY" && price < pd.low + buf) {
+    return true;
+  }
+  return false;
+}
+function fadeSkipReason(action) {
+  return action === "SELL"
+    ? "Skip fade \u2014 SELL into/above prior-day high"
+    : "Skip fade \u2014 BUY into/below prior-day low";
+}
 function wait5(candle, reason) {
   return {
     action: "WAITING",
@@ -2870,7 +2918,10 @@ function runCrudeSessionOr(params) {
   const maxTradesDay = params.maxTradesDay ?? CRUDE_SOR_MAX_TRADES_DAY;
   const allowBuy = params.allowBuy !== false;
   const allowSell = params.allowSell !== false;
+  const skipFadePriorDay = params.skipFadePriorDay === true;
+  const fadeBufferPts = params.fadeBufferPts ?? 0;
   const tradingDate = extractTradeDate(candle.date);
+  const priorDay = skipFadePriorDay ? priorDayHighLow(series, tradingDate) : null;
   const month = tradingDate.slice(0, 7);
   const time = extractHhMm(candle.date);
   if (state.tradingDate !== tradingDate) {
@@ -2921,6 +2972,9 @@ function runCrudeSessionOr(params) {
     }
     const action2 = p.dir === 1 ? "BUY" : "SELL";
     const entry2 = candle.open;
+    if (skipFadePriorDay && isFadePriorDay(action2, entry2, priorDay, fadeBufferPts)) {
+      return wait5(candle, fadeSkipReason(action2));
+    }
     const stopLoss2 = action2 === "BUY" ? entry2 - stopPts : entry2 + stopPts;
     const target2 = action2 === "BUY" ? entry2 + targetPts : entry2 - targetPts;
     if (crudeDayLossActive(dayLossStopPts) && state.dayNetPts - stopPts < -dayLossStopPts) {
@@ -2971,6 +3025,9 @@ function runCrudeSessionOr(params) {
   }
   if (action === "SELL" && !allowSell) {
     return wait5(candle, "Shorts off \u2014 CE only");
+  }
+  if (skipFadePriorDay && isFadePriorDay(action, candle.close, priorDay, fadeBufferPts)) {
+    return wait5(candle, fadeSkipReason(action));
   }
   if (requireConfirm) {
     state.pendingConfirm = {
@@ -3676,7 +3733,9 @@ function replayPaperOnCrude(params) {
           minOrWidth: tradeParams.minOrWidth,
           maxTradesDay: tradeParams.maxEveningTradesDay,
           allowBuy: tradeParams.allowBuy,
-          allowSell: tradeParams.allowSell
+          allowSell: tradeParams.allowSell,
+          skipFadePriorDay: tradeParams.skipFadePriorDay,
+          fadeBufferPts: tradeParams.fadeBufferPts
         });
         if (afternoon.action === "BUY" || afternoon.action === "SELL") {
           signal = afternoon;

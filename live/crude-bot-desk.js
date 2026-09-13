@@ -9,6 +9,7 @@
  *   - Morning OR 09:00–09:30 IST, skip only if wider than 60 pts.
  *   - Bullish/bearish close through the range, then a confirm bar (required).
  *   - Entries 16:00–21:00 IST. PE only (short the Mini). Afternoon CE was the bleed.
+ *   - Skip SELL into/above prior-day high (10-pt buffer). Textbook ORB: do not fade PDH.
  *   - Max 2 trades/day. Day stop 30 pts. Stop 30 / target 80 / trail ₹350→₹180.
  * Paper ₹ = Mini points × ₹10 × lots. Live buys one ATM CE/PE (qty = Mini lots).
  */
@@ -38,7 +39,7 @@ const optionStore = require('./sr-option-store');
 
 const ENGINE = 'crude-desk';
 const STRATEGY_ID = 'live-crude-green';
-const STRATEGY_VERSION = '2026.09-session-or';
+const STRATEGY_VERSION = '2026.09-no-fade-pdh';
 const BOOK_ID = 'crude-oil-mini';
 const RS_PER_POINT = 10;
 const CHARGE_RS = 40;
@@ -66,6 +67,8 @@ const PLAYBOOK = {
   trailLockRs: PROFILE.profitLockLockRs,
   allowBuy: PROFILE.allowBuy !== false,
   allowSell: PROFILE.allowSell !== false,
+  skipFadePriorDay: PROFILE.skipFadePriorDay === true,
+  fadeBufferPts: PROFILE.fadeBufferPts || 0,
 };
 
 const RULES = PLAYBOOK;
