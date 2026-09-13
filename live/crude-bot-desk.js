@@ -1,47 +1,53 @@
 'use strict';
 /**
- * Crude Bot — new evening squeeze-break on MCX CRUDEOILM futures.
+ * Crude Bot — Nifty/Bank winning playbook on MCX CRUDEOILM futures.
  *
- * Not S/R wall-break. Not Autobot. Not live-crude-green (morning OR 09:00–09:30
- * then 16:00 entries). Those desks never paid; this book is a different rule:
- *
- *   17:00–17:45 IST coil (width 12–28 pts)
- *   first 5m close beyond the coil after 17:50
- *   1 MIS futures lot-unit, SL then 1.8R, square-off 21:30
- *   max 1 trade / day
- *
- * Paper ₹ = points × ₹10 × lots − charges. Live buys/sells the mini future.
+ * Old crude books never paid (fee-negative S/R crude; live-crude-green OR).
+ * This desk does not use those. It copies the measured Nifty + Bank rules:
+ *   intraday wall, 2-bar retest, +20 target, lock 20→12,
+ *   time stop 6 bars, give-up off (Bank: give-up cost net), day ±₹3,500.
+ * Vehicle is the mini future (₹10/pt), not ATM options.
  */
 const defaultMarket = require('./kite-market');
 const store = require('./live.store');
 const { lotsFromAvailableFunds } = require('./daily-desk-defaults');
 const { resolveDeskCapital } = require('./sr-desk');
 const { LiveBroker } = require('./live-broker');
+const { runSrBreakout } = require('./sr-breakout');
 
 const ENGINE = 'crude-desk';
-const STRATEGY_ID = 'crude-squeeze';
-const STRATEGY_VERSION = '2026.09-squeeze';
+const STRATEGY_ID = 'crude-retest';
+const STRATEGY_VERSION = '2026.09-retest';
 const BOOK_ID = 'crude-oil-mini';
 const RS_PER_POINT = 10;
 const CHARGE_RS = 40;
-const DAY_LOSS_STOP_RS = 2500;
-const DAY_PROFIT_TARGET_RS = 4000;
+const DAY_LOSS_STOP_RS = 3500;
+const DAY_PROFIT_TARGET_RS = 3500;
 const TICK_MS = Number(process.env.CRUDE_BOT_INTERVAL_MS || 60_000);
 
-const RULES = {
-  squeezeStart: '17:00',
-  squeezeEnd: '17:45',
-  entryStart: '17:50',
-  entryEnd: '21:00',
-  squareOff: '21:30',
-  minWidth: 12,
-  maxWidth: 28,
-  breakBuf: 2,
-  maxStopPts: 18,
-  targetR: 1.8,
-  maxTargetPts: 32,
-  maxTradesDay: 1,
+const PLAYBOOK = {
+  wallMode: 'intraday',
+  retest: true,
+  maxRetestBars: 2,
+  timeStopBars: 6,
+  lockArmPts: 20,
+  lockAtPts: 12,
+  giveUpBar: 0,
+  giveUpMinPts: 0,
+  minScore: 1,
+  capStopToDayBudget: true,
+  targetByScore: { 1: 20, 2: 20, 3: 20 },
+  entryPts: 10,
+  trendBars: 20,
+  gapLo: 22,
+  gapHi: 45,
+  entryStartHm: '10:00',
+  entryEndHm: '21:30',
+  squareOffHm: '22:45',
+  maxTradesPerDay: 3,
 };
+
+const RULES = PLAYBOOK;
 
 /** @type {Map<string, object>} */
 const sessions = new Map();
@@ -66,16 +72,14 @@ function shiftDays(iso, d) {
   x.setUTCDate(x.getUTCDate() + d);
   return x.toISOString().slice(0, 10);
 }
-function barDay(bar) {
-  return String(bar?.date || '').slice(0, 10);
-}
-function barHm(bar) {
-  const s = String(bar?.date || bar?.time || '');
-  const m = s.match(/T(\d{2}):(\d{2})/) || String(bar?.hm || '').match(/(\d{2}):(\d{2})/);
-  return m ? `${m[1]}:${m[2]}` : '';
-}
 function round2(n) {
   return Math.round(Number(n) * 100) / 100;
+}
+function padHm(hm) {
+  const s = String(hm || '');
+  if (/^\d{2}:\d{2}:\d{2}$/.test(s)) return s;
+  if (/^\d{2}:\d{2}$/.test(s)) return `${s}:00`;
+  return s || '00:00:00';
 }
 
 function summarize(trades) {
@@ -137,30 +141,28 @@ async function resolveCrudeFuture(market, authorization, today) {
   return { token: futs[0].token, symbol: futs[0].sym, expiry: futs[0].expiry };
 }
 
-function squeezeOf(dayBars) {
-  const lo = hmToMin(RULES.squeezeStart);
-  const hi = hmToMin(RULES.squeezeEnd);
-  const coil = dayBars.filter((b) => {
-    const m = hmToMin(barHm(b));
-    return m >= lo && m <= hi;
-  });
-  if (coil.length < 3) return null;
-  const high = Math.max(...coil.map((b) => Number(b.high)));
-  const low = Math.min(...coil.map((b) => Number(b.low)));
-  const width = high - low;
-  if (!(width >= RULES.minWidth && width <= RULES.maxWidth)) {
-    return { skip: true, high, low, width, reason: `coil ${round2(width)}pts (want ${RULES.minWidth}–${RULES.maxWidth})` };
-  }
-  return { skip: false, high, low, width };
+function engineOpts(lots) {
+  const L = Math.max(1, Number(lots) || 1);
+  const perPoint = RS_PER_POINT * L;
+  return {
+    ...PLAYBOOK,
+    stopPts: DAY_LOSS_STOP_RS / perPoint,
+    dayLossStop: DAY_LOSS_STOP_RS / perPoint,
+    dayProfitTarget: DAY_PROFIT_TARGET_RS / perPoint,
+  };
 }
 
 function mapRow(t, lots, symbol) {
   const perPoint = RS_PER_POINT * lots;
   const pts = Number(t.points) || 0;
+  const open = !!(t.openAtFill || t.open);
   const gross = pts * perPoint;
-  const net = t.open ? gross : gross - CHARGE_RS * lots;
-  const entryHm = `${t.entryTime}:00`;
-  const exitHm = t.exitTime ? `${t.exitTime}:00` : null;
+  const net = open ? gross : gross - CHARGE_RS * lots;
+  const dir = t.side === 'SELL' ? -1 : 1;
+  const stopPts = Number(engineOpts(lots).stopPts) || 0;
+  const stop = Number(t.entryPrice) - dir * stopPts;
+  const entryHm = padHm(t.entryTime);
+  const exitHm = t.exitTime ? padHm(t.exitTime) : null;
   return {
     instrumentName: 'Crude Oil Mini',
     instrumentId: BOOK_ID,
@@ -180,11 +182,11 @@ function mapRow(t, lots, symbol) {
     exitPrice: t.exitPrice,
     indexEntry: t.entryPrice,
     indexExit: t.exitPrice,
-    indexStop: t.stop,
-    indexTarget: t.target,
-    stopPts: Math.abs(t.entryPrice - t.stop),
-    slTrigger: t.stop,
-    slPrice: t.stop,
+    indexStop: round2(stop),
+    indexTarget: Number(t.entryPrice) + dir * (Number(t.target) || 20),
+    stopPts,
+    slTrigger: round2(stop),
+    slPrice: round2(stop),
     slOn: true,
     optionEntryPremium: t.entryPrice,
     optionExitPremium: t.exitPrice,
@@ -192,146 +194,26 @@ function mapRow(t, lots, symbol) {
     netOptionPnlRs: Math.round(net),
     indexPoints: round2(pts),
     exitReason: t.exitReason,
-    open: !!t.open,
+    open,
     lots,
     premiumSource: 'mcx_fut',
     vehicle: 'fut',
   };
 }
 
-/**
- * Replay 5m CRUDEOILM candles. Does not call runSrBreakout or crude DNA.
- */
-function replaySqueeze(candles, { lots = 1, fromDate, toDate, symbol, forceCloseOpen = true } = {}) {
-  const grouped = new Map();
-  for (const bar of candles || []) {
-    const day = barDay(bar);
-    const hm = barHm(bar);
-    if (!day || !hm) continue;
-    if (fromDate && day < fromDate) continue;
-    if (toDate && day > toDate) continue;
-    if (!grouped.has(day)) grouped.set(day, []);
-    grouped.get(day).push(bar);
-  }
-  const trades = [];
-  let dayPnl = 0;
-  let dayKey = '';
-
-  for (const [day, raw] of [...grouped.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
-    if (day !== dayKey) {
-      dayKey = day;
-      dayPnl = 0;
-    }
-    const dayBars = raw.slice().sort((a, b) => barHm(a).localeCompare(barHm(b)));
-    const coil = squeezeOf(dayBars);
-    if (!coil || coil.skip) continue;
-    if (dayPnl <= -DAY_LOSS_STOP_RS || dayPnl >= DAY_PROFIT_TARGET_RS) continue;
-
-    let open = null;
-    let taken = 0;
-    for (const bar of dayBars) {
-      const hm = barHm(bar);
-      const mins = hmToMin(hm);
-      if (open) {
-        const dir = open.side === 'SELL' ? -1 : 1;
-        let exit = null;
-        let why = null;
-        if (dir > 0) {
-          if (Number(bar.low) <= open.stop) {
-            exit = open.stop;
-            why = 'SL';
-          } else if (Number(bar.high) >= open.target) {
-            exit = open.target;
-            why = 'TARGET';
-          }
-        } else if (Number(bar.high) >= open.stop) {
-          exit = open.stop;
-          why = 'SL';
-        } else if (Number(bar.low) <= open.target) {
-          exit = open.target;
-          why = 'TARGET';
-        }
-        if (!exit && mins >= hmToMin(RULES.squareOff)) {
-          exit = Number(bar.close);
-          why = 'SQUARE';
-        }
-        if (exit != null) {
-          const points = dir * (exit - open.entryPrice);
-          const row = {
-            date: day,
-            side: open.side,
-            entryTime: open.entryTime,
-            exitTime: hm,
-            entryPrice: open.entryPrice,
-            exitPrice: exit,
-            stop: open.stop,
-            target: open.target,
-            points,
-            exitReason: why,
-            open: false,
-          };
-          trades.push(mapRow(row, lots, symbol));
-          dayPnl += (points * RS_PER_POINT - CHARGE_RS) * lots;
-          open = null;
-        }
-        continue;
-      }
-      if (taken >= RULES.maxTradesDay) continue;
-      if (mins < hmToMin(RULES.entryStart) || mins > hmToMin(RULES.entryEnd)) continue;
-      const px = Number(bar.close);
-      let side = null;
-      if (px >= coil.high + RULES.breakBuf) side = 'BUY';
-      else if (px <= coil.low - RULES.breakBuf) side = 'SELL';
-      if (!side) continue;
-      const dir = side === 'SELL' ? -1 : 1;
-      const stopRaw = side === 'BUY' ? coil.low : coil.high;
-      const stop = side === 'BUY'
-        ? Math.max(stopRaw, px - RULES.maxStopPts)
-        : Math.min(stopRaw, px + RULES.maxStopPts);
-      const risk = Math.abs(px - stop);
-      if (!(risk >= 4)) continue;
-      const tgtPts = Math.min(RULES.maxTargetPts, risk * RULES.targetR);
-      const target = px + dir * tgtPts;
-      open = { side, entryTime: hm, entryPrice: px, stop, target };
-      taken += 1;
-    }
-    if (open) {
-      const last = dayBars[dayBars.length - 1];
-      const lastHm = barHm(last);
-      if (forceCloseOpen || hmToMin(lastHm) >= hmToMin(RULES.squareOff)) {
-        const dir = open.side === 'SELL' ? -1 : 1;
-        const exit = Number(last.close);
-        trades.push(mapRow({
-          date: day,
-          side: open.side,
-          entryTime: open.entryTime,
-          exitTime: lastHm,
-          entryPrice: open.entryPrice,
-          exitPrice: exit,
-          stop: open.stop,
-          target: open.target,
-          points: dir * (exit - open.entryPrice),
-          exitReason: 'SQUARE',
-          open: false,
-        }, lots, symbol));
-      } else {
-        trades.push(mapRow({
-          date: day,
-          side: open.side,
-          entryTime: open.entryTime,
-          exitTime: null,
-          entryPrice: open.entryPrice,
-          exitPrice: null,
-          stop: open.stop,
-          target: open.target,
-          points: 0,
-          exitReason: 'OPEN',
-          open: true,
-        }, lots, symbol));
-      }
-    }
-  }
-  return { trades, rules: RULES };
+function replayRetest(candles, { lots = 1, fromDate, toDate, symbol } = {}) {
+  const { trades: raw } = runSrBreakout(candles || [], {
+    ...engineOpts(lots),
+    reportFromDate: fromDate || '',
+  });
+  const trades = (raw || [])
+    .filter((t) => {
+      if (fromDate && t.date < fromDate) return false;
+      if (toDate && t.date > toDate) return false;
+      return true;
+    })
+    .map((t) => mapRow(t, lots, symbol));
+  return { trades, rules: PLAYBOOK };
 }
 
 function instrumentRow(trades) {
@@ -341,7 +223,7 @@ function instrumentRow(trades) {
     instrumentName: 'Crude Oil Mini',
     status: tot.trades ? 'taken' : 'not-taken',
     ...tot,
-    why: tot.trades ? 'Taken' : 'No evening squeeze-break in this window.',
+    why: tot.trades ? 'Taken' : 'No with-trend retest break in this window.',
   };
 }
 
@@ -374,23 +256,16 @@ async function runCrudeDesk({ authorization, fromDate, toDate, capitalRs, capita
     }
     const fut = await resolveCrudeFuture(market, authorization, today);
     symbol = fut.symbol;
-    const warm = shiftDays(fromDate, -2);
-    candles = await market.fetchHistorical5m(authorization, fut.token, warm, toDate);
+    candles = await market.fetchHistorical5m(authorization, fut.token, shiftDays(fromDate, -5), toDate);
   }
-  const { trades } = replaySqueeze(candles, {
-    lots: L,
-    fromDate,
-    toDate,
-    symbol,
-    forceCloseOpen: true,
-  });
+  const { trades } = replayRetest(candles, { lots: L, fromDate, toDate, symbol });
   const totals = summarize(trades);
   const book = {
     id: 'crude',
     label: 'Crude Oil Mini',
     sitOut: false,
     spec: { engine: ENGINE, strategy: STRATEGY_ID },
-    specText: `CRUDEOILM FUT · evening squeeze ${RULES.squeezeStart}–${RULES.squeezeEnd} · 1 trade/day`,
+    specText: `CRUDEOILM FUT · Nifty/Bank retest playbook · day ±₹${DAY_LOSS_STOP_RS}`,
     totals,
     trades,
     status: 'on',
@@ -406,17 +281,21 @@ async function runCrudeDesk({ authorization, fromDate, toDate, capitalRs, capita
     capitalSource: resolved.capitalSource,
     kiteFunds,
     maxLots: L,
-    allocation: { taken: [{ instrumentName: 'Crude Oil Mini', bookId: 'crude', direction: 'SQUEEZE', lots: L }], trades, totals },
+    allocation: {
+      taken: [{ instrumentName: 'Crude Oil Mini', bookId: 'crude', direction: 'RETEST', lots: L }],
+      trades,
+      totals,
+    },
     specText: book.specText,
     books: [book],
     coreBooks: [book],
     note:
-      'Crude Bot trades only Crude Oil Mini futures (MIS). Evening squeeze-break: coil 17:00–17:45 IST (12–28 pts), first close beyond it after 17:50, SL then 1.8R, square-off 21:30, max 1/day. Not Nifty/Bank, not S/R, not the old crude DNA. Paper ₹ is points × ₹10 × lots. SL ₹ is the futures stop.',
+      'Crude Bot trades only Crude Oil Mini futures (MIS). Same playbook as the paying Nifty/Bank desk: intraday wall, 2-bar retest, +20 pts, lock 20→12, day ±₹3,500. Not the old crude S/R book and not live-crude-green. Paper ₹ is points × ₹10 × lots (Nifty is ×65, so 1 crude lot is smaller rupees per point). SL ₹ is the futures stop.',
     instruments: [instrumentRow(trades)],
     protection: {
       fundsRs: capital,
       capitalRs: capital,
-      riskPerTradeRs: Math.round(L * RULES.maxStopPts * RS_PER_POINT),
+      riskPerTradeRs: Math.round(L * 20 * RS_PER_POINT),
       dayRiskRs: DAY_LOSS_STOP_RS,
       dayRiskUsedRs: Math.max(0, -Math.min(0, totals.netRs)),
       stillProtectedRs: Math.max(0, capital - DAY_LOSS_STOP_RS),
@@ -428,7 +307,7 @@ async function runCrudeDesk({ authorization, fromDate, toDate, capitalRs, capita
     trades,
     message: trades.length
       ? undefined
-      : 'No evening squeeze-break in this window (need a 12–28 pt 17:00–17:45 coil, then a close outside it).',
+      : 'No with-trend retest break in this window (need an intraday wall break, then a pullback within 2 bars).',
   };
 }
 
@@ -446,7 +325,7 @@ function getSession(userId) {
       tickBusy: false,
       broker: null,
       fut: null,
-      entered: false,
+      enteredKeys: new Set(),
       lots: 1,
       trades: [],
     });
@@ -476,7 +355,7 @@ function statusPayload(session) {
     trades: session.trades || [],
     positions: brokerPos,
     lastPreflight: session.lastPreflight,
-    note: 'Crude Bot live is MCX CRUDEOILM futures. Stop live on this tab stops only Crude Bot.',
+    note: 'Crude Bot live is MCX CRUDEOILM futures with the Nifty/Bank retest playbook. Stop live on this tab stops only Crude Bot.',
   };
 }
 
@@ -493,10 +372,10 @@ async function startLive(userId, { authorization, lots, liveAssistant }) {
   }
   session.lots = Math.max(1, Number(lots) || 1);
   session.status = 'running';
-  session.message = `Crude Bot on · CRUDEOILM FUT · ${session.lots} lot(s) · squeeze-break`;
+  session.message = `Crude Bot on · CRUDEOILM FUT · ${session.lots} lot(s) · retest playbook`;
   session.lastError = null;
   session.lastPreflight = liveAssistant || null;
-  session.entered = false;
+  session.enteredKeys = new Set();
   session.trades = [];
   session.fut = null;
   session.broker = new LiveBroker({
@@ -535,8 +414,12 @@ function startTick(session) {
   session.tickTimer = setInterval(run, TICK_MS);
 }
 
-function engineTradeStillOpen(t) {
-  return !!(t && (t.open || String(t.exitReason || '').toUpperCase() === 'OPEN'));
+function engineTradeStillOpen(t, nowHm) {
+  if (!t) return false;
+  const why = String(t.exitReason || '').toUpperCase();
+  if (['TARGET', 'LOCK', 'STOP', 'TIME', 'GIVEUP', 'FAIL', 'SL'].includes(why)) return false;
+  if (hmToMin(nowHm) >= hmToMin(PLAYBOOK.squareOffHm)) return false;
+  return why === 'CLOSE' || why === 'OPEN' || !!t.open;
 }
 
 async function onTick(session) {
@@ -558,25 +441,24 @@ async function onTick(session) {
     const candles = await market.fetchHistorical5m(
       authorization,
       session.fut.token,
-      shiftDays(today, -2),
+      shiftDays(today, -5),
       today,
     );
-    const { trades } = replaySqueeze(candles, {
+    const { trades } = replayRetest(candles, {
       lots: session.lots,
       fromDate: today,
       toDate: today,
       symbol: session.fut.symbol,
-      forceCloseOpen: hmToMin(hm) >= hmToMin(RULES.squareOff),
     });
     session.trades = trades;
     const pos = session.broker.positions.get(BOOK_ID);
-    const liveOpen = trades.find((t) => engineTradeStillOpen(t) && String(t.entryTime || '').slice(0, 10) === today);
-    const done = trades.find((t) => !engineTradeStillOpen(t) && String(t.entryTime || '').slice(0, 10) === today);
+    const liveOpen = trades.find((t) => engineTradeStillOpen(t, hm) && String(t.entryTime || '').slice(0, 10) === today);
+    const done = trades.find((t) => !engineTradeStillOpen(t, hm) && String(t.entryTime || '').slice(0, 10) === today);
 
     if (pos?.status === 'open') {
       const shouldExit =
-        hmToMin(hm) >= hmToMin(RULES.squareOff) ||
-        (done && String(done.exitReason || '') !== 'OPEN');
+        hmToMin(hm) >= hmToMin(PLAYBOOK.squareOffHm) ||
+        (done && !engineTradeStillOpen(done, hm));
       if (shouldExit) {
         await session.broker.placeExit(authorization, pos, 'Crude Oil Mini');
         pushEvent(session, 'EXIT', done?.exitReason || 'SQUARE');
@@ -584,7 +466,8 @@ async function onTick(session) {
       return;
     }
 
-    if (liveOpen && !session.entered) {
+    if (liveOpen && !(session.enteredKeys instanceof Set ? session.enteredKeys.has(liveOpen.entryTime) : false)) {
+      if (!(session.enteredKeys instanceof Set)) session.enteredKeys = new Set();
       const side = liveOpen.side === 'SELL' ? 'SELL' : 'BUY';
       await session.broker.placeEntry(authorization, BOOK_ID, 'Crude Oil Mini', {
         direction: side,
@@ -604,8 +487,8 @@ async function onTick(session) {
           source: 'listed',
         },
       });
-      session.entered = true;
-      pushEvent(session, 'SIGNAL', `${side} CRUDEOILM squeeze-break @ ${liveOpen.entryPrice}`);
+      session.enteredKeys.add(liveOpen.entryTime);
+      pushEvent(session, 'SIGNAL', `${side} CRUDEOILM retest @ ${liveOpen.entryPrice}`);
     }
   } finally {
     session.tickBusy = false;
@@ -626,8 +509,9 @@ module.exports = {
   STRATEGY_ID,
   STRATEGY_VERSION,
   RULES,
+  PLAYBOOK,
   BOOK_ID,
-  replaySqueeze,
+  replayRetest,
   runCrudeDesk,
   startLive,
   stop,

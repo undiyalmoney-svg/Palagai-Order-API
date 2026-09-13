@@ -5,60 +5,81 @@ const path = require('path');
 const {
   ENGINE,
   STRATEGY_ID,
-  RULES,
-  replaySqueeze,
+  PLAYBOOK,
+  replayRetest,
   runCrudeDesk,
   isCrudeDeskBody,
 } = require('./crude-bot-desk');
 
 assert.strictEqual(ENGINE, 'crude-desk');
-assert.strictEqual(STRATEGY_ID, 'crude-squeeze');
-assert.strictEqual(RULES.squeezeStart, '17:00');
+assert.strictEqual(STRATEGY_ID, 'crude-retest');
+assert.strictEqual(PLAYBOOK.retest, true);
+assert.strictEqual(PLAYBOOK.lockArmPts, 20);
+assert.strictEqual(PLAYBOOK.lockAtPts, 12);
+assert.strictEqual(PLAYBOOK.maxRetestBars, 2);
 assert.ok(isCrudeDeskBody({ engine: 'crude-desk' }));
-assert.ok(isCrudeDeskBody({ desk: 'crude' }));
 assert.ok(!isCrudeDeskBody({ engine: 'sr-desk' }));
 
 const src = fs.readFileSync(path.join(__dirname, 'crude-bot-desk.js'), 'utf8');
-assert.doesNotMatch(src, /runSrBreakout\(/);
+assert.match(src, /runSrBreakout\(/);
 assert.doesNotMatch(src, /require\('\.\/dna-live-crude-green'\)/);
-assert.doesNotMatch(src, /require\('\.\/sr-breakout'\)/);
+
+function hmToMin(hm) {
+  const [h, m] = hm.split(':').map(Number);
+  return h * 60 + m;
+}
+function minToHm(min) {
+  const h = String(Math.floor(min / 60)).padStart(2, '0');
+  const m = String(min % 60).padStart(2, '0');
+  return `${h}:${m}`;
+}
 
 function bar(day, hm, o, h, l, c) {
   return { date: `${day}T${hm}:00+0530`, open: o, high: h, low: l, close: c };
 }
 
-function coil(day, base) {
-  // 17:00–17:45 every 5m, width 18
+/**
+ * Range under a 5310 cap (no premature 3-bar break), drift up so trend>0,
+ * then one 15m close through the wall, a 5m retest, then TARGET +20.
+ */
+function buildDay(day) {
   const out = [];
-  for (let m = 17 * 60; m <= 17 * 60 + 45; m += 5) {
-    const hh = String(Math.floor(m / 60)).padStart(2, '0');
-    const mm = String(m % 60).padStart(2, '0');
-    out.push(bar(day, `${hh}:${mm}`, base + 5, base + 18, base, base + 8));
+  for (let m = hmToMin('09:00'); m < hmToMin('16:00'); m += 5) {
+    const t = (m - hmToMin('09:00')) / 5;
+    const mid = 5280 + t * 0.08;
+    const even = Math.floor(m / 5) % 2 === 0;
+    const o = even ? mid : mid - 1;
+    const c = even ? mid - 1 : mid;
+    out.push(bar(day, minToHm(m), o, Math.min(5308, mid + 3), mid - 4, c));
+  }
+  // 16:00–16:10: 15m close through ~5308 wall.
+  out.push(bar(day, '16:00', 5304, 5322, 5303, 5320));
+  out.push(bar(day, '16:05', 5320, 5321, 5316, 5318));
+  out.push(bar(day, '16:10', 5318, 5319, 5315, 5317));
+  // First 5m after 16:15 15m close: retest the broken high, then +20.
+  out.push(bar(day, '16:15', 5317, 5318, 5306, 5308));
+  out.push(bar(day, '16:20', 5308, 5340, 5307, 5335));
+  out.push(bar(day, '16:25', 5335, 5342, 5334, 5340));
+  for (let m = hmToMin('16:30'); m <= hmToMin('22:45'); m += 5) {
+    out.push(bar(day, minToHm(m), 5340, 5342, 5338, 5340));
   }
   return out;
 }
 
 const day = '2026-09-11';
-const candles = [
-  ...coil(day, 5400),
-  bar(day, '17:50', 5410, 5412, 5408, 5411),
-  bar(day, '18:00', 5418, 5424, 5416, 5422), // close >= 5420 → BUY
-  bar(day, '18:05', 5422, 5456, 5420, 5455), // target
-];
-const { trades } = replaySqueeze(candles, { lots: 1, fromDate: day, toDate: day, symbol: 'CRUDEOILM25SEPFUT' });
-assert.strictEqual(trades.length, 1);
-assert.strictEqual(trades[0].side, 'BUY');
-assert.strictEqual(trades[0].exitReason, 'TARGET');
+const candles = buildDay(day);
+const { trades } = replayRetest(candles, {
+  lots: 1,
+  fromDate: day,
+  toDate: day,
+  symbol: 'CRUDEOILM25SEPFUT',
+});
+assert.ok(trades.length >= 1, `expected a retest trade, got ${trades.length}`);
 assert.strictEqual(trades[0].vehicle, 'fut');
 assert.ok(trades[0].slPrice > 0);
-assert.ok(trades[0].netOptionPnlRs > 0, `net ${trades[0].netOptionPnlRs}`);
-assert.match(trades[0].optionSymbol, /CRUDEOILM/);
-
-const wide = coil('2026-09-12', 5400).map((b, i) =>
-  i === 0 ? { ...b, high: b.low + 40 } : b,
-);
-const skip = replaySqueeze(wide, { lots: 1, fromDate: '2026-09-12', toDate: '2026-09-12' });
-assert.strictEqual(skip.trades.length, 0);
+assert.match(String(trades[0].optionSymbol), /CRUDEOILM/);
+assert.strictEqual(trades[0].exitReason, 'TARGET');
+assert.ok(Number(trades[0].netOptionPnlRs) > 0);
 
 (async () => {
   const paper = await runCrudeDesk(
@@ -73,12 +94,18 @@ assert.strictEqual(skip.trades.length, 0);
     { candles, market: { fetchUserMargins: async () => null } },
   );
   assert.strictEqual(paper.engine, 'crude-desk');
-  assert.strictEqual(paper.strategy, 'crude-squeeze');
+  assert.strictEqual(paper.strategy, 'crude-retest');
   assert.strictEqual(paper.instruments[0].id, 'crude');
   assert.ok(paper.trades.length >= 1);
-  assert.match(paper.note, /squeeze/i);
-  assert.doesNotMatch(paper.note, /S\/R wall-break/);
-  console.log('crude-bot-desk.selftest: ok', trades[0].exitReason, trades[0].netOptionPnlRs);
+  assert.match(paper.note, /retest/i);
+  assert.match(paper.note, /Nifty\/Bank/);
+  console.log(
+    'crude-bot-desk.selftest: ok',
+    paper.trades[0].exitReason,
+    paper.trades[0].netOptionPnlRs,
+    'n=',
+    paper.trades.length,
+  );
 })().catch((err) => {
   console.error(err);
   process.exit(1);
