@@ -59,6 +59,9 @@ assert.ok(mapped.entryPrice > 20 && mapped.entryPrice < 800, `nifty premium ${ma
 assert.ok(mapped.exitPrice > 20 && mapped.exitPrice < 900, `nifty exit prem ${mapped.exitPrice}`);
 assert.notStrictEqual(mapped.entryPrice, 25000);
 assert.strictEqual(mapped.premiumSource, 'bs_atm_weekly');
+assert.ok(mapped.stopPts > 0, 'Nifty paper must carry the ₹5,000 index cut as stopPts');
+assert.ok(mapped.indexStop < mapped.indexEntry, 'Nifty CE SL sits below index entry');
+assert.ok(mapped.slTrigger > 0 && mapped.slTrigger < mapped.optionEntryPremium, `Nifty option SL ${mapped.slTrigger}`);
 
 const withSeconds = mapTrade(
   {
@@ -131,6 +134,12 @@ assert.strictEqual(bankMapped.exitClock, '12:20:00 PM');
 assert.strictEqual(bankMapped.entryHm, '12:05:00');
 assert.strictEqual(bankMapped.exitHm, '12:20:00');
 assert.ok(bankMapped.entryPrice < 5000, `bank premium must not be index, got ${bankMapped.entryPrice}`);
+assert.strictEqual(bankMapped.stopPts, null, 'Bank has no index rupee cut-off');
+assert.strictEqual(bankMapped.indexStop, null);
+assert.ok(
+  bankMapped.slTrigger > 0 && bankMapped.slTrigger < bankMapped.optionEntryPremium,
+  `Bank option SL still parks below fill (${bankMapped.slTrigger})`,
+);
 assert.strictEqual(bankMapped.indexEntry, 51234.5);
 
 const bankHigh = mapTrade(
@@ -207,6 +216,7 @@ assert.strictEqual(nseMarked.entryOhlc.high, 531.8);
 assert.strictEqual(nseMarked.entryOhlc.low, 512.55);
 assert.strictEqual(nseMarked.entryOhlc.close, 524);
 assert.strictEqual(nseMarked.exitPrice, 518.4);
+assert.ok(nseMarked.slTrigger > 0 && nseMarked.slTrigger < 524, `overlay must keep option SL below fill (${nseMarked.slTrigger})`);
 assert.strictEqual(
   nseWeeklyOptionSymbol('BANKNIFTY', bankPe.expiry, bankPe.optionStrike, 'PE'),
   'BANKNIFTY2691556100PE',

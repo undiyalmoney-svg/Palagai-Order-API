@@ -203,6 +203,8 @@ class LiveBroker {
         entryPremium: entry || null,
         exitPremium: exitPx || null,
         lastLtp: lastLtp || null,
+        slTrigger: Number(p?.slTrigger) > 0 ? Number(p.slTrigger) : null,
+        slOn: !!(p?.slOrderId && p?.status === 'open'),
         pnlRs: pnlRs != null ? Math.round(pnlRs) : null,
       });
     }
@@ -232,6 +234,27 @@ class LiveBroker {
       return this.optionMaxLossRsByInstrument.get(instrumentId);
     }
     return (LIVE_GREEN_DNA.liveOps.maxOptionLossRs || 0) * this.lotsFor(instrumentId);
+  }
+
+  /** Always a positive option SL trigger, even if fill is late and Bank has no ₹ cap. */
+  optionSlTrigger({
+    fillPremium, ltp, indexRisk, exchange, tradingSymbol, instrumentId, quantity, fut, indexStop,
+  }) {
+    if (fut && Number(indexStop) > 0) return roundOptionTick(indexStop);
+    const fill = Number(fillPremium) > 0 ? Number(fillPremium) : Number(ltp) || 0;
+    const px = Number(ltp) > 0 ? Number(ltp) : fill;
+    let trigger = computeProtectiveSlTrigger({
+      fillPremium: fill || px,
+      indexRiskPts: Math.max(0, Number(indexRisk) || 0),
+      exchange,
+      tradingSymbol,
+      ltp: px || null,
+      maxLossRs: this.optionMaxLossRs(instrumentId),
+      lotUnits: quantity,
+    });
+    if (!(trigger > 0) && px > 0) trigger = roundOptionTick(px * 0.9);
+    if (px > 0 && trigger >= px) trigger = roundOptionTick(Math.max(0.05, px * 0.9));
+    return trigger > 0 ? trigger : 0;
   }
 
   clear() {
@@ -305,26 +328,33 @@ class LiveBroker {
     }
   }
 
-  /** Ensure an open position has a resting protective SL-M; (re)place if missing. */
+  /** Ensure an open position has a resting protective SL; (re)place if missing. */
   async ensureProtectiveSl(authorization, pos, open) {
-    if (pos.slOrderId || !(pos.entryPremium > 0)) return;
+    if (pos.slOrderId) return;
+    const ltp = await this.resolveOptionLtp(authorization, pos.tradingSymbol, pos.exchange);
+    const fill = Number(pos.entryPremium) > 0 ? Number(pos.entryPremium) : Number(ltp) || 0;
     const indexRisk = open
       ? Math.abs(open.indexEntry - open.indexStop)
       : Math.abs(Number(pos.indexEntry || 0) - Number(pos.indexStop || 0));
-    const ltp = await this.resolveOptionLtp(authorization, pos.tradingSymbol, pos.exchange);
     const fut = pos.vehicle === 'fut' || isFutSymbol(pos.tradingSymbol) || open?.vehicle === 'fut';
-    const trigger = fut && (open?.indexStop > 0 || pos.indexStop > 0)
-      ? roundOptionTick(open?.indexStop || pos.indexStop)
-      : computeProtectiveSlTrigger({
-        fillPremium: pos.entryPremium,
-        indexRiskPts: indexRisk,
-        exchange: pos.exchange,
-        tradingSymbol: pos.tradingSymbol,
-        ltp,
-        maxLossRs: this.optionMaxLossRs(pos.instrumentId),
-        lotUnits: pos.quantity,
-      });
-    if (!(trigger > 0)) return;
+    const trigger = this.optionSlTrigger({
+      fillPremium: fill,
+      ltp,
+      indexRisk,
+      exchange: pos.exchange,
+      tradingSymbol: pos.tradingSymbol,
+      instrumentId: pos.instrumentId,
+      quantity: pos.quantity,
+      fut,
+      indexStop: open?.indexStop || pos.indexStop,
+    });
+    if (!(trigger > 0)) {
+      this.pushEvent(
+        'ERROR',
+        `Could not place safety stop on ${niceOption(pos.tradingSymbol)} — no option price yet.`,
+      );
+      return;
+    }
     const res = await kiteService.placeOrder(
       authorization,
       'regular',
@@ -561,35 +591,43 @@ class LiveBroker {
     );
     const indexRisk = Math.abs(open.indexEntry - open.indexStop);
     const ltp = await this.resolveOptionLtp(authorization, sym, exchange);
-    const slTrigger = vehicle === 'fut' && open.indexStop > 0
-      ? roundOptionTick(open.indexStop)
-      : computeProtectiveSlTrigger({
-        fillPremium,
-        indexRiskPts: indexRisk,
-        exchange,
-        tradingSymbol: sym,
-        ltp,
-        maxLossRs: this.optionMaxLossRs(instrumentId),
-        lotUnits: quantity,
-      });
+    const slTrigger = this.optionSlTrigger({
+      fillPremium,
+      ltp,
+      indexRisk,
+      exchange,
+      tradingSymbol: sym,
+      instrumentId,
+      quantity,
+      fut: vehicle === 'fut',
+      indexStop: open.indexStop,
+    });
 
-    const slRes = await kiteService.placeOrder(
-      authorization,
-      'regular',
-      slOrderFields({ exchange, tradingsymbol: sym, quantity, product, trigger: slTrigger, direction }),
-    );
-    const slOrderId = slRes.data?.data?.order_id || null;
-    if (slRes.status >= 400 || !slOrderId) {
+    let slOrderId = null;
+    if (!(slTrigger > 0)) {
       this.pushEvent(
         'ERROR',
-        `Bought, but safety stop FAILED — ${slRes.data?.message || slRes.status}. Retrying; watch this position.`,
+        `Bought ${niceOption(sym)}, but SL trigger is missing — retrying next tick.`,
       );
     } else {
-      this.pushEvent(
-        'SL',
-        `Safety stop set at \u20B9${tickStr(slTrigger)} — most this trade can lose is ` +
-          `${rs((fillPremium - slTrigger) * quantity)}`,
+      const slRes = await kiteService.placeOrder(
+        authorization,
+        'regular',
+        slOrderFields({ exchange, tradingsymbol: sym, quantity, product, trigger: slTrigger, direction }),
       );
+      slOrderId = slRes.data?.data?.order_id || null;
+      if (slRes.status >= 400 || !slOrderId) {
+        this.pushEvent(
+          'ERROR',
+          `Bought, but safety stop FAILED — ${slRes.data?.message || slRes.status}. Retrying; watch this position.`,
+        );
+      } else {
+        this.pushEvent(
+          'SL',
+          `Safety stop set at \u20B9${tickStr(slTrigger)} — most this trade can lose is ` +
+            `${rs((fillPremium - slTrigger) * quantity)}`,
+        );
+      }
     }
 
     this.positions.set(instrumentId, {

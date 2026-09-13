@@ -8,11 +8,13 @@ const { blackScholesPrice, realizedVolAnnualized } = require('./bs-option-pricer
 const defaultMarket = require('./kite-market');
 const { lotsFromAvailableFunds } = require('./daily-desk-defaults');
 const { runSrBreakout } = require('./sr-breakout');
+const { computeProtectiveSlTrigger } = require('./strategy-core.cjs');
 const {
   exitOptsFor,
   LOT_UNITS,
   DAY_LOSS_STOP_RS,
   DAY_PROFIT_TARGET_RS,
+  OPTION_SL_MAX_RS,
   STRATEGY_ID,
   STRATEGY_VERSION,
 } = require('./sr-strategy-config');
@@ -185,6 +187,46 @@ function ivForBook(book, realized) {
   return Math.min(cap, Math.max(floor, r));
 }
 
+function roundOptionTick(p) {
+  return Math.max(0.05, Math.round(Number(p) / 0.05) * 0.05);
+}
+
+function bookForMapped(mapped) {
+  return Object.values(BOOKS).find((b) => b.id === mapped.instrumentId) || BOOKS.nifty;
+}
+
+/** Same protective option SL Live places after the ATM CE/PE fill. */
+function attachProtectiveSl(mapped, book) {
+  const lots = Math.max(1, Number(mapped.lots) || 1);
+  const opts = exitOptsFor(book.key, lots);
+  const stopPts = Number(opts.stopPts) || 0;
+  const entry = Number(mapped.indexEntry);
+  const dir = mapped.direction === 'PE' ? -1 : 1;
+  mapped.stopPts = stopPts > 0 ? stopPts : null;
+  mapped.indexStop = entry > 0 && stopPts > 0
+    ? Math.round((entry - dir * stopPts) * 100) / 100
+    : null;
+  const fill = Number(mapped.optionEntryPremium) || 0;
+  const indexRisk = mapped.indexStop != null
+    ? Math.abs(entry - mapped.indexStop)
+    : stopPts;
+  let trigger = fill > 0
+    ? computeProtectiveSlTrigger({
+      fillPremium: fill,
+      indexRiskPts: Math.max(0, Number(indexRisk) || 0),
+      exchange: 'NFO',
+      tradingSymbol: mapped.optionSymbol,
+      ltp: fill,
+      maxLossRs: (OPTION_SL_MAX_RS[book.key] || 0) * lots,
+      lotUnits: (book.unitsPerLot || 1) * lots,
+    })
+    : 0;
+  if (!(trigger > 0) && fill > 0) trigger = roundOptionTick(fill * 0.9);
+  if (fill > 0 && trigger >= fill) trigger = roundOptionTick(Math.max(0.05, fill * 0.9));
+  mapped.slTrigger = trigger > 0 ? trigger : null;
+  return mapped;
+}
+
 function mapTrade(t, book, lots, perPoint, vol) {
   const pts = Number(t.points) || 0;
   const optionPnlRs = Math.round(pts * perPoint);
@@ -221,7 +263,7 @@ function mapTrade(t, book, lots, perPoint, vol) {
       );
     }
   }
-  return {
+  const row = {
     instrumentName: book.name,
     instrumentId: book.id,
     selectedInstrument,
@@ -256,6 +298,7 @@ function mapTrade(t, book, lots, perPoint, vol) {
     lots,
     spec: { engine: ENGINE, strategy: STRATEGY_ID, version: STRATEGY_VERSION },
   };
+  return attachProtectiveSl(row, book);
 }
 
 /** Desk fill = NSE charting 5m option close (and full OHLC). BS is fallback only. */
@@ -273,7 +316,8 @@ function applyOptionOhlc(mapped, pnl) {
     mapped.optionExitPremium = x;
     mapped.exitOhlc = pnl.exitOhlc || null;
   }
-  return mapped;
+  if (pnl.slTrigger > 0) mapped.slTrigger = pnl.slTrigger;
+  return attachProtectiveSl(mapped, bookForMapped(mapped));
 }
 
 async function overlayNseOptionOhlc(mapped, rawTrade, book, deps = {}) {
@@ -521,6 +565,7 @@ module.exports = {
   mapTrade,
   applyOptionOhlc,
   overlayNseOptionOhlc,
+  attachProtectiveSl,
   atmStrike,
   nextWeeklyExpiry,
   formatClock12,

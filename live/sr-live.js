@@ -178,19 +178,78 @@ function pushEvent(session, action, detail) {
   if (session.events.length > 200) session.events.splice(0, session.events.length - 200);
 }
 
-function statusPayload(session) {
-  const positions = [];
-  if (session.broker) {
-    for (const [instrumentId, p] of session.broker.positions.entries()) {
-      positions.push({
-        instrumentId,
-        symbol: p.tradingSymbol,
-        status: p.status,
-        entryTime: p.entryTime,
-        quantity: p.quantity,
-      });
-    }
+function bookNameFor(instrumentId) {
+  const hit = Object.values(SPEC).find((s) => s.bookId === instrumentId);
+  return hit?.name || instrumentId;
+}
+
+function optionKindOfSymbol(sym) {
+  const s = String(sym || '').toUpperCase();
+  if (/PE$/.test(s) || /\bPE\b/.test(s)) return 'PE';
+  if (/CE$/.test(s) || /\bCE\b/.test(s)) return 'CE';
+  return '';
+}
+
+/** Same shape as paper desk trades so Trade Bot can reuse the result table. */
+function liveTradesFromBroker(session) {
+  const broker = session?.broker;
+  if (!broker || typeof broker.positions?.entries !== 'function') return [];
+  const snap = typeof broker.moneySnapshot === 'function'
+    ? broker.moneySnapshot()
+    : { legs: [] };
+  const pnlById = new Map((snap.legs || []).map((leg) => [leg.instrumentId, leg]));
+  const rows = [];
+  for (const [instrumentId, p] of broker.positions.entries()) {
+    if (!p || p.status === 'error') continue;
+    const open = p.status === 'open' || p.status === 'exiting';
+    const slTrigger = Number(p.slTrigger) > 0 ? Number(p.slTrigger) : null;
+    const slOn = !!(p.slOrderId && open);
+    const kind = optionKindOfSymbol(p.tradingSymbol);
+    const pnl = pnlById.get(instrumentId);
+    const lots = typeof broker.lotsFor === 'function' ? broker.lotsFor(instrumentId) : 1;
+    rows.push({
+      instrumentName: bookNameFor(instrumentId),
+      instrumentId,
+      selectedInstrument: p.tradingSymbol || null,
+      optionSymbol: p.tradingSymbol || null,
+      side: p.direction || 'BUY',
+      sideLabel: kind ? `${kind} BUY` : (p.direction || 'BUY'),
+      direction: kind || p.direction || 'BUY',
+      entryTime: p.entryTime || null,
+      exitTime: open ? null : (p.exitTime || null),
+      entryPrice: Number(p.entryPremium) > 0 ? Number(p.entryPremium) : null,
+      optionEntryPremium: Number(p.entryPremium) > 0 ? Number(p.entryPremium) : null,
+      exitPrice: open
+        ? (Number(p.lastLtp) > 0 ? Number(p.lastLtp) : null)
+        : (Number(p.exitPremium) > 0 ? Number(p.exitPremium) : null),
+      optionExitPremium: Number(p.exitPremium) > 0 ? Number(p.exitPremium) : null,
+      slTrigger,
+      slOn,
+      slOrderId: p.slOrderId || null,
+      lots,
+      quantity: p.quantity || null,
+      netOptionPnlRs: pnl?.pnlRs != null ? pnl.pnlRs : null,
+      optionPnlRs: pnl?.pnlRs != null ? pnl.pnlRs : null,
+      open,
+      exitReason: open ? (slOn ? 'OPEN' : 'OPEN · SL missing') : (p.closedBy || p.status || 'flat'),
+    });
   }
+  return rows;
+}
+
+function statusPayload(session) {
+  const trades = liveTradesFromBroker(session);
+  const positions = trades.map((t) => ({
+    instrumentId: t.instrumentId,
+    symbol: t.optionSymbol,
+    status: t.open ? 'open' : 'flat',
+    entryTime: t.entryTime,
+    quantity: t.quantity,
+    entryPremium: t.optionEntryPremium,
+    slTrigger: t.slTrigger,
+    slOrderId: t.slOrderId,
+    slOn: !!t.slOn,
+  }));
   return {
     status: 'ok',
     running: session.status === 'running',
@@ -209,6 +268,7 @@ function statusPayload(session) {
     strategyVersion: STRATEGY_VERSION,
     openSignals: Object.fromEntries(session.openSignal),
     positions,
+    trades,
     kitePnl: session.broker && typeof session.broker.moneySnapshot === 'function'
       ? session.broker.moneySnapshot()
       : { closedRs: 0, openRs: 0, netRs: 0, legs: [] },
@@ -795,5 +855,5 @@ function status(userId) {
 
 module.exports = {
   start, stop, status, decideLiveAction, applyDeskLimits, signalId, hmToMin,
-  engineTradeStillOpen, engineBookHasOpenTrade, mustExitHeldForNewLeg, matchHeldEngineTrade, pickOption, pickIndexFuture, selectNearestFut, liveTransactionType, SPEC, FRESH_MINUTES, _sessions: sessions,
+  engineTradeStillOpen, engineBookHasOpenTrade, mustExitHeldForNewLeg, matchHeldEngineTrade, pickOption, pickIndexFuture, selectNearestFut, liveTransactionType, liveTradesFromBroker, SPEC, FRESH_MINUTES, _sessions: sessions,
 };

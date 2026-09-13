@@ -1,6 +1,6 @@
 'use strict';
 const assert = require('assert');
-const { decideLiveAction, signalId, hmToMin, SPEC, applyDeskLimits, engineTradeStillOpen, engineBookHasOpenTrade, mustExitHeldForNewLeg, matchHeldEngineTrade, pickOption, selectNearestFut, liveTransactionType } = require('./sr-live');
+const { decideLiveAction, signalId, hmToMin, SPEC, applyDeskLimits, engineTradeStillOpen, engineBookHasOpenTrade, mustExitHeldForNewLeg, matchHeldEngineTrade, pickOption, selectNearestFut, liveTransactionType, liveTradesFromBroker } = require('./sr-live');
 const { exitOptsFor, LOT_UNITS, OPTION_SL_MAX_RS } = require('./sr-strategy-config');
 
 assert.deepStrictEqual(SPEC.nifty.opts, exitOptsFor('nifty'), 'Live Nifty opts must match Paper shared config');
@@ -238,5 +238,28 @@ assert.strictEqual(summarizeOptionTrades([
   { rupees: 100, rupeesSource: 'option-live' },
   { rupees: 50, rupeesSource: 'option-live', liveSkip: 'one-leg' },
 ]).netRupees, 100);
+
+{
+  const { LiveBroker } = require('./live-broker');
+  const broker = new LiveBroker({ pushEvent() {}, realOrders: false });
+  broker.setLots('nifty-50', 1);
+  broker.positions.set('nifty-50', {
+    status: 'open',
+    tradingSymbol: 'NIFTY2591525000CE',
+    entryTime: '2026-09-11T10:15:00+0530',
+    quantity: 65,
+    entryPremium: 159.55,
+    slTrigger: 121.1,
+    slOrderId: 'SL1',
+    direction: 'BUY',
+  });
+  const rows = liveTradesFromBroker({ broker });
+  assert.strictEqual(rows.length, 1);
+  assert.strictEqual(rows[0].slTrigger, 121.1);
+  assert.strictEqual(rows[0].slOn, true);
+  assert.strictEqual(rows[0].instrumentName, 'Nifty 50');
+  assert.strictEqual(rows[0].sideLabel, 'CE BUY');
+  assert.strictEqual(rows[0].open, true);
+}
 
 console.log('sr-live.selftest: ok');
