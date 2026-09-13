@@ -103,8 +103,15 @@ assert.ok(!isOptionPrem(8864, 8864));
   assert.strictEqual(paper.engine, 'crude-desk');
   assert.strictEqual(paper.strategy, 'crude-retest');
   assert.strictEqual(paper.maxLots, 3);
+  assert.strictEqual(paper.trades[0].lots, 3);
+  assert.strictEqual(paper.trades[0].exitReason, 'TARGET');
+  assert.strictEqual(
+    paper.trades[0].netOptionPnlRs,
+    Math.round(Number(paper.trades[0].indexPoints) * 10 * 3 - 40 * 3),
+  );
+  assert.strictEqual(paper.trades[0].pnlSource, 'index_x_lot_crude');
   assert.ok(paper.trades.length >= 1);
-  assert.match(paper.note, /retest/i);
+  assert.match(paper.note, /3 Mini lot/i);
   assert.match(paper.note, /ATM CE\/PE/i);
   assert.strictEqual(paper.trades[0].optionEntryPremium, null);
 
@@ -137,6 +144,39 @@ assert.ok(!isOptionPrem(8864, 8864));
   assert.ok(priced[0].optionEntryPremium > 50 && priced[0].optionEntryPremium < 250, priced[0].optionEntryPremium);
   assert.ok(priced[0].slPrice > 0 && priced[0].slPrice < priced[0].optionEntryPremium);
   assert.match(String(priced[0].optionSymbol), /CRUDEOILM26SEP5300CE|CRUDEOILM26SEP5300PE/);
+
+  const { trades: sized, raw: sizedRaw } = replayRetest(candles, {
+    lots: 3,
+    fromDate: day,
+    toDate: day,
+    symbol: 'CRUDEOILM25SEPFUT',
+  });
+  const indexNet = Number(sized[0].netOptionPnlRs);
+  assert.strictEqual(sized[0].lots, 3);
+  assert.strictEqual(indexNet, Math.round(Number(sized[0].indexPoints) * 10 * 3 - 40 * 3));
+  const dump = [];
+  for (let m = hmToMin('10:00'); m <= hmToMin('22:45'); m += 5) {
+    dump.push({
+      date: `${day}T${minToHm(m)}:00+0530`,
+      open: 180,
+      high: 185,
+      low: 40,
+      close: 45,
+    });
+  }
+  const overlaySized = await overlayOptionPrices(sized, sizedRaw, {
+    authorization: 'token x:y',
+    lots: 3,
+    fromDate: day,
+    toDate: day,
+    market: {
+      fetchInstrumentsCsv: async () => csv,
+      fetchHistorical5m: async (_a, token) => (Number(token) === 22 || Number(token) === 23 ? dump : []),
+    },
+  });
+  assert.strictEqual(overlaySized[0].netOptionPnlRs, indexNet, 'overlay must not rewrite paper ₹ with option × lot_size 10 × lots');
+  assert.strictEqual(overlaySized[0].lots, 3);
+  assert.ok(overlaySized[0].optionEntryPremium > 0 && overlaySized[0].optionEntryPremium < 250);
   console.log(
     'crude-bot-desk.selftest: ok',
     paper.trades[0].exitReason,

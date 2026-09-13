@@ -24,7 +24,6 @@ const {
   ohlcOf,
   liveLikeEntryPrem,
   liveLikeExitPrem,
-  optionRupees,
   barsInHold,
   slLimitFill,
 } = require('./sr-option-pnl');
@@ -235,7 +234,7 @@ function applyOptionPnl(row, pnl, lots) {
     strike: row.optionStrike,
     instrumentToken: pnl.instrumentToken || 0,
     exchange: 'MCX',
-    lotSize: pnl.lotSize || LOT_UNITS.crude,
+    lotSize: 1,
   };
   row.selectedInstrument = row.option.tradingSymbol;
   const x = Number(pnl?.optionExitPremium || pnl?.exitClose);
@@ -243,11 +242,6 @@ function applyOptionPnl(row, pnl, lots) {
     row.exitPrice = x;
     row.optionExitPremium = x;
     row.exitOhlc = pnl.exitOhlc || null;
-  }
-  if (Number.isFinite(Number(pnl.rupees))) {
-    row.netOptionPnlRs = Math.round(Number(pnl.rupees));
-    row.optionPnlRs = Math.round(Number(pnl.rupees) + (Number(pnl.chargesRs) || 0));
-    row.chargesRs = Number(pnl.chargesRs) || 0;
   }
   if (pnl.slTrigger > 0 && isOptionPrem(pnl.slTrigger, row.indexEntry)) {
     row.slTrigger = round2(pnl.slTrigger);
@@ -300,6 +294,8 @@ function mapRow(t, lots, symbol) {
     optionExitPremium: null,
     optionPnlRs: Math.round(gross),
     netOptionPnlRs: Math.round(net),
+    chargesRs: open ? 0 : CHARGE_RS * lots,
+    pnlSource: 'index_x_lot_crude',
     indexPoints: round2(pts),
     exitReason: t.exitReason,
     open,
@@ -343,7 +339,7 @@ function resolveListedCrudeOption(instruments, rawTrade) {
     instrumentToken: Number(inst.instrumentToken) || 0,
     strike: Number(inst.strike) || 0,
     expiry: inst.expiry,
-    lotSize: Math.max(1, Number(inst.lotSize) || 10),
+    lotSize: 1,
     instrumentType: inst.instrumentType,
     exchange: 'MCX',
     source: hit.source,
@@ -393,8 +389,7 @@ async function overlayOptionPrices(trades, raw, {
     const exitOhlc = ohlcOf(exitBar);
     const entryPrem = liveLikeEntryPrem(entryBar, 0.5);
     let exitPrem = liveLikeExitPrem(exitBar, 0.5);
-    const lotSize = pick.lotSize;
-    const qty = lotSize * Math.max(1, Number(lots) || 1);
+    const lotsN = Math.max(1, Number(lots) || 1);
     const indexRisk = Math.abs(Number(t.entryPrice) - (Number(t.entryPrice) - (Number(engineOpts(lots).stopPts) || 0)));
     const slTrigger = computeProtectiveSlTrigger({
       fillPremium: entryPrem,
@@ -402,8 +397,8 @@ async function overlayOptionPrices(trades, raw, {
       exchange: 'MCX',
       tradingSymbol: pick.tradingSymbol,
       ltp: entryPrem,
-      maxLossRs: (OPTION_SL_MAX_RS.crude || 0) * Math.max(1, Number(lots) || 1),
-      lotUnits: qty,
+      maxLossRs: (OPTION_SL_MAX_RS.crude || 0) * lotsN,
+      lotUnits: (LOT_UNITS.crude || 10) * lotsN,
     });
     for (const bar of barsInHold(candles, t.entryTime, t.exitTime)) {
       const fill = slLimitFill(slTrigger, Number(bar.low) || Number(bar.close) || 0);
@@ -412,19 +407,16 @@ async function overlayOptionPrices(trades, raw, {
         break;
       }
     }
-    const gross = optionRupees(entryPrem, exitPrem, lotSize, lots);
     return applyOptionPnl(row, {
       optionSymbol: pick.tradingSymbol,
       instrumentToken: pick.instrumentToken,
-      lotSize,
+      lotSize: 1,
       optionEntryPremium: entryPrem,
       optionExitPremium: exitPrem,
       entryClose: entryOhlc ? entryOhlc.close : null,
       exitClose: exitOhlc ? exitOhlc.close : null,
       entryOhlc,
       exitOhlc,
-      rupees: gross,
-      chargesRs: 0,
       slTrigger,
       barsSource: candles.length ? 'kite' : 'empty',
       rupeesSource: candles.length ? 'option-live' : 'unavailable',
@@ -528,7 +520,7 @@ async function runCrudeDesk({ authorization, fromDate, toDate, capitalRs, capita
     books: [book],
     coreBooks: [book],
     note:
-      'Crude Bot trades only Crude Oil Mini ATM CE/PE (MIS). Same playbook as Nifty/Bank: intraday wall, 2-bar retest, +20 pts, lock 20→12, day ±₹3,500. Signals come from the mini future; In/Out/SL ₹ are the option premium (Kite 5m on listed MCX options). NSE charting is used for Nifty/Bank paper. Live buys one ATM CE or PE from Kite — it does not trade the future print.',
+      `Crude Bot trades only Crude Oil Mini ATM CE/PE (MIS), ${L} Mini lot(s) (3 per ₹40,000). Paper ₹ = index points × ₹10 × lots — same as Nifty/Bank (index × lot). In/Out/SL are option premium and do not replace rupees. Live quantity is ${L} (1 qty per Mini lot), not Kite lot_size 10.`,
     instruments: [instrumentRow(trades)],
     protection: {
       fundsRs: capital,
@@ -622,6 +614,7 @@ async function startLive(userId, { authorization, lots, liveAssistant }) {
   });
   session.broker.setMaxOpenLegs(1);
   session.broker.setLots(BOOK_ID, session.lots);
+  session.broker.setOptionMaxLossRs(BOOK_ID, (OPTION_SL_MAX_RS.crude || 0) * session.lots);
   pushEvent(session, 'START', session.message);
   startTick(session);
   return statusPayload(session);
@@ -740,7 +733,7 @@ async function onTick(session) {
           tradingSymbol: opt.tradingSymbol,
           instrumentToken: Number(opt.instrumentToken) || 0,
           exchange: 'MCX',
-          lotSize: Math.max(1, Number(opt.lotSize) || 1),
+          lotSize: 1,
           strike: opt.strike,
           source: 'listed',
         },

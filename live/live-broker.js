@@ -40,6 +40,17 @@ function roundOptionTick(p) {
   return Math.max(TICK, Math.round((Number(p) || 0) / TICK) * TICK);
 }
 
+/** One Crude Mini lot is qty 1 on Kite, including ATM CE/PE. */
+function crudeMiniOrderLotSize(option) {
+  const sym = String(option?.tradingSymbol || option?.symbol || '');
+  const exchange = String(
+    option?.exchange || (sym.toUpperCase().startsWith('CRUDEOIL') ? 'MCX' : ''),
+  ).toUpperCase();
+  const lotSize = Math.max(1, Number(option?.lotSize) || 1);
+  if (exchange === 'MCX' && /CRUDEOILM/i.test(sym) && lotSize > 1) return 1;
+  return lotSize;
+}
+
 /**
  * Protective SELL stop for a long option. The exchange discontinued SL-M for
  * F&O, so we place a Stop-Loss LIMIT (order_type 'SL') with the limit ~10%
@@ -524,13 +535,9 @@ class LiveBroker {
     const exchange =
       option.exchange ||
       (String(sym).toUpperCase().startsWith('CRUDEOIL') ? 'MCX' : 'NFO');
-    // Kite MCX lot_size is 1 (1 qty = 1 lot). Legacy crudeMiniLotSize forced 10 and
-    // bought 10 lots per Autobot lot — clamp CRUDEOILM to trading qty 1.
-    let lotSize = Math.max(1, Number(option.lotSize) || 1);
-    const isCrudeOpt = /(CE|PE)$/i.test(String(sym));
-    if (exchange === 'MCX' && /CRUDEOILM/i.test(String(sym)) && lotSize > 1 && !isCrudeOpt) {
-      lotSize = 1;
-    }
+    // Kite CRUDEOILM FUT and listed CE/PE often advertise lot_size 10 (barrels).
+    // 1 Mini lot = qty 1. Leaving CE/PE at 10 turned 3 lots into 30 contracts.
+    const lotSize = crudeMiniOrderLotSize({ ...option, tradingSymbol: sym, exchange });
     const lotsMult = this.lotsFor(instrumentId);
     const quantity = lotSize * lotsMult;
     const product = 'MIS';
@@ -1071,6 +1078,7 @@ class LiveBroker {
 
 module.exports = {
   LiveBroker,
+  crudeMiniOrderLotSize,
   isFilledOrWorking,
   isPendingSl,
   isTerminalOrderStatus,
