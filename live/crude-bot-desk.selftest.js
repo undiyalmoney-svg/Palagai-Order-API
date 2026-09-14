@@ -13,6 +13,10 @@ const {
   overlayOptionPrices,
   calendarSpanDays,
   OPTION_OVERLAY_MAX_DAYS,
+  crudeMiniFutSymbol,
+  stitchCrudeMiniBars,
+  crudePaperCoverage,
+  fetchRolledCrudeMini5m,
 } = require('./crude-bot-desk');
 
 assert.strictEqual(ENGINE, 'crude-desk');
@@ -238,6 +242,47 @@ assert.ok(isOptionPrem(120, 8864));
   assert.strictEqual(isolated[0].optionStrike, 5300);
   assert.ok(isolated[0].optionEntryPremium !== 645.05, 'must not use another day\'s option print');
   assert.notStrictEqual(isolated[0].entryOhlc && isolated[0].entryOhlc.close, 645.05);
+
+  assert.strictEqual(crudeMiniFutSymbol('2026-09'), 'CRUDEOILM26SEPFUT');
+  const stitched = stitchCrudeMiniBars([
+    { expiry: '2026-07-17', sym: 'CRUDEOILM26JULFUT', bars: [{ date: '2026-07-10T16:00:00+0530', close: 1 }] },
+    { expiry: '2026-08-18', sym: 'CRUDEOILM26AUGFUT', bars: [{ date: '2026-08-10T16:00:00+0530', close: 2 }] },
+    { expiry: '2026-08-18', sym: 'CRUDEOILM26AUGFUT', bars: [{ date: '2026-07-10T16:00:00+0530', close: 99 }] },
+  ]);
+  assert.strictEqual(stitched.length, 2);
+  assert.strictEqual(stitched[0].close, 1, 'keep nearer-expiry bar on overlap');
+  assert.strictEqual(stitched[1].close, 2);
+  const cov = crudePaperCoverage('2026-01-01', '2026-09-11', stitched, [
+    { sym: 'CRUDEOILM26JULFUT' },
+    { sym: 'CRUDEOILM26AUGFUT' },
+  ]);
+  assert.ok(cov.missingMonths.includes('2026-01'));
+  assert.ok(!cov.missingMonths.includes('2026-07'));
+
+  const histCalls = [];
+  const rolledCsv = [
+    'instrument_token,exchange_token,tradingsymbol,name,last_price,expiry,strike,tick_size,lot_size,instrument_type',
+    '11,1,CRUDEOILM26JULFUT,CRUDEOILM,0,2026-07-17,0,1,1,FUT',
+    '12,1,CRUDEOILM26SEPFUT,CRUDEOILM,0,2026-09-18,0,1,1,FUT',
+  ].join('\n');
+  const rolled = await fetchRolledCrudeMini5m(
+    {
+      fetchHistorical5m: async (_a, token, from, to) => {
+        histCalls.push({ token: String(token), from, to });
+        if (String(token) === '11') return [{ date: '2026-07-10T16:00:00+0530', close: 5100 }];
+        return [{ date: '2026-09-10T16:00:00+0530', close: 5300 }];
+      },
+    },
+    'token x:y',
+    '2026-01-01',
+    '2026-09-11',
+    { instrumentsCsv: rolledCsv, chunkGapMs: 0 },
+  );
+  assert.strictEqual(histCalls.length, 2, 'must fetch every listed Mini future, not only the front month');
+  assert.ok(rolled.candles.some((c) => String(c.date).startsWith('2026-07-10')));
+  assert.ok(rolled.candles.some((c) => String(c.date).startsWith('2026-09-10')));
+  assert.ok(rolled.coverage.missingMonths.includes('2026-01'));
+  assert.match(longPaper.note, /Mini 5m used/);
 
   console.log(
     'crude-bot-desk.selftest: ok',

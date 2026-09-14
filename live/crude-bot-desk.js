@@ -189,6 +189,142 @@ async function resolveCrudeFuture(market, authorization, today) {
   return { token: futs[0].token, symbol: futs[0].sym, expiry: futs[0].expiry };
 }
 
+const MCX_MON = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+
+function crudeMiniFutSymbol(yyyyMm) {
+  const y = String(yyyyMm).slice(2, 4);
+  const m = Number(String(yyyyMm).slice(5, 7));
+  return `CRUDEOILM${y}${MCX_MON[m - 1]}FUT`;
+}
+
+function iterateYearMonths(fromIso, toIso) {
+  const out = [];
+  let y = Number(String(fromIso).slice(0, 4));
+  let m = Number(String(fromIso).slice(5, 7));
+  const ey = Number(String(toIso).slice(0, 4));
+  const em = Number(String(toIso).slice(5, 7));
+  while (y < ey || (y === ey && m <= em)) {
+    out.push(`${y}-${String(m).padStart(2, '0')}`);
+    m += 1;
+    if (m > 12) {
+      m = 1;
+      y += 1;
+    }
+  }
+  return out;
+}
+
+function maxIso(a, b) {
+  return String(a) > String(b) ? a : b;
+}
+function minIso(a, b) {
+  return String(a) < String(b) ? a : b;
+}
+
+function assumedExpiryForSymbol(sym, listedExpiry) {
+  if (listedExpiry) return String(listedExpiry).slice(0, 10);
+  const m = String(sym || '').toUpperCase().match(/^CRUDEOILM(\d{2})([A-Z]{3})FUT$/);
+  if (!m) return '';
+  const mi = MCX_MON.indexOf(m[2]);
+  if (mi < 0) return '';
+  return `${2000 + Number(m[1])}-${String(mi + 1).padStart(2, '0')}-19`;
+}
+
+function stitchCrudeMiniBars(parts) {
+  const byTs = new Map();
+  for (const part of parts || []) {
+    const expiry = String(part.expiry || '9999-12-31').slice(0, 10);
+    for (const bar of part.bars || []) {
+      const ts = String(bar.date || '');
+      const day = ts.slice(0, 10);
+      if (!day || day > expiry) continue;
+      const prev = byTs.get(ts);
+      if (!prev || expiry < prev.expiry) {
+        byTs.set(ts, { bar, expiry });
+      }
+    }
+  }
+  return [...byTs.values()]
+    .map((row) => row.bar)
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)));
+}
+
+function crudePaperCoverage(fromDate, toDate, candles, contracts) {
+  const days = [...new Set((candles || []).map((c) => String(c.date || '').slice(0, 10)).filter(Boolean))].sort();
+  const missingMonths = [];
+  for (const ym of iterateYearMonths(fromDate, toDate)) {
+    if (!days.some((d) => d.startsWith(ym))) missingMonths.push(ym);
+  }
+  return {
+    firstBarDay: days[0] || null,
+    lastBarDay: days[days.length - 1] || null,
+    barDays: days.length,
+    missingMonths,
+    contracts: (contracts || []).map((c) => c.sym || c.symbol).filter(Boolean),
+  };
+}
+
+function coverageNote(coverage, fromDate, toDate) {
+  if (!coverage) return '';
+  const used = (coverage.contracts || []).join(', ') || 'none';
+  const first = coverage.firstBarDay || 'none';
+  const last = coverage.lastBarDay || 'none';
+  let text = ` Mini 5m used ${used} covering ${first}→${last} (${coverage.barDays} days).`;
+  if (coverage.missingMonths && coverage.missingMonths.length) {
+    text += ` No Mini 5m in ${coverage.missingMonths[0]}–${coverage.missingMonths[coverage.missingMonths.length - 1]} of ${fromDate}→${toDate}: Kite only lists live CRUDEOILM months (usually the current + next). Older months have no token, so paper cannot invent trades there.`;
+  }
+  return text;
+}
+
+/**
+ * Front-month Mini 5m, rolled across every CRUDEOILM future still on the MCX list.
+ * A single front-month token only has ~2–3 months of history, which is why
+ * Jan–Sep paper used to look empty outside the listed contract.
+ */
+async function fetchRolledCrudeMini5m(market, authorization, fromDate, toDate, deps = {}) {
+  const csv = deps.instrumentsCsv
+    || (typeof market.fetchInstrumentsCsv === 'function'
+      ? await market.fetchInstrumentsCsv(authorization, 'MCX')
+      : '');
+  const csvFuts = parseMcxFuts(csv).slice().sort((a, b) => String(a.expiry).localeCompare(String(b.expiry)));
+  if (!csvFuts.length) {
+    const err = new Error('No live CRUDEOILM future found');
+    err.status = 400;
+    throw err;
+  }
+  const warmFrom = shiftDays(fromDate, -5);
+  const gapMs = deps.chunkGapMs != null ? deps.chunkGapMs : PAPER_HISTORY_GAP_MS;
+  const parts = [];
+  for (const fut of csvFuts) {
+    const expiry = assumedExpiryForSymbol(fut.sym, fut.expiry);
+    if (!expiry) continue;
+    const start = maxIso(warmFrom, shiftDays(expiry, -80));
+    const end = minIso(toDate, expiry);
+    if (start > end) continue;
+    if (parts.length && gapMs) {
+      await new Promise((r) => setTimeout(r, gapMs));
+    }
+    const bars = await market.fetchHistorical5m(authorization, fut.token, start, end, { chunkGapMs: gapMs });
+    parts.push({
+      token: fut.token,
+      sym: fut.sym,
+      expiry,
+      from: start,
+      to: end,
+      bars: bars || [],
+    });
+  }
+  if (!parts.length) {
+    const err = new Error('No CRUDEOILM future history in this date range');
+    err.status = 400;
+    throw err;
+  }
+  const candles = stitchCrudeMiniBars(parts);
+  const symbol = parts.map((p) => p.sym).join(' + ');
+  const coverage = crudePaperCoverage(fromDate, toDate, candles, parts);
+  return { candles, symbol, parts, coverage };
+}
+
 function engineOpts() {
   return {
     stopPts: PLAYBOOK.stopPts,
@@ -550,20 +686,24 @@ async function runCrudeDesk({ authorization, fromDate, toDate, capitalRs, capita
   const resolved = resolveDeskCapital({ capitalRs, capitalSource, liveMoney, kiteFunds });
   const capital = resolved.capital;
   const L = crudeLotsFromAvailableFunds(capital);
-  const today = todayIso();
   let symbol = 'CRUDEOILM FUT';
   let candles = deps.candles || [];
+  let coverage = deps.coverage || null;
   if (!deps.candles) {
     if (!authorization) {
       const err = new Error('Kite session required — Get Token, then Run.');
       err.status = 400;
       throw err;
     }
-    const fut = await resolveCrudeFuture(market, authorization, today);
-    symbol = fut.symbol;
-    candles = await market.fetchHistorical5m(authorization, fut.token, shiftDays(fromDate, -5), toDate, {
+    const rolled = await fetchRolledCrudeMini5m(market, authorization, fromDate, toDate, {
       chunkGapMs: deps.chunkGapMs != null ? deps.chunkGapMs : PAPER_HISTORY_GAP_MS,
+      instrumentsCsv: deps.instrumentsCsv,
     });
+    symbol = rolled.symbol;
+    candles = rolled.candles;
+    coverage = rolled.coverage;
+  } else if (!coverage) {
+    coverage = crudePaperCoverage(fromDate, toDate, candles, [{ sym: symbol }]);
   }
   const spanDays = calendarSpanDays(fromDate, toDate);
   const skipOverlay = deps.skipOptionOverlay === true || spanDays > OPTION_OVERLAY_MAX_DAYS;
@@ -612,7 +752,9 @@ async function runCrudeDesk({ authorization, fromDate, toDate, capitalRs, capita
       `Crude Bot trades only Crude Oil Mini ATM PE (MIS), ${L} Mini lot(s). Session OR 09:00–09:30 (skip if wider than ${PLAYBOOK.maxOrbPts} pts), confirm bar, entries ${PLAYBOOK.entryStartHm}–${PLAYBOOK.entryEndHm} after NSE, max ${PLAYBOOK.maxTradesPerDay}/day. Afternoon CE is off. Stop ${PLAYBOOK.stopPts} pts (₹${dayRiskRs(L)} at this size) / target ${PLAYBOOK.targetByScore[1]} pts · trail ₹${PLAYBOOK.trailArmRs}→₹${PLAYBOOK.trailLockRs}. Day stop ${PLAYBOOK.dayLossStopPts} Mini pts. Paper ₹ = Mini points × ₹10 × lots.`
       + (skipOverlay && spanDays > OPTION_OVERLAY_MAX_DAYS
         ? ` Option OHLC skipped on ${spanDays}-day ranges (keeps Run paper under the proxy limit); rupees still Mini points × ₹10 × lots.`
-        : ''),
+        : '')
+      + coverageNote(coverage, fromDate, toDate),
+    coverage,
     instruments: [instrumentRow(trades)],
     protection: {
       fundsRs: capital,
@@ -868,4 +1010,8 @@ module.exports = {
   isOptionPrem,
   resolveCrudeFuture,
   parseMcxFuts,
+  crudeMiniFutSymbol,
+  stitchCrudeMiniBars,
+  crudePaperCoverage,
+  fetchRolledCrudeMini5m,
 };
