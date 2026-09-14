@@ -361,7 +361,7 @@ async function start(userId, config) {
     pushEvent(
       session,
       'CRUDE_ON',
-      'Crude LIVE_CRUDE_GREEN ON — no entries before 15:15 IST; signal window 16:00–19:00, max 1/day. UI may not show a Crude toggle yet; server still runs it.',
+      'Crude LIVE_CRUDE_GREEN ON — no entries before 15:15 IST; signal window 16:00–19:00, max 2/day. UI may not show a Crude toggle yet; server still runs it.',
     );
   }
   session.message =

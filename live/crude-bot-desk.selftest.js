@@ -21,7 +21,7 @@ assert.strictEqual(PLAYBOOK.orbToHm, '09:30');
 assert.strictEqual(PLAYBOOK.minOrbPts, 0);
 assert.strictEqual(PLAYBOOK.maxOrbPts, 60);
 assert.strictEqual(PLAYBOOK.entryStartHm, '16:00');
-assert.strictEqual(PLAYBOOK.maxTradesPerDay, 1);
+assert.strictEqual(PLAYBOOK.maxTradesPerDay, 2);
 assert.strictEqual(PLAYBOOK.entryEndHm, '19:00');
 assert.strictEqual(PLAYBOOK.allowBuy, false);
 assert.strictEqual(PLAYBOOK.allowSell, true);

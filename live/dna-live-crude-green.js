@@ -7,14 +7,14 @@
  *   13W/7L · net ₹+1,800 · PF 1.76 · 0 entries before 16:00
  *
  * Method: session-OR · OR width ≤60 · 16:00–19:00 · SL30/TP80
- *   trail ₹350→₹180 · max 1/day · confirm ON · no fade PDH
- * Killed on the same bars: SL20/15 (more losses), dayStop 15 (zero trades).
+ *   trail ₹350→₹180 · max 2/day · confirm ON · no fade PDH
+ * Killed: SL20/15 (more losses). Max 1/day overfit the Aug–Sep slice.
  */
 
 const LIVE_CRUDE_GREEN_DNA = {
   id: 'live-crude-green-v3',
   label: 'Live Crude Green · after NSE close',
-  version: '2026.09-max1-1900',
+  version: '2026.09-19-max2',
   profileId: 'live-crude-green',
 
   enableNifty: false,
@@ -40,8 +40,12 @@ const LIVE_CRUDE_GREEN_DNA = {
     targetPts: 80,
     requireConfirm: true,
     firstWinLock: false,
-    /** Second fill was the give-back SL after a green (19 Aug −30 after +83). */
-    maxTradesDay: 1,
+    /**
+     * Max 1/day cut Aug 13–Sep 13 losses to ₹0, but on Kite 2026-06-01→09-14
+     * (CRUDEOILM26SEPFUT) it ate net: max1+19:00 ₹3,840 vs max2+19:00 ₹8,640.
+     * Last-entry 19:00 is the loss cut that still raises net (vs 21:00).
+     */
+    maxTradesDay: 2,
     minOrWidth: 0,
     maxOrWidth: 60,
     /** Afternoon CE (long Mini) was the −₹1,020 bleed on 13 Aug–13 Sep. PE only. */
@@ -50,10 +54,10 @@ const LIVE_CRUDE_GREEN_DNA = {
     /**
      * Do not short into/above the prior day's high (ORB: that is a fade into
      * resistance, not a breakdown). Buffer 10 pts also skips shorts hugging PDH.
-     * 6 Aug–13 Sep @ 3 lots (engine, later same-day fill allowed):
-     *   no-fade only: loss ₹5,100 / net ₹5,220
-     *   + max1 + 19:00: loss ₹1,020 / net ₹6,090
-     * 13 Aug–13 Sep: loss ₹0 / net ₹5,970 (was ₹2,040 / ₹7,140).
+     * Kite CRUDEOILM26SEPFUT 2026-06-01→09-14 @ 3 lots:
+     *   max2+21:00  loss ₹12,270 net ₹5,280
+     *   max1+19:00  loss ₹6,120  net ₹3,840  (overfit)
+     *   max2+19:00  loss ₹8,160  net ₹8,640  <- live DNA
      */
     skipFadePriorDay: true,
     fadeBufferPts: 10,
@@ -78,13 +82,13 @@ const LIVE_CRUDE_GREEN_DNA = {
 
   research: {
     window: '2026-08-13 → 2026-09-13',
-    greenDays: '5W / 0L @ 3 lots',
+    greenDays: '16W / 8L @ 3 lots (Jun–mid Sep Kite)',
     engineValidated: true,
-    netRsApprox: 5970,
-    profitFactor: 99,
+    netRsApprox: 8640,
+    profitFactor: 2.06,
     earlyEntriesBefore1515: 0,
     note:
-      'PE only. Skip PDH fade. Max 1/day. Last entry 19:00. SL30 kept — SL20 raised losses. Afternoon CE off.',
+      'PE only. Skip PDH fade. Max 2/day. Last entry 19:00. SL30. Max 1/day overfit Aug–Sep.',
   },
 };
 
@@ -118,7 +122,7 @@ function liveCrudeGreenProfileOverrides() {
     defaultEnableMorning: false,
     defaultEnableEvening: true,
     dailyBandLabel:
-      'After NSE · OR≤60 · PE only · no fade PDH · 16:00–19:00 · SL30/TP80 · trail ₹350→₹180 · max1',
+      'After NSE · OR≤60 · PE only · no fade PDH · 16:00–19:00 · SL30/TP80 · trail ₹350→₹180 · max2',
     profitLockArmRs: s.profitLockArmRs,
     profitLockLockRs: s.profitLockLockRs,
     profitLockGivebackRs: s.profitLockGivebackRs,

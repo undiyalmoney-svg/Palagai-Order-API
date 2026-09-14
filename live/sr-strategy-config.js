@@ -110,18 +110,18 @@ const EXIT_RULES = Object.freeze({
     lockArmPts: 20, lockAtPts: 12, giveUpBar: 2, giveUpMinPts: 8,
     minScore: 2,
     capStopToDayBudget: true,
-    // FAIL-STOP (close back through the broken 15m wall). This is invalidation,
-    // not a rupee cut. Bank failStop was catastrophic (-Rs239k). On Nifty
-    // 2026-08-10→09-08 the same 12 winners still hit TARGET; TIME/GIVEUP loss
-    // ₹3,148 → ₹1,595. Do NOT copy onto Bank.
+    // FAIL-STOP (close back through the broken 15m wall). Invalidation, not a
+    // rupee cut. Bank failStop stays off. Kite 5m 2026-06-01→09-14:
+    //   failStop off  57W/15L  loss ₹11,126  net ₹56,300
+    //   failStop on   53W/19L  loss ₹5,603   net ₹58,175
     failStop: true,
     targetByScore: { 1: 20, 2: 20, 3: 20 },
   }),
-  // Bank — 4 bars + profit lock armed at +10. Test window: net Rs206,867,
-  // losses -Rs42,343, PF 7.89 (those figures used 6-bar TIME).
-  // 2026-08-10→09-08 live window: 33/34 winners already at TARGET by bar 4;
-  // the one TIME loser was −40.65 pts at 6 bars and −8 pts at 4 bars
-  // (₹1,240 → ₹242). This is NOT a price stop (those remain forbidden on Bank).
+  // Bank — 6 bars + profit lock armed at +20/12 on options.
+  // 2026-08-10→09-08 looked better at 4-bar TIME (one loser −40.6 → −8 pts).
+  // Kite 5m 2026-06-01→09-14 (live token) reverses that: 4-bar TIME
+  //   loss ₹6,142 → ₹7,469  net ₹79,698 → ₹77,792  (one extra loser).
+  // Keep 6. This is still NOT a price stop.
   // Arm level swept on both windows; +10 is the most profitable overall AND
   // loses less than the +12 it replaced:
   //   +6  train Rs266,895  test Rs190,685  combined Rs457,580  loss -Rs24,010
@@ -170,7 +170,7 @@ const EXIT_RULES = Object.freeze({
   //     Rs301,110 vs Rs283,075) at identical -Rs8,580 losses. Requiring a
   //     pullback already excludes the spent, over-extended moves.
   banknifty: Object.freeze({
-    wallMode: 'intraday', timeStopBars: 4,
+    wallMode: 'intraday', timeStopBars: 6,
     retest: true, maxRetestBars: 2,
     // Same option problem as Nifty: lock-at-5 does not clear CE/PE charges.
     lockArmPts: 20, lockAtPts: 12,
@@ -228,5 +228,5 @@ module.exports = {
   EXIT_RULES, CUT_LOSS_RS, LOT_UNITS, DEFAULT_LOTS, OPTION_SL_MAX_RS, exitOptsFor,
   DAY_LOSS_STOP_RS, DAY_PROFIT_TARGET_RS, paperVehicleFor,
   STRATEGY_ID: 'sr-breakout',
-  STRATEGY_VERSION: 'sr-breakout.2026-09-13.1',
+  STRATEGY_VERSION: 'sr-breakout.2026-09-14.1',
 };

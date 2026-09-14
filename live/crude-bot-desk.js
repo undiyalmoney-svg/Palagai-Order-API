@@ -10,7 +10,7 @@
  *   - Bullish/bearish close through the range, then a confirm bar (required).
  *   - Entries 16:00–19:00 IST. PE only (short the Mini). Afternoon CE was the bleed.
  *   - Skip SELL into/above prior-day high (10-pt buffer). Textbook ORB: do not fade PDH.
- *   - Max 1 trade/day (second fill was giving the first win back). SL30/TP80 / trail ₹350→₹180.
+ *   - Max 2 trades/day. Last entry 19:00 (21:00 added late SLs). SL30/TP80 / trail ₹350→₹180.
  * Paper ₹ = Mini points × ₹10 × lots. Live buys one ATM CE/PE (qty = Mini lots).
  */
 const defaultMarket = require('./kite-market');
@@ -39,7 +39,7 @@ const optionStore = require('./sr-option-store');
 
 const ENGINE = 'crude-desk';
 const STRATEGY_ID = 'live-crude-green';
-const STRATEGY_VERSION = '2026.09-max1-1900';
+const STRATEGY_VERSION = '2026.09-19-max2';
 const BOOK_ID = 'crude-oil-mini';
 const RS_PER_POINT = 10;
 const CHARGE_RS = 40;
