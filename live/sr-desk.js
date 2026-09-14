@@ -397,6 +397,7 @@ async function overlayNseOptionOhlc(mapped, rawTrade, book, deps = {}) {
       rawTrade.entryTime || mapped.entryHm,
       rawTrade.exitTime || mapped.exitHm,
       day,
+      { afterFill: true },
     );
     for (const bar of hold) {
       const fill = slLimitFill(marked.slTrigger, bar.low);

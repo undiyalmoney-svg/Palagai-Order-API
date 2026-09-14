@@ -106,14 +106,16 @@ function pickBar(candles, hm) {
   return last;
 }
 
-function barsInHold(candles, entryHm, exitHm, day) {
+function barsInHold(candles, entryHm, exitHm, day, opts = {}) {
   const a = hmToMin(clockOf(entryHm));
   const b = hmToMin(clockOf(exitHm));
   if (a == null || b == null) return [];
   const d = dayOfStamp(entryHm, day) || dayOfStamp(exitHm, day);
+  const afterFill = opts.afterFill === true;
   return candlesOnDay(candles, d).filter((c) => {
     const m = hmToMin(hmOf(c.date));
-    return m != null && m >= a && m <= b;
+    if (m == null || m > b) return false;
+    return afterFill ? m > a : m >= a;
   });
 }
 
@@ -251,7 +253,7 @@ async function optionPnlForTrade({ authorization, spec, trade, lots, session, pi
       maxLossRs: (OPTION_SL_MAX_RS[spec.key] || 0) * Math.max(1, Number(lots) || 1),
     lotUnits: qty,
   });
-  for (const bar of barsInHold(candles, trade.entryTime, trade.exitTime, day)) {
+  for (const bar of barsInHold(candles, trade.entryTime, trade.exitTime, day, { afterFill: true })) {
     const low = Number(bar.low) || Number(bar.close) || 0;
     const fill = slLimitFill(slTrigger, low);
     if (fill != null) {

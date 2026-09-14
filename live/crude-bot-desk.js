@@ -596,7 +596,7 @@ async function overlayOptionPrices(trades, raw, {
       maxLossRs: (OPTION_SL_MAX_RS.crude || 0) * lotsN,
       lotUnits: (LOT_UNITS.crude || 10) * lotsN,
     });
-    for (const bar of barsInHold(candles, t.entryTime, t.exitTime, t.date)) {
+    for (const bar of barsInHold(candles, t.entryTime, t.exitTime, t.date, { afterFill: true })) {
       const fill = slLimitFill(slTrigger, Number(bar.low) || Number(bar.close) || 0);
       if (fill != null) {
         exitPrem = fill;

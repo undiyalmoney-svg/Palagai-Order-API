@@ -259,8 +259,61 @@ assert.strictEqual(
   'BANKNIFTY2691556100PE',
 );
 
+const fillWick = {
+  date: '2026-09-11T10:00:00+0530',
+  open: 891.85,
+  high: 930,
+  low: 800,
+  close: 923.4,
+};
+const targetBar = {
+  date: '2026-09-11T10:05:00+0530',
+  open: 927.7,
+  high: 975,
+  low: 923.5,
+  close: 971.15,
+};
+const bankTarget = mapTrade(
+  {
+    date: '2026-09-11',
+    option: 'CE',
+    entryTime: '10:00',
+    exitTime: '10:05',
+    exitReason: 'TARGET',
+    entryPrice: 52000,
+    exitPrice: 52020,
+    points: 20,
+  },
+  BOOKS.banknifty,
+  1,
+  30,
+);
+
 Promise.resolve()
   .then(() => overlayNseOptionOhlc(
+    bankTarget,
+    {
+      date: '2026-09-11',
+      option: 'CE',
+      entryTime: '10:00',
+      exitTime: '10:05',
+      entryPrice: 52000,
+      exitPrice: 52020,
+      points: 20,
+    },
+    BOOKS.banknifty,
+    {
+      candlesByKey: { nifty: [], banknifty: [] },
+      fetchOption5m: async () => [fillWick, targetBar],
+    },
+  ))
+  .then((row) => {
+    assert.strictEqual(row.entryPrice, 923.4);
+    assert.strictEqual(row.exitPrice, 971.15);
+    assert.notStrictEqual(row.exitVia, 'sl-limit');
+    assert.strictEqual(row.netOptionPnlRs, Math.round((971.15 - 923.4) * 30) - 20);
+    assert.ok(row.netOptionPnlRs > 0, 'TARGET must not book the fill-bar wick as SL');
+    return overlayNseOptionOhlc(
     { ...bankPe },
     {
       date: '2026-09-11',
@@ -281,7 +334,8 @@ Promise.resolve()
         return [bankBar];
       },
     },
-  ))
+    );
+  })
   .then((row) => {
     assert.strictEqual(row.entryPrice, 524);
     assert.strictEqual(row.premiumSource, 'nse-5m');
