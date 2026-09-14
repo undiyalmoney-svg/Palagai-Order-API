@@ -21,7 +21,8 @@ assert.strictEqual(PLAYBOOK.orbToHm, '09:30');
 assert.strictEqual(PLAYBOOK.minOrbPts, 0);
 assert.strictEqual(PLAYBOOK.maxOrbPts, 60);
 assert.strictEqual(PLAYBOOK.entryStartHm, '16:00');
-assert.strictEqual(PLAYBOOK.maxTradesPerDay, 2);
+assert.strictEqual(PLAYBOOK.maxTradesPerDay, 1);
+assert.strictEqual(PLAYBOOK.entryEndHm, '19:00');
 assert.strictEqual(PLAYBOOK.allowBuy, false);
 assert.strictEqual(PLAYBOOK.allowSell, true);
 assert.strictEqual(PLAYBOOK.skipFadePriorDay, true);
@@ -147,7 +148,7 @@ assert.ok(isOptionPrem(120, 8864));
   );
   assert.ok(paper.trades[0].netOptionPnlRs > 0);
   assert.strictEqual(paper.protection.dayRiskRs, 30 * 10 * 3);
-  assert.match(paper.note, /16:00–21:00/);
+  assert.match(paper.note, /16:00–19:00/);
   assert.strictEqual(paper.trades[0].optionEntryPremium, null);
 
   const csv = [

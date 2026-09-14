@@ -14,6 +14,8 @@ assert.strictEqual(EXIT_RULES.banknifty.timeStopBars, 4);
 assert.strictEqual(exitOptsFor('nifty', 1).failStop, true);
 assert.strictEqual(exitOptsFor('banknifty', 1).timeStopBars, 4);
 assert.strictEqual(exitOptsFor('banknifty', 1).failStop, undefined);
+assert.strictEqual(PLAYBOOK.maxTradesPerDay, 1);
+assert.strictEqual(PLAYBOOK.entryEndHm, '19:00');
 assert.strictEqual(PLAYBOOK.skipFadePriorDay, true);
 assert.strictEqual(PLAYBOOK.fadeBufferPts, 10);
 assert.strictEqual(PLAYBOOK.allowBuy, false);
@@ -21,6 +23,7 @@ assert.strictEqual(PLAYBOOK.allowBuy, false);
 console.log('sr-loss-cut.selftest: ok', {
   niftyFailStop: EXIT_RULES.nifty.failStop,
   bankTimeStop: EXIT_RULES.banknifty.timeStopBars,
+  crudeMaxDay: PLAYBOOK.maxTradesPerDay,
+  crudeEntryEnd: PLAYBOOK.entryEndHm,
   crudeSkipFade: PLAYBOOK.skipFadePriorDay,
-  crudeFadeBuf: PLAYBOOK.fadeBufferPts,
 });

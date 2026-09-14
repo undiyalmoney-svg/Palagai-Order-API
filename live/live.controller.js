@@ -138,7 +138,7 @@ async function defaults(_req, res) {
       bankLots: DAILY_3K_PRESET.bankLots,
       crudeLots: DAILY_3K_PRESET.crudeLots,
       crudeStrategy: 'live-crude-green',
-      crudeWindow: '16:00–21:00 IST (hard gate 15:15)',
+      crudeWindow: '16:00–19:00 IST (hard gate 15:15)',
       bankOnlyAfterNifty: !!LIVE_GREEN_DNA.liveOps.bankOnlyAfterNifty,
       niftyMaxTradesDay: DAILY_3K_PRESET.niftyMaxTradesDay,
       bankMaxTradesDay: DAILY_3K_PRESET.bankMaxTradesDay,
@@ -233,7 +233,7 @@ async function startCrudeDesk(req, res) {
         liveAssistant: assistant,
         engine: crudeBot.ENGINE,
         note:
-          'Crude Bot live buys one ATM Crude Mini PE after NSE close (session OR ≤60 pts, confirm, SL30/TP80, max 2/day). Afternoon CE is off. It does not touch Nifty or Bank.',
+          'Crude Bot live buys one ATM Crude Mini PE after NSE close (session OR ≤60 pts, confirm, SL30/TP80, 16:00–19:00, max 1/day). Afternoon CE is off. It does not touch Nifty or Bank.',
       });
     } catch (err) {
       const detail = err.message || String(err);
