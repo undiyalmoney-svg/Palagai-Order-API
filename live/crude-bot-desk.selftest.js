@@ -11,6 +11,8 @@ const {
   isCrudeDeskBody,
   isOptionPrem,
   overlayOptionPrices,
+  calendarSpanDays,
+  OPTION_OVERLAY_MAX_DAYS,
 } = require('./crude-bot-desk');
 
 assert.strictEqual(ENGINE, 'crude-desk');
@@ -150,6 +152,33 @@ assert.ok(isOptionPrem(120, 8864));
   assert.strictEqual(paper.protection.dayRiskRs, 30 * 10 * 3);
   assert.match(paper.note, /16:00–19:00/);
   assert.strictEqual(paper.trades[0].optionEntryPremium, null);
+  assert.strictEqual(calendarSpanDays('2026-01-01', '2026-09-11'), 254);
+  assert.ok(254 > OPTION_OVERLAY_MAX_DAYS);
+
+  let optionHistoryCalls = 0;
+  const longPaper = await runCrudeDesk(
+    {
+      authorization: 'token x:y',
+      fromDate: '2026-01-01',
+      toDate: winDay,
+      capitalRs: 40000,
+      capitalSource: 'mine',
+      liveMoney: false,
+    },
+    {
+      candles: win,
+      market: {
+        fetchUserMargins: async () => null,
+        fetchHistorical5m: async () => {
+          optionHistoryCalls += 1;
+          return [];
+        },
+      },
+    },
+  );
+  assert.strictEqual(optionHistoryCalls, 0, 'must not pull option 5m on a year-long paper window');
+  assert.match(longPaper.note, /Option OHLC skipped/);
+  assert.ok(longPaper.trades[0].netOptionPnlRs > 0);
 
   const csv = [
     'instrument_token,exchange_token,tradingsymbol,name,last_price,expiry,strike,tick_size,lot_size,instrument_type',

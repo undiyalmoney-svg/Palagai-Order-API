@@ -394,7 +394,7 @@ async function loadCandles(market, authorization, book, fromDate, toDate, deps) 
   }
   const warmupFrom = shiftDays(fromDate, -12);
   return market.fetchHistorical5m(authorization, book.token, warmupFrom, toDate, {
-    chunkGapMs: deps.chunkGapMs ?? (deps.candlesByKey ? 0 : 3000),
+    chunkGapMs: deps.chunkGapMs ?? (deps.candlesByKey ? 0 : 200),
   });
 }
 
@@ -434,7 +434,7 @@ async function runSrDesk({ authorization, fromDate, toDate, capitalRs, capitalSo
 
   for (let i = 0; i < keys.length; i += 1) {
     if (i > 0 && !deps.candlesByKey) {
-      await new Promise((r) => setTimeout(r, Number(deps.bookGapMs) || 3000));
+      await new Promise((r) => setTimeout(r, Number(deps.bookGapMs) || 400));
     }
     const book = BOOKS[keys[i]];
     try {

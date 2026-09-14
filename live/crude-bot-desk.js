@@ -96,6 +96,15 @@ function shiftDays(iso, d) {
   x.setUTCDate(x.getUTCDate() + d);
   return x.toISOString().slice(0, 10);
 }
+/** Inclusive calendar days. Option overlay on a year of Mini PEs times out the Vercel proxy. */
+function calendarSpanDays(fromDate, toDate) {
+  const a = Date.parse(`${String(fromDate).slice(0, 10)}T00:00:00Z`);
+  const b = Date.parse(`${String(toDate).slice(0, 10)}T00:00:00Z`);
+  if (!Number.isFinite(a) || !Number.isFinite(b) || b < a) return 0;
+  return Math.floor((b - a) / 86400000) + 1;
+}
+const OPTION_OVERLAY_MAX_DAYS = 14;
+const PAPER_HISTORY_GAP_MS = 200;
 function round2(n) {
   return Math.round(Number(n) * 100) / 100;
 }
@@ -552,17 +561,23 @@ async function runCrudeDesk({ authorization, fromDate, toDate, capitalRs, capita
     }
     const fut = await resolveCrudeFuture(market, authorization, today);
     symbol = fut.symbol;
-    candles = await market.fetchHistorical5m(authorization, fut.token, shiftDays(fromDate, -5), toDate);
+    candles = await market.fetchHistorical5m(authorization, fut.token, shiftDays(fromDate, -5), toDate, {
+      chunkGapMs: deps.chunkGapMs != null ? deps.chunkGapMs : PAPER_HISTORY_GAP_MS,
+    });
   }
+  const spanDays = calendarSpanDays(fromDate, toDate);
+  const skipOverlay = deps.skipOptionOverlay === true || spanDays > OPTION_OVERLAY_MAX_DAYS;
   const { trades: mapped, raw } = replayRetest(candles, { lots: L, fromDate, toDate, symbol });
-  const trades = await overlayOptionPrices(mapped, raw, {
-    authorization: deps.skipOptionOverlay ? null : authorization,
-    lots: L,
-    market,
-    fromDate,
-    toDate,
-    instruments: deps.optionInstruments,
-  });
+  const trades = skipOverlay
+    ? mapped
+    : await overlayOptionPrices(mapped, raw, {
+      authorization,
+      lots: L,
+      market,
+      fromDate,
+      toDate,
+      instruments: deps.optionInstruments,
+    });
   const totals = summarize(trades);
   const book = {
     id: 'crude',
@@ -594,7 +609,10 @@ async function runCrudeDesk({ authorization, fromDate, toDate, capitalRs, capita
     books: [book],
     coreBooks: [book],
     note:
-      `Crude Bot trades only Crude Oil Mini ATM PE (MIS), ${L} Mini lot(s). Session OR 09:00–09:30 (skip if wider than ${PLAYBOOK.maxOrbPts} pts), confirm bar, entries ${PLAYBOOK.entryStartHm}–${PLAYBOOK.entryEndHm} after NSE, max ${PLAYBOOK.maxTradesPerDay}/day. Afternoon CE is off. Stop ${PLAYBOOK.stopPts} pts (₹${dayRiskRs(L)} at this size) / target ${PLAYBOOK.targetByScore[1]} pts · trail ₹${PLAYBOOK.trailArmRs}→₹${PLAYBOOK.trailLockRs}. Day stop ${PLAYBOOK.dayLossStopPts} Mini pts. Paper ₹ = Mini points × ₹10 × lots.`,
+      `Crude Bot trades only Crude Oil Mini ATM PE (MIS), ${L} Mini lot(s). Session OR 09:00–09:30 (skip if wider than ${PLAYBOOK.maxOrbPts} pts), confirm bar, entries ${PLAYBOOK.entryStartHm}–${PLAYBOOK.entryEndHm} after NSE, max ${PLAYBOOK.maxTradesPerDay}/day. Afternoon CE is off. Stop ${PLAYBOOK.stopPts} pts (₹${dayRiskRs(L)} at this size) / target ${PLAYBOOK.targetByScore[1]} pts · trail ₹${PLAYBOOK.trailArmRs}→₹${PLAYBOOK.trailLockRs}. Day stop ${PLAYBOOK.dayLossStopPts} Mini pts. Paper ₹ = Mini points × ₹10 × lots.`
+      + (skipOverlay && spanDays > OPTION_OVERLAY_MAX_DAYS
+        ? ` Option OHLC skipped on ${spanDays}-day ranges (keeps Run paper under the proxy limit); rupees still Mini points × ₹10 × lots.`
+        : ''),
     instruments: [instrumentRow(trades)],
     protection: {
       fundsRs: capital,
@@ -842,6 +860,8 @@ module.exports = {
   startLive,
   stop,
   status,
+  calendarSpanDays,
+  OPTION_OVERLAY_MAX_DAYS,
   isCrudeDeskBody,
   summarize,
   overlayOptionPrices,

@@ -179,6 +179,30 @@ function isResearchEngine(engine) {
   return e === 'ee-wait' || e === 'order-flow' || e === 'confluence';
 }
 
+function deskErrorMessage(err) {
+  if (!err) return 'Paper run failed';
+  const msg = err.message;
+  if (typeof msg === 'string' && msg.trim() && msg !== '[object Object]') return msg;
+  if (msg && typeof msg === 'object') {
+    try {
+      const json = JSON.stringify(msg);
+      if (json && json !== '{}') return json.slice(0, 280);
+    } catch {
+      /* ignore */
+    }
+  }
+  const s = String(err);
+  return s && s !== '[object Object]' ? s : 'Paper run failed';
+}
+
+function sendDeskError(res, err) {
+  const status = Number(err && err.status) || 500;
+  res.status(status).json({
+    status: 'error',
+    message: deskErrorMessage(err),
+  });
+}
+
 async function persistKiteHeader(req, uid) {
   const headerAuth = String(
     req.headers['x-kite-authorization'] || req.headers['x-kite-authorisation'] || '',
@@ -257,21 +281,25 @@ async function startCrudeDesk(req, res) {
     });
     return;
   }
-  const out = await crudeBot.runCrudeDesk({
-    authorization,
-    fromDate: window.fromDate,
-    toDate: window.toDate,
-    capitalRs: body.capitalRs || body.capital,
-    capitalSource: body.capitalSource || body.fundSource,
-    liveMoney: false,
-  });
-  res.json({
-    ...out,
-    mode: 'paper',
-    liveMoney: false,
-    realOrders: false,
-    today: window.today,
-  });
+  try {
+    const out = await crudeBot.runCrudeDesk({
+      authorization,
+      fromDate: window.fromDate,
+      toDate: window.toDate,
+      capitalRs: body.capitalRs || body.capital,
+      capitalSource: body.capitalSource || body.fundSource,
+      liveMoney: false,
+    });
+    res.json({
+      ...out,
+      mode: 'paper',
+      liveMoney: false,
+      realOrders: false,
+      today: window.today,
+    });
+  } catch (err) {
+    sendDeskError(res, err);
+  }
 }
 
 async function start(req, res) {
@@ -356,21 +384,25 @@ async function start(req, res) {
     });
     return;
   }
-  const out = await runSrDesk({
-    authorization,
-    fromDate: window.fromDate,
-    toDate: window.toDate,
-    capitalRs: body.capitalRs || body.capital,
-    capitalSource: body.capitalSource || body.fundSource,
-    liveMoney: false,
-  });
-  res.json({
-    ...out,
-    mode: 'paper',
-    liveMoney: false,
-    realOrders: false,
-    today: window.today,
-  });
+  try {
+    const out = await runSrDesk({
+      authorization,
+      fromDate: window.fromDate,
+      toDate: window.toDate,
+      capitalRs: body.capitalRs || body.capital,
+      capitalSource: body.capitalSource || body.fundSource,
+      liveMoney: false,
+    });
+    res.json({
+      ...out,
+      mode: 'paper',
+      liveMoney: false,
+      realOrders: false,
+      today: window.today,
+    });
+  } catch (err) {
+    sendDeskError(res, err);
+  }
 }
 
 async function stop(req, res) {
