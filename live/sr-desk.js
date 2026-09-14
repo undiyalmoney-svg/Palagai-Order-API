@@ -1,14 +1,21 @@
 'use strict';
 /**
  * Trade Bot desk = the walk-forward S/R engine (Nifty + Bank only).
- * Not the straddle desk. Paper ₹ is index points × lot (same unit as the
- * measured OOS window). Live still buys one ATM CE or PE.
+ * Not the straddle desk. Engine exits on the index. Paper ₹ shadows Live:
+ * ATM CE/PE premium × lot (65 / 30), not index points × lot.
  */
 const { blackScholesPrice, realizedVolAnnualized } = require('./bs-option-pricer');
 const defaultMarket = require('./kite-market');
 const { lotsFromAvailableFunds } = require('./daily-desk-defaults');
 const { runSrBreakout } = require('./sr-breakout');
 const { computeProtectiveSlTrigger } = require('./strategy-core.cjs');
+const {
+  optionRupees,
+  slLimitFill,
+  barsInHold,
+  liveLikeEntryPrem,
+  liveLikeExitPrem,
+} = require('./sr-option-pnl');
 const {
   exitOptsFor,
   LOT_UNITS,
@@ -195,6 +202,27 @@ function bookForMapped(mapped) {
   return Object.values(BOOKS).find((b) => b.id === mapped.instrumentId) || BOOKS.nifty;
 }
 
+function calendarSpanDays(fromDate, toDate) {
+  const a = Date.parse(`${String(fromDate).slice(0, 10)}T00:00:00Z`);
+  const b = Date.parse(`${String(toDate).slice(0, 10)}T00:00:00Z`);
+  if (!Number.isFinite(a) || !Number.isFinite(b) || b < a) return 0;
+  return Math.floor((b - a) / 86400000) + 1;
+}
+
+/** Live money is (exit − entry) premium × lot qty. Paper must use that, not index pts. */
+function applyLiveOptionRupees(mapped) {
+  const lots = Math.max(1, Number(mapped.lots) || 1);
+  const book = bookForMapped(mapped);
+  const units = Math.max(1, Number(book.unitsPerLot) || 1);
+  const gross = optionRupees(mapped.optionEntryPremium, mapped.optionExitPremium, units, lots);
+  if (gross == null) return mapped;
+  mapped.optionPnlRs = gross;
+  mapped.chargesRs = CHARGE_RS * lots;
+  mapped.netOptionPnlRs = gross - mapped.chargesRs;
+  mapped.pnlSource = 'option_x_lot_live';
+  return mapped;
+}
+
 /** Same protective option SL Live places after the ATM CE/PE fill. */
 function attachProtectiveSl(mapped, book) {
   const lots = Math.max(1, Number(mapped.lots) || 1);
@@ -299,7 +327,7 @@ function mapTrade(t, book, lots, perPoint, vol) {
     lots,
     spec: { engine: ENGINE, strategy: STRATEGY_ID, version: STRATEGY_VERSION },
   };
-  return attachProtectiveSl(row, book);
+  return applyLiveOptionRupees(attachProtectiveSl(row, book));
 }
 
 /** Desk fill = NSE charting 5m option close (and full OHLC). BS is fallback only. */
@@ -318,7 +346,7 @@ function applyOptionOhlc(mapped, pnl) {
     mapped.exitOhlc = pnl.exitOhlc || null;
   }
   if (pnl.slTrigger > 0) mapped.slTrigger = pnl.slTrigger;
-  return attachProtectiveSl(mapped, bookForMapped(mapped));
+  return applyLiveOptionRupees(attachProtectiveSl(mapped, bookForMapped(mapped)));
 }
 
 async function overlayNseOptionOhlc(mapped, rawTrade, book, deps = {}) {
@@ -356,7 +384,7 @@ async function overlayNseOptionOhlc(mapped, rawTrade, book, deps = {}) {
     const entryOhlc = ohlcOf(entryBar);
     const exitOhlc = ohlcOf(exitBar);
     if (!entryOhlc) return mapped;
-    return applyOptionOhlc(mapped, {
+    const marked = applyOptionOhlc(mapped, {
       entryClose: entryOhlc.close,
       exitClose: exitOhlc ? exitOhlc.close : null,
       entryOhlc,
@@ -364,6 +392,21 @@ async function overlayNseOptionOhlc(mapped, rawTrade, book, deps = {}) {
       optionSymbol: deps.optionSession?._nse5mSymbol || weekly || monthly,
       source: 'nse-5m',
     });
+    const hold = barsInHold(
+      candles,
+      rawTrade.entryTime || mapped.entryHm,
+      rawTrade.exitTime || mapped.exitHm,
+      day,
+    );
+    for (const bar of hold) {
+      const fill = slLimitFill(marked.slTrigger, bar.low);
+      if (fill == null) continue;
+      marked.exitPrice = fill;
+      marked.optionExitPremium = fill;
+      marked.exitVia = 'sl-limit';
+      return applyLiveOptionRupees(marked);
+    }
+    return marked;
   } catch {
     return mapped;
   }
@@ -464,7 +507,7 @@ async function runSrDesk({ authorization, fromDate, toDate, capitalRs, capitalSo
         mapped.push(await overlayNseOptionOhlc(row, t, book, {
           ...deps,
           optionSession,
-          overlayOptionOhlc: deps.overlayOptionOhlc ?? (fromDate === toDate),
+          overlayOptionOhlc: deps.overlayOptionOhlc ?? (calendarSpanDays(fromDate, toDate) <= 14),
         }));
       }
       allTrades.push(...mapped);
@@ -535,7 +578,7 @@ async function runSrDesk({ authorization, fromDate, toDate, capitalRs, capitalSo
     books: booksOut,
     coreBooks: booksOut.filter((b) => b.id === 'nifty' || b.id === 'bank' || b.id === 'crude'),
     note:
-      'This desk trades only Nifty 50 and Bank Nifty (S/R wall-break, with-trend). No Crude, no stocks. Paper ₹ is index points × lot. Entry/exit prices are the NSE 5-minute option OHLC close when available, otherwise the modeled ATM weekly premium — never the index. SL ₹ is the option-premium stop Live rests on Kite (paper uses the same trigger). Day brake ±₹3,500. Live buys one ATM CE or PE. Crude stays off.',
+      'This desk trades only Nifty 50 and Bank Nifty (S/R wall-break, with-trend). No Crude, no stocks. Paper ₹ shadows Live: ATM CE/PE premium × lot (Nifty 65 / Bank 30), minus ₹20/lot. Signals still fire on the index (day brake ±₹3,500). In/Out are NSE 5-minute option OHLC when the range is ≤14 days, otherwise modeled weekly premium. SL ₹ is the option-premium stop Live rests on Kite. Live buys one ATM CE or PE. Crude stays off.',
     instruments: booksOut
       .filter((b) => b.id === 'nifty' || b.id === 'bank')
       .map((b) => instrumentRow({ id: b.id, name: b.label }, b.trades || [])),

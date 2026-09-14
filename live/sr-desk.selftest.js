@@ -87,8 +87,13 @@ assert.strictEqual(withSeconds.entryClock, '10:15:37 AM');
 assert.strictEqual(withSeconds.exitClock, '10:45:08 AM');
 assert.strictEqual(withSeconds.entryTime, '2026-09-11T10:15:37+0530');
 assert.strictEqual(withSeconds.exitTime, '2026-09-11T10:45:08+0530');
-assert.strictEqual(mapped.optionPnlRs, 1300);
-assert.strictEqual(mapped.netOptionPnlRs, 1280);
+assert.strictEqual(mapped.pnlSource, 'option_x_lot_live');
+assert.strictEqual(
+  mapped.optionPnlRs,
+  Math.round((mapped.optionExitPremium - mapped.optionEntryPremium) * 65),
+);
+assert.strictEqual(mapped.netOptionPnlRs, mapped.optionPnlRs - 20);
+assert.ok(mapped.optionPnlRs !== 1300, '20 index pts × 65 must not be the paper rupees');
 assert.ok(!/straddle/i.test(mapped.optionSymbol));
 assert.deepStrictEqual(Object.keys(BOOKS).sort(), ['banknifty', 'nifty']);
 assert.strictEqual(BOOKS.nifty.strikeStep, 50);
@@ -218,6 +223,37 @@ assert.strictEqual(nseMarked.entryOhlc.low, 512.55);
 assert.strictEqual(nseMarked.entryOhlc.close, 524);
 assert.strictEqual(nseMarked.exitPrice, 518.4);
 assert.ok(nseMarked.slTrigger > 0 && nseMarked.slTrigger < 524, `overlay must keep option SL below fill (${nseMarked.slTrigger})`);
+assert.strictEqual(nseMarked.pnlSource, 'option_x_lot_live');
+assert.strictEqual(nseMarked.optionPnlRs, Math.round((518.4 - 524) * 30));
+assert.strictEqual(nseMarked.netOptionPnlRs, nseMarked.optionPnlRs - 20);
+
+const juneStop = applyOptionOhlc(
+  mapTrade(
+    {
+      date: '2026-06-12',
+      option: 'CE',
+      entryTime: '13:20',
+      exitTime: '13:25',
+      exitReason: 'STOP',
+      entryPrice: 23350,
+      exitPrice: 23323,
+      points: -26.92,
+    },
+    BOOKS.nifty,
+    2,
+    130,
+  ),
+  {
+    entryClose: 155.05,
+    exitClose: 140.85,
+    optionSymbol: 'NIFTY26JUN23350CE',
+    source: 'nse-5m',
+  },
+);
+assert.strictEqual(juneStop.lots, 2);
+assert.strictEqual(juneStop.optionPnlRs, Math.round((140.85 - 155.05) * 65 * 2));
+assert.strictEqual(juneStop.netOptionPnlRs, juneStop.optionPnlRs - 40);
+assert.ok(juneStop.netOptionPnlRs !== -3540, 'must not print the index day-cap as option rupees');
 assert.strictEqual(
   nseWeeklyOptionSymbol('BANKNIFTY', bankPe.expiry, bankPe.optionStrike, 'PE'),
   'BANKNIFTY2691556100PE',
