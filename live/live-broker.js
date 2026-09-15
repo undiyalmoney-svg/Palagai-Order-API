@@ -153,6 +153,15 @@ class LiveBroker {
     this.optionMaxLossRsByInstrument = new Map();
     /** Realised option ₹ this Live session (premium × qty), not index points. */
     this.closedOptionRs = 0;
+    /** Prior legs so a new fill on the same book does not erase the stop from the table. */
+    this.closedLegs = [];
+  }
+
+  archiveFlatLeg(instrumentId) {
+    const cur = this.positions.get(instrumentId);
+    if (!cur || cur.status === 'open' || cur.status === 'exiting') return;
+    if (!(Number(cur.entryPremium) > 0) && !cur.tradingSymbol) return;
+    this.closedLegs.push({ ...cur, instrumentId: cur.instrumentId || instrumentId });
   }
 
   setMaxOpenLegs(n) {
@@ -422,6 +431,7 @@ class LiveBroker {
         current.closedBy = 'sl';
         current.closedEntryTime = current.entryTime;
         current.exitPremium = fillPx || null;
+        current.exitTime = new Date().toISOString();
         current.slOrderId = null;
         if (fillPx > 0) this.recordClosedOptionPnl(current, fillPx);
         this.positions.set(instrumentId, current);
@@ -486,12 +496,14 @@ class LiveBroker {
       await this.placeExit(authorization, current, instrumentName);
       // Only enter the new leg if the prior exit actually flattened.
       if (current.status === 'flat') {
+        this.archiveFlatLeg(instrumentId);
         await this.placeEntry(authorization, instrumentId, instrumentName, open);
       }
       return;
     }
 
     if (open && (!current || current.status === 'flat' || current.status === 'error')) {
+      if (current && current.status === 'flat') this.archiveFlatLeg(instrumentId);
       await this.placeEntry(authorization, instrumentId, instrumentName, open);
       return;
     }
@@ -991,6 +1003,7 @@ class LiveBroker {
     pos.slOrderId = null;
     pos.closedBy = 'exit';
     pos.closedEntryTime = pos.entryTime;
+    pos.exitTime = new Date().toISOString();
     if (fillPx > 0) this.recordClosedOptionPnl(pos, fillPx);
     this.pushEvent(
       'EXIT',

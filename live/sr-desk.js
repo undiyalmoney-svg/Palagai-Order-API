@@ -350,8 +350,9 @@ function applyOptionOhlc(mapped, pnl) {
 
 async function overlayNseOptionOhlc(mapped, rawTrade, book, deps = {}) {
   const injected = typeof deps.fetchOption5m === 'function';
-  const wantBars = deps.overlayOptionOhlc !== false;
-  if (!injected && (!wantBars || deps.candlesByKey)) return mapped;
+    const wantBars = deps.overlayOptionOhlc !== false;
+    if (!wantBars) return mapped;
+    if (!injected && deps.skipNseOverlay) return mapped;
   try {
     const nse = deps.nseIntraday || require('./nse-option-intraday');
     const { pickBarFlex, ohlcOf, fillBarEntryPx, walkOptionSl } = deps.optionPnl || require('./sr-option-pnl');

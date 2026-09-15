@@ -278,4 +278,61 @@ assert.strictEqual(summarizeOptionTrades([
   assert.strictEqual(rows[0].open, true);
 }
 
+{
+  const { LiveBroker } = require('./live-broker');
+  const broker = new LiveBroker({ pushEvent() {}, realOrders: false });
+  broker.setLots('nifty-50', 1);
+  broker.closedLegs = [{
+    instrumentId: 'nifty-50',
+    status: 'flat',
+    tradingSymbol: 'NIFTY2591525000CE',
+    entryTime: '2026-09-11T10:15:00+0530',
+    quantity: 65,
+    entryPremium: 159.55,
+    exitPremium: 121.1,
+    slTrigger: 121.1,
+    closedBy: 'sl',
+    direction: 'BUY',
+  }];
+  broker.positions.set('nifty-50', {
+    status: 'open',
+    tradingSymbol: 'NIFTY2591525050PE',
+    entryTime: '2026-09-11T11:20:00+0530',
+    quantity: 65,
+    entryPremium: 140,
+    slTrigger: 110,
+    slOrderId: 'SL2',
+    direction: 'BUY',
+  });
+  const rows = liveTradesFromBroker({ broker });
+  assert.strictEqual(rows.length, 2, 'closed SL must stay on the board after the next fill');
+  assert.strictEqual(rows[0].exitReason, 'sl');
+  assert.ok(rows[0].netOptionPnlRs < 0, 'stopped leg must show a live loss');
+  assert.strictEqual(rows[1].open, true);
+}
+
+{
+  const fs = require('fs');
+  const os = require('os');
+  const path = require('path');
+  const persist = require('./desk-live-persist');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'desk-live-'));
+  process.env.DESK_LIVE_DIR = dir;
+  persist.save('sr', 'tab-reopen', {
+    status: 'running',
+    message: 'S/R Live on',
+    events: [{ at: 't', action: 'SL', detail: 'Safety stop hit' }],
+    broker: {
+      closedOptionRs: -1950,
+      closedLegs: [{ instrumentId: 'nifty-50', status: 'flat', closedBy: 'sl' }],
+      positions: [['nifty-50', { status: 'flat', closedBy: 'sl', entryPremium: 150 }]],
+      lotsByInstrument: [],
+    },
+  });
+  const loaded = persist.load('sr', 'tab-reopen');
+  assert.strictEqual(loaded.status, 'running');
+  assert.strictEqual(loaded.events[0].action, 'SL');
+  assert.strictEqual(loaded.broker.closedLegs[0].closedBy, 'sl');
+}
+
 console.log('sr-live.selftest: ok');

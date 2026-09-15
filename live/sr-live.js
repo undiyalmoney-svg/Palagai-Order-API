@@ -6,6 +6,7 @@
  */
 const market = require('./kite-market');
 const store = require('./live.store');
+const persist = require('./desk-live-persist');
 const optionStore = require('./sr-option-store');
 const { archiveSrInstruments, instrumentsWithArchive } = require('./instrument-archive');
 const { connectMongo, getDb } = require('./live.mongo');
@@ -168,14 +169,56 @@ function getSession(userId) {
       tickTimer: null,
       tickBusy: false,
       broker: null,
+      hydrated: false,
     });
+    hydrateSrSession(sessions.get(id));
   }
   return sessions.get(id);
+}
+
+function persistSrSession(session) {
+  if (!session || !session.userId) return;
+  persist.scheduleSave('sr', session.userId, () => ({
+    status: session.status,
+    message: session.message,
+    events: session.events,
+    lastError: session.lastError,
+    lastPreflight: session.lastPreflight,
+    lastTickAt: session.lastTickAt,
+    config: session.config,
+    entered: [...(session.entered || [])],
+    openSignal: session.openSignal ? Object.fromEntries(session.openSignal) : {},
+    broker: persist.brokerSnapshot(session.broker),
+    savedAt: new Date().toISOString(),
+  }));
+}
+
+function hydrateSrSession(session) {
+  if (session.hydrated) return;
+  session.hydrated = true;
+  const snap = persist.load('sr', session.userId);
+  if (!snap) return;
+  session.status = snap.status === 'running' ? 'running' : (snap.status || 'stopped');
+  session.message = snap.message || session.message;
+  session.events = Array.isArray(snap.events) ? snap.events : [];
+  session.lastError = snap.lastError || null;
+  session.lastPreflight = snap.lastPreflight || null;
+  session.lastTickAt = snap.lastTickAt || null;
+  session.config = snap.config || null;
+  session.entered = new Set(snap.entered || []);
+  session.openSignal = new Map(Object.entries(snap.openSignal || {}));
+  session.broker = new LiveBroker({
+    pushEvent: (a, d) => pushEvent(session, a, d),
+    realOrders: true,
+  });
+  persist.restoreBroker(session.broker, snap.broker);
+  if (session.status === 'running') startTick(session);
 }
 
 function pushEvent(session, action, detail) {
   session.events.push({ at: new Date().toISOString(), action, detail: String(detail || '') });
   if (session.events.length > 200) session.events.splice(0, session.events.length - 200);
+  persistSrSession(session);
 }
 
 function bookNameFor(instrumentId) {
@@ -190,6 +233,51 @@ function optionKindOfSymbol(sym) {
   return '';
 }
 
+function liveTradeRow(session, instrumentId, p, pnlById) {
+  const broker = session?.broker;
+  const open = p.status === 'open' || p.status === 'exiting';
+  const slTrigger = Number(p.slTrigger) > 0 ? Number(p.slTrigger) : null;
+  const slOn = !!(p.slOrderId && open);
+  const kind = optionKindOfSymbol(p.tradingSymbol);
+  const pnl = pnlById?.get(instrumentId) || null;
+  const qty = Number(p.quantity) || 0;
+  const entry = Number(p.entryPremium) || 0;
+  const exitPx = Number(p.exitPremium) || 0;
+  let pnlRs = pnl?.pnlRs;
+  if (pnlRs == null && !open && entry > 0 && exitPx > 0 && qty > 0) {
+    const signed = p.direction === 'SELL' ? (entry - exitPx) * qty : (exitPx - entry) * qty;
+    pnlRs = Math.round(signed);
+  }
+  const lots = typeof broker?.lotsFor === 'function' ? broker.lotsFor(instrumentId) : 1;
+  return {
+    instrumentName: bookNameFor(instrumentId),
+    instrumentId,
+    selectedInstrument: p.tradingSymbol || null,
+    optionSymbol: p.tradingSymbol || null,
+    side: p.direction || 'BUY',
+    sideLabel: kind ? `${kind} BUY` : (p.direction || 'BUY'),
+    direction: kind || p.direction || 'BUY',
+    entryTime: p.entryTime || null,
+    exitTime: open ? null : (p.exitTime || null),
+    entryPrice: entry > 0 ? entry : null,
+    optionEntryPremium: entry > 0 ? entry : null,
+    exitPrice: open
+      ? (Number(p.lastLtp) > 0 ? Number(p.lastLtp) : null)
+      : (exitPx > 0 ? exitPx : null),
+    optionExitPremium: exitPx > 0 ? exitPx : null,
+    slTrigger,
+    slPrice: slTrigger,
+    slOn,
+    slOrderId: p.slOrderId || null,
+    lots,
+    quantity: p.quantity || null,
+    netOptionPnlRs: pnlRs != null ? pnlRs : null,
+    optionPnlRs: pnlRs != null ? pnlRs : null,
+    open,
+    exitReason: open ? (slOn ? 'OPEN' : 'OPEN · SL missing') : (p.closedBy || p.status || 'flat'),
+  };
+}
+
 /** Same shape as paper desk trades so Trade Bot can reuse the result table. */
 function liveTradesFromBroker(session) {
   const broker = session?.broker;
@@ -199,41 +287,19 @@ function liveTradesFromBroker(session) {
     : { legs: [] };
   const pnlById = new Map((snap.legs || []).map((leg) => [leg.instrumentId, leg]));
   const rows = [];
+  const seen = new Set();
+  const add = (instrumentId, p) => {
+    if (!p || p.status === 'error') return;
+    const key = `${instrumentId}|${p.entryTime || ''}|${p.tradingSymbol || ''}|${p.closedBy || p.status || ''}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    rows.push(liveTradeRow(session, instrumentId, p, pnlById));
+  };
+  for (const p of broker.closedLegs || []) {
+    add(p.instrumentId, p);
+  }
   for (const [instrumentId, p] of broker.positions.entries()) {
-    if (!p || p.status === 'error') continue;
-    const open = p.status === 'open' || p.status === 'exiting';
-    const slTrigger = Number(p.slTrigger) > 0 ? Number(p.slTrigger) : null;
-    const slOn = !!(p.slOrderId && open);
-    const kind = optionKindOfSymbol(p.tradingSymbol);
-    const pnl = pnlById.get(instrumentId);
-    const lots = typeof broker.lotsFor === 'function' ? broker.lotsFor(instrumentId) : 1;
-    rows.push({
-      instrumentName: bookNameFor(instrumentId),
-      instrumentId,
-      selectedInstrument: p.tradingSymbol || null,
-      optionSymbol: p.tradingSymbol || null,
-      side: p.direction || 'BUY',
-      sideLabel: kind ? `${kind} BUY` : (p.direction || 'BUY'),
-      direction: kind || p.direction || 'BUY',
-      entryTime: p.entryTime || null,
-      exitTime: open ? null : (p.exitTime || null),
-      entryPrice: Number(p.entryPremium) > 0 ? Number(p.entryPremium) : null,
-      optionEntryPremium: Number(p.entryPremium) > 0 ? Number(p.entryPremium) : null,
-      exitPrice: open
-        ? (Number(p.lastLtp) > 0 ? Number(p.lastLtp) : null)
-        : (Number(p.exitPremium) > 0 ? Number(p.exitPremium) : null),
-      optionExitPremium: Number(p.exitPremium) > 0 ? Number(p.exitPremium) : null,
-      slTrigger,
-      slPrice: slTrigger,
-      slOn,
-      slOrderId: p.slOrderId || null,
-      lots,
-      quantity: p.quantity || null,
-      netOptionPnlRs: pnl?.pnlRs != null ? pnl.pnlRs : null,
-      optionPnlRs: pnl?.pnlRs != null ? pnl.pnlRs : null,
-      open,
-      exitReason: open ? (slOn ? 'OPEN' : 'OPEN · SL missing') : (p.closedBy || p.status || 'flat'),
-    });
+    add(instrumentId, p);
   }
   return rows;
 }
@@ -274,6 +340,7 @@ function statusPayload(session) {
       ? session.broker.moneySnapshot()
       : { closedRs: 0, openRs: 0, netRs: 0, legs: [] },
     events: session.events.slice(-80),
+    liveMoney: session.status === 'running',
   };
 }
 
@@ -364,6 +431,7 @@ async function start(userId, body = {}) {
     pushEvent(session, 'ERROR', `reconcile: ${e.message}`);
   }
   startTick(session);
+  persistSrSession(session);
   return statusPayload(session);
 }
 
@@ -376,6 +444,7 @@ async function stop(userId) {
     session.tickTimer = null;
   }
   pushEvent(session, 'STOP', session.message);
+  persistSrSession(session);
   return statusPayload(session);
 }
 
@@ -847,6 +916,7 @@ async function onTick(session) {
     }
     session.lastTickAt = new Date().toISOString();
     session.lastError = null;
+    persistSrSession(session);
   } finally {
     session.tickBusy = false;
   }

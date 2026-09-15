@@ -14,7 +14,7 @@ npm-debug.log*
 *.tmp
 
 # Research datasets (3.2GB market data). Local only - never commit.
-research-data/
+data/desk-live/
 
 # local Claude Code config
 .claude/

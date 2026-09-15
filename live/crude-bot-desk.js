@@ -15,6 +15,7 @@
  */
 const defaultMarket = require('./kite-market');
 const store = require('./live.store');
+const persist = require('./desk-live-persist');
 const { crudeLotsFromAvailableFunds } = require('./daily-desk-defaults');
 const { resolveDeskCapital } = require('./sr-desk');
 const { LiveBroker } = require('./live-broker');
@@ -603,6 +604,8 @@ async function overlayOptionPrices(trades, raw, {
     const hit = walkOptionSl(candles, t.entryTime, t.exitTime, t.date, slTrigger, entryBar);
     if (hit) {
       exitPrem = hit.fill;
+      row.exitReason = 'SL';
+      row.exitVia = hit.isFillBar ? 'sl-limit-fill-close' : 'sl-limit';
     }
     return applyOptionPnl(row, {
       optionSymbol: pick.tradingSymbol,
@@ -793,14 +796,56 @@ function getSession(userId) {
       enteredKeys: new Set(),
       lots: 1,
       trades: [],
+      hydrated: false,
     });
+    hydrateCrudeSession(sessions.get(id));
   }
   return sessions.get(id);
+}
+
+function persistCrudeSession(session) {
+  if (!session || !session.userId) return;
+  persist.scheduleSave('crude', session.userId, () => ({
+    status: session.status,
+    message: session.message,
+    events: session.events,
+    lastError: session.lastError,
+    lastPreflight: session.lastPreflight,
+    lots: session.lots,
+    trades: session.trades,
+    fut: session.fut,
+    enteredKeys: [...(session.enteredKeys || [])],
+    broker: persist.brokerSnapshot(session.broker),
+    savedAt: new Date().toISOString(),
+  }));
+}
+
+function hydrateCrudeSession(session) {
+  if (session.hydrated) return;
+  session.hydrated = true;
+  const snap = persist.load('crude', session.userId);
+  if (!snap) return;
+  session.status = snap.status === 'running' ? 'running' : (snap.status || 'stopped');
+  session.message = snap.message || session.message;
+  session.events = Array.isArray(snap.events) ? snap.events : [];
+  session.lastError = snap.lastError || null;
+  session.lastPreflight = snap.lastPreflight || null;
+  session.lots = Math.max(1, Number(snap.lots) || 1);
+  session.trades = Array.isArray(snap.trades) ? snap.trades : [];
+  session.fut = snap.fut || null;
+  session.enteredKeys = new Set(snap.enteredKeys || []);
+  session.broker = new LiveBroker({
+    pushEvent: (a, d) => pushEvent(session, a, d),
+    realOrders: true,
+  });
+  persist.restoreBroker(session.broker, snap.broker);
+  if (session.status === 'running') startTick(session);
 }
 
 function pushEvent(session, action, detail) {
   session.events.push({ at: new Date().toISOString(), action, detail: String(detail || '') });
   if (session.events.length > 200) session.events.splice(0, session.events.length - 200);
+  persistCrudeSession(session);
 }
 
 function statusPayload(session) {
@@ -852,6 +897,7 @@ async function startLive(userId, { authorization, lots, liveAssistant }) {
   session.broker.setOptionMaxLossRs(BOOK_ID, (OPTION_SL_MAX_RS.crude || 0) * session.lots);
   pushEvent(session, 'START', session.message);
   startTick(session);
+  persistCrudeSession(session);
   return statusPayload(session);
 }
 
@@ -864,6 +910,7 @@ async function stop(userId) {
     session.tickTimer = null;
   }
   pushEvent(session, 'STOP', session.message);
+  persistCrudeSession(session);
   return statusPayload(session);
 }
 
