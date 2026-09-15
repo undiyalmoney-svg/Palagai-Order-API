@@ -18,7 +18,9 @@ const { approveLiveStart, approveLiveEntry } = require('./engine/risk');
 const { confirmDirection, selectTradeExpiry, liveTransactionType } = require('./engine/pipeline');
 const { NIFTY_50_INSTRUMENT, BANK_NIFTY_INSTRUMENT, CRUDE_OIL_MINI_INSTRUMENT } = require('./strategy-core.cjs');
 
-const TICK_MS = Number(process.env.SR_LIVE_INTERVAL_MS || 60_000);
+const TICK_MS = Number(process.env.SR_LIVE_INTERVAL_MS || 15_000);
+const TICK_STUCK_MS = Number(process.env.SR_LIVE_TICK_STUCK_MS || 25_000);
+const HISTORY_TIMEOUT_MS = Number(process.env.SR_LIVE_HISTORY_MS || 20_000);
 const FRESH_MINUTES = 20;
 
 const SPEC = {
@@ -452,13 +454,28 @@ function startTick(session) {
   if (session.tickTimer) return;
   const run = () => {
     if (session.status !== 'running') return;
+    const started = Number(session.tickStartedAt) || 0;
+    if (session.tickBusy && started && Date.now() - started > TICK_STUCK_MS) {
+      session.tickBusy = false;
+      session.lastError = 'Live tick stuck on Kite history — retrying';
+      pushEvent(session, 'ERROR', session.lastError);
+    }
     void onTick(session).catch((err) => {
+      session.tickBusy = false;
       session.lastError = String(err.message || err);
       pushEvent(session, 'ERROR', session.lastError);
     });
   };
   run();
   session.tickTimer = setInterval(run, TICK_MS);
+}
+
+function withTimeout(promise, ms, label) {
+  let t;
+  const timeout = new Promise((_, reject) => {
+    t = setTimeout(() => reject(new Error(`${label} timeout ${ms}ms`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(t));
 }
 
 function parseMcxCsv(csv) {
@@ -770,6 +787,7 @@ async function pickFreshLiveEntry(session, authorization, spec, key, trades, hm,
 async function onTick(session) {
   if (session.tickBusy) return;
   session.tickBusy = true;
+  session.tickStartedAt = Date.now();
   try {
     const authorization = await store.getAuthorizationFor(session.userId);
     if (!authorization) {
@@ -779,6 +797,7 @@ async function onTick(session) {
     const today = todayIso();
     const hm = nowHm();
     const cfg = session.config;
+    const watchBits = [];
 
     for (const key of cfg.instruments) {
       const spec = SPEC[key];
@@ -795,7 +814,11 @@ async function onTick(session) {
           token = fut.token;
         }
         if (!token) throw new Error('missing instrument token');
-        const candles = await market.fetchHistorical5m(authorization, token, warmupFrom, today);
+        const candles = await withTimeout(
+          market.fetchHistorical5m(authorization, token, warmupFrom, today),
+          HISTORY_TIMEOUT_MS,
+          `${spec.name} 5m`,
+        );
         const entryPts = cfg.entryPts != null ? cfg.entryPts : spec.entryPts;
         const perPoint = spec.unitsPerLot * lots;
         const dayLossStop = cfg.dayLossStopRs > 0 ? cfg.dayLossStopRs / perPoint : 0;
@@ -809,6 +832,12 @@ async function onTick(session) {
           // kept for the Paper/Live equality self-test.
           ...exitOptsFor(key, lots),
         });
+        const last = trades[trades.length - 1];
+        watchBits.push(
+          last
+            ? `${spec.name} ${trades.length} · ${last.entryTime} ${last.option || last.side} ${last.exitReason}`
+            : `${spec.name} 0 setups`,
+        );
 
         const bookId = spec.bookId;
         const current = session.broker.positions.get(bookId);
@@ -911,9 +940,16 @@ async function onTick(session) {
           }
         }
       } catch (e) {
+        watchBits.push(`${spec.name} error`);
         pushEvent(session, 'ERROR', `${spec.name}: ${e.message}`);
       }
     }
+    const watch = `${hm} ${watchBits.join(' · ') || 'no books'}`;
+    if (session.lastWatch !== watch) {
+      pushEvent(session, 'WATCH', watch);
+      session.lastWatch = watch;
+    }
+    session.message = `S/R Live · ${watch}`;
     session.lastTickAt = new Date().toISOString();
     session.lastError = null;
     persistSrSession(session);

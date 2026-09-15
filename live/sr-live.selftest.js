@@ -14,7 +14,7 @@ const n = SPEC.nifty.opts;
 assert.ok(n.maxRetestBars > 0, 'Nifty must have the entry meter');
 assert.ok(n.lockAtPts >= 12, 'Nifty lock must clear option charges, not +5 index pts');
 assert.ok(n.lockArmPts > n.lockAtPts, 'lock must arm above the level it exits at');
-assert.ok(n.minScore >= 2, 'Nifty skips score-1 noise that does not pay CE/PE');
+assert.ok(n.minScore >= 1, 'Nifty still scores setups; score-1 with-trend retests are taken');
 assert.strictEqual(OPTION_SL_MAX_RS.nifty, 5000);
 assert.strictEqual(OPTION_SL_MAX_RS.banknifty, 0, 'Bank keeps no rupee option cap');
 assert.ok(SPEC.banknifty.opts.lockAtPts >= 12, 'Bank lock-at-5 cannot pay the option');

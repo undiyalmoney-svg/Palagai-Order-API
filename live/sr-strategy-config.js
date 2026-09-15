@@ -108,7 +108,7 @@ const EXIT_RULES = Object.freeze({
     // ≈ ₹133 before charges; last week TARGET/LOCK in pts, net −₹3k option).
     // Arm at the 20-pt target, lock 12 pts (~₹320 option) so a lock can pay.
     lockArmPts: 20, lockAtPts: 12, giveUpBar: 2, giveUpMinPts: 8,
-    minScore: 2,
+    minScore: 1,
     capStopToDayBudget: true,
     // FAIL-STOP (close back through the broken 15m wall). Invalidation, not a
     // rupee cut. Bank failStop stays off. Kite 5m 2026-06-01→09-14:

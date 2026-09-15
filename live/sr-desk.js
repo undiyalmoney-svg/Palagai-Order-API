@@ -329,6 +329,28 @@ function mapTrade(t, book, lots, perPoint, vol) {
   return applyLiveOptionRupees(attachProtectiveSl(row, book));
 }
 
+function markLiveParity(row, raw, book, fromDate, toDate) {
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
+  if (fromDate !== today || toDate !== today) {
+    row.liveWouldTake = true;
+    return row;
+  }
+  const { decideLiveAction } = require('./sr-live');
+  const hm = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false,
+  }).format(new Date());
+  const act = decideLiveAction({
+    trade: raw,
+    nowHm: hm,
+    alreadyOpen: false,
+    squareOffHm: book.session.squareOffHm,
+  });
+  row.liveWouldTake = act === 'enter' || act === 'hold';
+  if (act === 'skip') row.skipReason = 'Live would skip — signal older than 20 minutes';
+  if (act === 'wait') row.skipReason = 'Live waiting for entry time';
+  return row;
+}
+
 /** Desk fill = NSE charting 5m option close (and full OHLC). BS is fallback only. */
 function applyOptionOhlc(mapped, pnl) {
   const close = Number(pnl?.entryClose);
@@ -505,7 +527,7 @@ async function runSrDesk({ authorization, fromDate, toDate, capitalRs, capitalSo
       const optionSession = deps.optionSession || {};
       const mapped = [];
       for (const t of trades || []) {
-        const row = mapTrade(t, book, L, perPoint, iv);
+        const row = markLiveParity(mapTrade(t, book, L, perPoint, iv), t, book, fromDate, toDate);
         mapped.push(await overlayNseOptionOhlc(row, t, book, {
           ...deps,
           optionSession,
