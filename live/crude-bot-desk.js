@@ -31,8 +31,8 @@ const {
   ohlcOf,
   liveLikeEntryPrem,
   liveLikeExitPrem,
-  barsInHold,
-  slLimitFill,
+  walkOptionSl,
+  fillBarEntryPx,
   lastBarOnDay,
 } = require('./sr-option-pnl');
 const optionStore = require('./sr-option-store');
@@ -583,7 +583,11 @@ async function overlayOptionPrices(trades, raw, {
     const exitBar = pickBarFlex(candles, t.exitTime, t.date) || lastBarOnDay(candles, t.date);
     const entryOhlc = ohlcOf(entryBar);
     const exitOhlc = ohlcOf(exitBar);
-    const entryPrem = liveLikeEntryPrem(entryBar, 0.5);
+    const fillPx = fillBarEntryPx(entryBar);
+    const entryPrem = liveLikeEntryPrem(
+      fillPx != null ? { close: fillPx, high: entryBar && entryBar.high } : entryBar,
+      0.5,
+    );
     let exitPrem = liveLikeExitPrem(exitBar, 0.5);
     const lotsN = Math.max(1, Number(lots) || 1);
     const indexRisk = Math.abs(Number(t.entryPrice) - (Number(t.entryPrice) - (Number(engineOpts(lots).stopPts) || 0)));
@@ -596,12 +600,9 @@ async function overlayOptionPrices(trades, raw, {
       maxLossRs: (OPTION_SL_MAX_RS.crude || 0) * lotsN,
       lotUnits: (LOT_UNITS.crude || 10) * lotsN,
     });
-    for (const bar of barsInHold(candles, t.entryTime, t.exitTime, t.date, { afterFill: true })) {
-      const fill = slLimitFill(slTrigger, Number(bar.low) || Number(bar.close) || 0);
-      if (fill != null) {
-        exitPrem = fill;
-        break;
-      }
+    const hit = walkOptionSl(candles, t.entryTime, t.exitTime, t.date, slTrigger, entryBar);
+    if (hit) {
+      exitPrem = hit.fill;
     }
     return applyOptionPnl(row, {
       optionSymbol: pick.tradingSymbol,

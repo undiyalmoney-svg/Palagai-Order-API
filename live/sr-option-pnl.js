@@ -93,6 +93,13 @@ function ohlcOf(bar) {
   };
 }
 
+/** In on a dump 5m bar is the body high (open), not the stopped close. */
+function fillBarEntryPx(bar) {
+  const o = ohlcOf(bar);
+  if (!o) return null;
+  return tickPrem(Math.max(o.open, o.close));
+}
+
 function pickBar(candles, hm) {
   const want = clockOf(hm);
   if (!Array.isArray(candles) || !want) return null;
@@ -146,6 +153,31 @@ function slLimitFill(trigger, barLow) {
   if (!(trig > 0) || !(low > 0) || low > trig + 1e-9) return null;
   const limit = tickPrem(Math.max(TICK, trig * 0.9));
   return tickPrem(Math.min(trig, Math.max(low, limit)));
+}
+
+/**
+ * Live rests SL-M after fill. Paper:
+ * fill bar — close vs SL only (pre-fill wick is ignored)
+ * later bars — low vs SL (stop can fill on a wick after the order is live)
+ */
+function slWalkPx(bar, slTrigger, isFillBar) {
+  if (!bar || !(Number(slTrigger) > 0)) return null;
+  const probe = isFillBar
+    ? (Number(bar.close) || 0)
+    : (Number(bar.low) || Number(bar.close) || 0);
+  return slLimitFill(slTrigger, probe);
+}
+
+function walkOptionSl(candles, entryHm, exitHm, day, slTrigger, fillBar) {
+  const rest = barsInHold(candles, entryHm, exitHm, day, { afterFill: true });
+  const walk = [];
+  if (fillBar) walk.push({ bar: fillBar, isFillBar: true });
+  for (const bar of rest) walk.push({ bar, isFillBar: false });
+  for (const { bar, isFillBar } of walk) {
+    const fill = slWalkPx(bar, slTrigger, isFillBar);
+    if (fill != null) return { fill, isFillBar };
+  }
+  return null;
 }
 
 function optionRupees(entryPrem, exitPrem, lotSize, lots = 1) {
@@ -237,7 +269,11 @@ async function optionPnlForTrade({ authorization, spec, trade, lots, session, pi
   const entryOhlc = ohlcOf(entryBar);
   const exitOhlc = ohlcOf(exitBar);
   const friction = liveFriction();
-  const entryPrem = liveLikeEntryPrem(entryBar, friction);
+  const entryPrint = fillBarEntryPx(entryBar);
+  const entryPrem = liveLikeEntryPrem(
+    entryPrint != null ? { close: entryPrint, high: entryBar && entryBar.high } : entryBar,
+    friction,
+  );
   let exitPrem = liveLikeExitPrem(exitBar, friction);
   let exitVia = 'bid';
   const lotSize = Math.max(1, Number(pick.lotSize) || spec.unitsPerLot || 1);
@@ -253,14 +289,10 @@ async function optionPnlForTrade({ authorization, spec, trade, lots, session, pi
       maxLossRs: (OPTION_SL_MAX_RS[spec.key] || 0) * Math.max(1, Number(lots) || 1),
     lotUnits: qty,
   });
-  for (const bar of barsInHold(candles, trade.entryTime, trade.exitTime, day, { afterFill: true })) {
-    const low = Number(bar.low) || Number(bar.close) || 0;
-    const fill = slLimitFill(slTrigger, low);
-    if (fill != null) {
-      exitPrem = fill;
-      exitVia = 'sl-limit';
-      break;
-    }
+  const hit = walkOptionSl(candles, trade.entryTime, trade.exitTime, day, slTrigger, entryBar);
+  if (hit) {
+    exitPrem = hit.fill;
+    exitVia = hit.isFillBar ? 'sl-limit-fill-close' : 'sl-limit';
   }
 
   const gross = optionRupees(entryPrem, exitPrem, lotSize, lots);
@@ -342,5 +374,5 @@ function summarizeOptionTrades(trades) {
 
 module.exports = {
   optionRupees, pickBar, pickBarFlex, ohlcOf, optionPnlForTrade, summarizeOptionTrades, summarizeSidecar, hmOf,
-  liveLikeEntryPrem, liveLikeExitPrem, slLimitFill, markOneOpenLeg, barsInHold, lastBarOnDay,
+  liveLikeEntryPrem, liveLikeExitPrem, slLimitFill, slWalkPx, walkOptionSl, fillBarEntryPx, markOneOpenLeg, barsInHold, lastBarOnDay,
 };

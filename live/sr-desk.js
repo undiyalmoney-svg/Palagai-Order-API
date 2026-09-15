@@ -11,8 +11,7 @@ const { runSrBreakout } = require('./sr-breakout');
 const { computeProtectiveSlTrigger } = require('./strategy-core.cjs');
 const {
   optionRupees,
-  slLimitFill,
-  barsInHold,
+  walkOptionSl,
   liveLikeEntryPrem,
   liveLikeExitPrem,
 } = require('./sr-option-pnl');
@@ -355,7 +354,7 @@ async function overlayNseOptionOhlc(mapped, rawTrade, book, deps = {}) {
   if (!injected && (!wantBars || deps.candlesByKey)) return mapped;
   try {
     const nse = deps.nseIntraday || require('./nse-option-intraday');
-    const { pickBarFlex, ohlcOf } = deps.optionPnl || require('./sr-option-pnl');
+    const { pickBarFlex, ohlcOf, fillBarEntryPx, walkOptionSl } = deps.optionPnl || require('./sr-option-pnl');
     const root = nse.optionRootForBook(book);
     const weekly = nse.nseWeeklyOptionSymbol(
       root,
@@ -384,27 +383,28 @@ async function overlayNseOptionOhlc(mapped, rawTrade, book, deps = {}) {
     const entryOhlc = ohlcOf(entryBar);
     const exitOhlc = ohlcOf(exitBar);
     if (!entryOhlc) return mapped;
+    const entryPrint = fillBarEntryPx(entryBar) || entryOhlc.close;
     const marked = applyOptionOhlc(mapped, {
-      entryClose: entryOhlc.close,
+      entryClose: entryPrint,
       exitClose: exitOhlc ? exitOhlc.close : null,
       entryOhlc,
       exitOhlc,
       optionSymbol: deps.optionSession?._nse5mSymbol || weekly || monthly,
       source: 'nse-5m',
     });
-    const hold = barsInHold(
+    const hit = walkOptionSl(
       candles,
       rawTrade.entryTime || mapped.entryHm,
       rawTrade.exitTime || mapped.exitHm,
       day,
-      { afterFill: true },
+      marked.slTrigger,
+      entryBar,
     );
-    for (const bar of hold) {
-      const fill = slLimitFill(marked.slTrigger, bar.low);
-      if (fill == null) continue;
-      marked.exitPrice = fill;
-      marked.optionExitPremium = fill;
-      marked.exitVia = 'sl-limit';
+    if (hit) {
+      marked.exitPrice = hit.fill;
+      marked.optionExitPremium = hit.fill;
+      marked.exitVia = hit.isFillBar ? 'sl-limit-fill-close' : 'sl-limit';
+      marked.exitReason = 'SL';
       return applyLiveOptionRupees(marked);
     }
     return marked;

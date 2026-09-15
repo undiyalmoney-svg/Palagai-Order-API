@@ -225,6 +225,21 @@ assert.strictEqual(slLimitFill(100, 95), 95, 'SL fills at the low when low is ab
 assert.strictEqual(slLimitFill(100, 50), 90, 'gapped SL fills at the 90% limit, not the panic low');
 assert.strictEqual(slLimitFill(100, 101), null, 'SL does not fire above the trigger');
 {
+  const { slWalkPx, walkOptionSl, fillBarEntryPx } = require('./sr-option-pnl');
+  const fillBar = { date: '2026-09-11T10:00:00+0530', open: 100, high: 102, low: 80, close: 101 };
+  const closeStop = { date: '2026-09-11T10:00:00+0530', open: 100, high: 102, low: 80, close: 90 };
+  const dumpBar = { date: '2026-09-11T10:00:00+0530', open: 923.4, high: 930, low: 800, close: 850 };
+  const later = { date: '2026-09-11T10:05:00+0530', open: 101, high: 102, low: 88, close: 99 };
+  assert.strictEqual(fillBarEntryPx(dumpBar), 923.4, 'dump bar In is the open, not the stopped close');
+  assert.strictEqual(slWalkPx(fillBar, 95, true), null, 'fill-bar wick does not fire SL');
+  assert.strictEqual(slWalkPx(closeStop, 95, true), 90, 'fill-bar close through SL does fire');
+  assert.strictEqual(slWalkPx(later, 95, false), 88, 'later bar low fires SL');
+  const wickOnly = walkOptionSl([fillBar, later], '10:00', '10:10', '2026-09-11', 95, fillBar);
+  assert.ok(wickOnly && wickOnly.fill === 88 && wickOnly.isFillBar === false);
+  const closeHit = walkOptionSl([closeStop, later], '10:00', '10:10', '2026-09-11', 95, closeStop);
+  assert.ok(closeHit && closeHit.isFillBar === true && closeHit.fill === 90);
+}
+{
   const seq = markOneOpenLeg([
     { date: '2026-09-08', entryTime: '11:50', exitTime: '12:00' },
     { date: '2026-09-08', entryTime: '12:10', exitTime: '12:20' },

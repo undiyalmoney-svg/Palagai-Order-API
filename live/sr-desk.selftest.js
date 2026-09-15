@@ -313,7 +313,63 @@ Promise.resolve()
     assert.notStrictEqual(row.exitVia, 'sl-limit');
     assert.strictEqual(row.netOptionPnlRs, Math.round((971.15 - 923.4) * 30) - 20);
     assert.ok(row.netOptionPnlRs > 0, 'TARGET must not book the fill-bar wick as SL');
+    const fillCloseStop = {
+      date: '2026-09-11T10:00:00+0530',
+      open: 923.4,
+      high: 930,
+      low: 800,
+      close: 850,
+    };
     return overlayNseOptionOhlc(
+      { ...bankTarget },
+      {
+        date: '2026-09-11',
+        option: 'CE',
+        entryTime: '10:00',
+        exitTime: '10:05',
+        entryPrice: 52000,
+        exitPrice: 52020,
+        points: 20,
+      },
+      BOOKS.banknifty,
+      {
+        candlesByKey: { nifty: [], banknifty: [] },
+        fetchOption5m: async () => [fillCloseStop, targetBar],
+      },
+    ).then((stopped) => {
+      assert.strictEqual(stopped.exitReason, 'SL');
+      assert.strictEqual(stopped.exitVia, 'sl-limit-fill-close');
+      assert.strictEqual(stopped.entryPrice, 923.4);
+      assert.ok(stopped.netOptionPnlRs < 0, 'Live SL-M after fill books a loss when the fill bar closes through SL');
+      assert.ok(stopped.exitPrice < stopped.entryPrice);
+      return overlayNseOptionOhlc(
+        { ...bankTarget },
+        {
+          date: '2026-09-11',
+          option: 'CE',
+          entryTime: '10:00',
+          exitTime: '10:05',
+          entryPrice: 52000,
+          exitPrice: 52020,
+          points: 20,
+        },
+        BOOKS.banknifty,
+        {
+          candlesByKey: { nifty: [], banknifty: [] },
+          fetchOption5m: async () => [fillWick, {
+            date: '2026-09-11T10:05:00+0530',
+            open: 920,
+            high: 922,
+            low: 800,
+            close: 810,
+          }],
+        },
+      );
+    }).then((laterStop) => {
+      assert.strictEqual(laterStop.exitReason, 'SL');
+      assert.strictEqual(laterStop.exitVia, 'sl-limit');
+      assert.ok(laterStop.netOptionPnlRs < 0, 'bars after fill still stop on the low, same as Live SL-M');
+      return overlayNseOptionOhlc(
     { ...bankPe },
     {
       date: '2026-09-11',
@@ -335,6 +391,7 @@ Promise.resolve()
       },
     },
     );
+    });
   })
   .then((row) => {
     assert.strictEqual(row.entryPrice, 524);
