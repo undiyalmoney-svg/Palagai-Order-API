@@ -6,13 +6,21 @@ const assert = require('assert');
 const { runSrBreakout } = require('./sr-breakout');
 const { structureOf, compactSessionBars, chartPayload } = require('./sr-structure');
 const { exitOptsFor, MAX_TRADES_PER_DAY, STRATEGY_VERSION } = require('./sr-strategy-config');
-const { SPEC, FRESH_MINUTES, mergeStructureOntoLiveTrades } = require('./sr-live');
+const { SPEC, decideLiveAction, mergeStructureOntoLiveTrades } = require('./sr-live');
 const { BOOKS, mapTrade } = require('./sr-desk');
 
 assert.strictEqual(STRATEGY_VERSION, 'sr-breakout.2026-09-15.6');
 assert.strictEqual(MAX_TRADES_PER_DAY, 2);
-assert.strictEqual(FRESH_MINUTES, 20);
 assert.deepStrictEqual(SPEC.nifty.opts, exitOptsFor('nifty'), 'Live Nifty opts === Paper exitOptsFor');
+assert.deepStrictEqual(SPEC.crude.opts, exitOptsFor('crude'), 'Live Crude opts === Paper exitOptsFor');
+assert.strictEqual(
+  decideLiveAction({
+    trade: { date: '2026-09-15', entryTime: '10:15', exitTime: '11:00', exitReason: 'CLOSE' },
+    nowHm: '11:00', alreadyOpen: false, squareOffHm: '15:15',
+  }),
+  'enter',
+  'Live must join an OPEN engine trade 45 min after fill',
+);
 assert.deepStrictEqual(SPEC.banknifty.opts, exitOptsFor('banknifty'), 'Live Bank opts === Paper exitOptsFor');
 assert.strictEqual(SPEC.nifty.opts.timeStopBars, exitOptsFor('nifty').timeStopBars);
 assert.strictEqual(SPEC.nifty.session.squareOffHm, BOOKS.nifty.session.squareOffHm);

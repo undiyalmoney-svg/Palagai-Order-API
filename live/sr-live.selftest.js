@@ -69,11 +69,11 @@ assert.strictEqual(hmToMin('10:15'), 615);
 
 assert.strictEqual(decideLiveAction({
   trade, nowHm: '10:20', alreadyOpen: false, squareOffHm: '15:15',
-}), 'enter', 'fresh signal within 20 min must enter');
+}), 'enter', 'engine still OPEN — Live enters (same as Paper)');
 
 assert.strictEqual(decideLiveAction({
   trade, nowHm: '11:00', alreadyOpen: false, squareOffHm: '15:15',
-}), 'skip', 'stale signal must not enter');
+}), 'enter', 'OPEN engine trade 45 min after fill — Live must still enter');
 
 assert.strictEqual(decideLiveAction({
   trade, nowHm: '10:10', alreadyOpen: false, squareOffHm: '15:15',
@@ -82,15 +82,14 @@ assert.strictEqual(decideLiveAction({
 assert.strictEqual(decideLiveAction({
   trade: { ...trade, exitReason: 'TARGET', exitTime: '10:18' },
   nowHm: '10:20', alreadyOpen: false, squareOffHm: '15:15',
-}), 'enter', 'fresh entry must still hit Kite even if the next 5m bar already TARGET-wicked');
-// 9 Sep 2026: Paper 11:50 SELL TARGET at 11:55 (+20 wick). Live was on from 11:22 and sent nothing.
+}), 'skip', 'Paper already TARGET — Live stays flat, does not chase');
 assert.strictEqual(decideLiveAction({
   trade: {
     ...trade, side: 'SELL', option: 'PE', entryTime: '11:50', exitTime: '11:55',
     exitReason: 'TARGET', entryPrice: 23512.6, points: 20,
   },
   nowHm: '11:56', alreadyOpen: false, squareOffHm: '15:15',
-}), 'enter', '9 Sep 11:50 Nifty SELL must enter at 11:56 even after Paper TARGET');
+}), 'skip', 'Paper already TARGET — Live does not buy a finished trade');
 
 // Live today: only candles up to "now" exist, so an unfinished trade is CLOSE
 // at the last bar. That must still ENTER (this is what blocked 7 Sep buys).
@@ -101,11 +100,19 @@ assert.strictEqual(decideLiveAction({
 assert.strictEqual(decideLiveAction({
   trade: { ...trade, entryTime: '10:50', exitTime: '10:55', exitReason: 'GIVEUP' },
   nowHm: '10:56', alreadyOpen: false, squareOffHm: '15:15',
-}), 'enter', 'fresh GIVEUP replay still enters; next tick exits if already filled');
+}), 'skip', 'Paper already GIVEUP and we are flat — do not enter');
+assert.strictEqual(decideLiveAction({
+  trade: { ...trade, entryTime: '10:15', exitTime: '10:45', exitReason: 'TIME' },
+  nowHm: '11:00', alreadyOpen: false, squareOffHm: '15:15',
+}), 'skip', 'TIME done and flat — do not buy a finished Paper trade');
+assert.strictEqual(decideLiveAction({
+  trade: { ...trade, entryTime: '10:15', exitTime: '10:45', exitReason: 'CLOSE' },
+  nowHm: '11:00', alreadyOpen: false, squareOffHm: '15:15',
+}), 'enter', 'CLOSE on last bar is still OPEN — enter even 45 min later');
 assert.strictEqual(decideLiveAction({
   trade: { ...trade, entryTime: '10:50', exitTime: '10:55', exitReason: 'TARGET' },
   nowHm: '11:20', alreadyOpen: false, squareOffHm: '15:15',
-}), 'skip', 'stale TARGET (30m) must not chase');
+}), 'skip', 'engine TARGET done and flat — do not chase');
 
 assert.strictEqual(decideLiveAction({
   trade: { ...trade, exitReason: 'TARGET', exitTime: '10:40' },
@@ -152,6 +159,17 @@ assert.strictEqual(decideLiveAction({
   trade: { ...trade, exitReason: 'STOP', exitTime: '10:25' },
   nowHm: '10:26', alreadyOpen: true, squareOffHm: '15:15',
 }), 'exit', 'Nifty Rs5000 cut-off must flatten Live');
+assert.strictEqual(decideLiveAction({
+  trade: { ...trade, exitReason: 'TIME', exitTime: '10:45' },
+  nowHm: '11:00', alreadyOpen: true, squareOffHm: '15:15',
+}), 'exit', 'engine TIME must flatten Live');
+assert.strictEqual(decideLiveAction({
+  trade: { ...trade, exitReason: 'STRUCTURE', exitTime: '10:50' },
+  nowHm: '10:51', alreadyOpen: true, squareOffHm: '15:15',
+}), 'exit', 'engine STRUCTURE must flatten Live');
+assert.strictEqual(decideLiveAction({
+  trade, nowHm: '11:00', alreadyOpen: true, squareOffHm: '15:15',
+}), 'hold', 'CLOSE last-bar still OPEN — Live holds with Paper');
 
 assert.strictEqual(decideLiveAction({
   trade, nowHm: '15:16', alreadyOpen: false, squareOffHm: '15:15',
@@ -181,6 +199,12 @@ assert.strictEqual(engineTradeStillOpen({ ...trade, exitReason: 'STRUCTURE', exi
 const liveSrc = require('fs').readFileSync(require('path').join(__dirname, 'sr-live.js'), 'utf8');
 assert.doesNotMatch(liveSrc, /\.\.\.exitOptsFor\(\s*k\s*,/, 'Live tick must call exitOptsFor(key, lots), not k');
 assert.match(liveSrc, /\.\.\.exitOptsFor\(\s*key\s*,\s*lots\)/, 'Live tick must pass the loop key into exitOptsFor');
+assert.doesNotMatch(liveSrc, /FRESH_MINUTES/, 'Live must not have a 20-minute freshness gate');
+assert.doesNotMatch(liveSrc, /need <.*m after entry/, 'Live skip log must not mention a freshness window');
+{
+  const deskSrc = require('fs').readFileSync(require('path').join(__dirname, 'sr-desk.js'), 'utf8');
+  assert.doesNotMatch(deskSrc, /older than 20 minutes/, 'Paper UI must not mark Live-skip on age');
+}
 
 const limits = applyDeskLimits(
   { maxTradesPerDay: 3, dayLossStopRs: 3500, dayProfitTargetRs: 3500 },

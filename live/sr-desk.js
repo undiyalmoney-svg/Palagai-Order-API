@@ -353,7 +353,6 @@ function markLiveParity(row, raw, book, fromDate, toDate) {
     squareOffHm: book.session.squareOffHm,
   });
   row.liveWouldTake = act === 'enter' || act === 'hold';
-  if (act === 'skip') row.skipReason = 'Live would skip — signal older than 20 minutes';
   if (act === 'wait') row.skipReason = 'Live waiting for entry time';
   return row;
 }
@@ -659,6 +658,7 @@ module.exports = {
   mapTrade,
   applyOptionOhlc,
   overlayNseOptionOhlc,
+  markLiveParity,
   attachProtectiveSl,
   atmStrike,
   nextWeeklyExpiry,

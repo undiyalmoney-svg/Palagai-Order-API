@@ -1,8 +1,8 @@
 'use strict';
 /**
  * S/R Breakout LIVE worker — places real MIS option buys when the same engine
- * that powers Paper fires a fresh signal. Opt-in only (Start Live). Paper,
- * observe, and the collector stay read-only.
+ * that powers Paper has an OPEN trade, and flattens when that engine exits.
+ * Opt-in only (Start Live). Paper, observe, and the collector stay read-only.
  */
 const market = require('./kite-market');
 const store = require('./live.store');
@@ -22,7 +22,6 @@ const { NIFTY_50_INSTRUMENT, BANK_NIFTY_INSTRUMENT, CRUDE_OIL_MINI_INSTRUMENT } 
 const TICK_MS = Number(process.env.SR_LIVE_INTERVAL_MS || 15_000);
 const TICK_STUCK_MS = Number(process.env.SR_LIVE_TICK_STUCK_MS || 25_000);
 const HISTORY_TIMEOUT_MS = Number(process.env.SR_LIVE_HISTORY_MS || 20_000);
-const FRESH_MINUTES = 20;
 
 const SPEC = {
   nifty: {
@@ -97,10 +96,11 @@ function indexStopPrice(trade, spec) {
 }
 
 /**
- * Decide what Live should do for one engine trade.
- * enter = fresh signal, still in the window, not already filled.
+ * Decide what Live should do for one engine trade — same book as Paper.
+ * enter = engine trade is still OPEN and we are flat (even if fill was >20m ago).
  * exit  = we are in the trade and the engine/session says get out.
- * hold  = stay; skip = too late / already done; wait = bar not reached yet.
+ * hold  = stay; skip = engine already done / session over and we are flat;
+ * wait  = bar not reached yet. No Live-only freshness gate.
  */
 function engineTradeStillOpen(trade, hm) {
   if (!trade) return false;
@@ -132,26 +132,22 @@ function matchHeldEngineTrade(trades, openTrade, held) {
   return (trades || []).find((x) => String(x.entryTime) === String(t)) || null;
 }
 
-function decideLiveAction({ trade, nowHm: hm, alreadyOpen, squareOffHm, freshMinutes = FRESH_MINUTES }) {
+function decideLiveAction({ trade, nowHm: hm, alreadyOpen, squareOffHm }) {
   const now = hmToMin(hm);
   const entry = hmToMin(trade.entryTime);
-  const exit = hmToMin(trade.exitTime);
   const so = hmToMin(squareOffHm);
-  const finished = ENGINE_DONE.has(trade.exitReason) && exit <= now;
+  const stillOpen = engineTradeStillOpen(trade, hm);
   const sessionOver = now >= so;
   if (alreadyOpen) {
-    if (sessionOver || finished) return 'exit';
+    if (sessionOver || !stillOpen) return 'exit';
     return 'hold';
   }
-  // Do NOT skip a fresh entry just because the replay already printed TARGET /
-  // LOCK / GIVEUP. Nifty retest only emits the trade once a 5-min bar exists
-  // AFTER fill; that same bar can wick +20 and mark TARGET. Live then never
-  // sent Kite (9 Sep 2026 11:50 SELL: Paper TARGET at 11:55, entered=[]).
-  // Enter while the signal is still inside the fresh window; the next tick
-  // flattens if the engine is already done.
+  // Same as Paper: join an OPEN engine trade even if we started Live late.
+  // Do not chase TIME/GIVEUP/STOP/STRUCTURE/TARGET after Paper already exited.
+  // Intraday CLOSE on the last fetched bar still means OPEN (not session done).
   if (sessionOver) return 'skip';
   if (now < entry) return 'wait';
-  if (now - entry > freshMinutes) return 'skip';
+  if (!stillOpen) return 'skip';
   return 'enter';
 }
 
@@ -739,11 +735,10 @@ async function pickFreshLiveEntry(session, authorization, spec, key, trades, hm,
     });
     if (act !== 'enter') {
       if (act === 'skip' && !session.entered.has(id)) {
-        const age = hmToMin(hm) - hmToMin(t.entryTime);
         pushEvent(
           session,
           'SKIP',
-          `${t.entryTime} ${spec.name} ${t.exitReason || ''} — not entering (${age}m after entry, need <${FRESH_MINUTES}m)`,
+          `${t.entryTime} ${spec.name} ${t.exitReason || ''} — Paper already exited or session over`,
         );
         session.entered.add(id);
       }
@@ -1007,6 +1002,6 @@ function status(userId) {
 
 module.exports = {
   start, stop, status, decideLiveAction, applyDeskLimits, signalId, hmToMin,
-  engineTradeStillOpen, engineBookHasOpenTrade, mustExitHeldForNewLeg, matchHeldEngineTrade, pickOption, pickIndexFuture, selectNearestFut, liveTransactionType, liveTradesFromBroker, SPEC, FRESH_MINUTES, _sessions: sessions,
+  engineTradeStillOpen, engineBookHasOpenTrade, mustExitHeldForNewLeg, matchHeldEngineTrade, pickOption, pickIndexFuture, selectNearestFut, liveTransactionType, liveTradesFromBroker, SPEC, _sessions: sessions,
   mergeStructureOntoLiveTrades,
 };

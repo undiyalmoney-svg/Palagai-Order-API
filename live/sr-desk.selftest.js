@@ -1,6 +1,6 @@
 'use strict';
 const assert = require('assert');
-const { runSrDesk, mapTrade, applyOptionOhlc, overlayNseOptionOhlc, resolveDeskCapital, ENGINE, BOOKS } = require('./sr-desk');
+const { runSrDesk, mapTrade, applyOptionOhlc, overlayNseOptionOhlc, markLiveParity, resolveDeskCapital, ENGINE, BOOKS } = require('./sr-desk');
 const { pickBarFlex, ohlcOf } = require('./sr-option-pnl');
 const { nseWeeklyOptionSymbol } = require('./nse-option-intraday');
 const { STRATEGY_ID } = require('./sr-strategy-config');
@@ -432,6 +432,41 @@ Promise.resolve()
     );
   })
   .then((sized) => {
+    const hist = markLiveParity(
+      { liveWouldTake: false },
+      { entryTime: '10:15', exitTime: '10:45', exitReason: 'TIME' },
+      BOOKS.nifty,
+      '2026-08-01',
+      '2026-08-31',
+    );
+    assert.strictEqual(hist.liveWouldTake, true, 'historical months do not need live-skip noise');
+    assert.ok(!hist.skipReason);
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
+    const done = markLiveParity(
+      { liveWouldTake: true },
+      { entryTime: '09:50', exitTime: '10:20', exitReason: 'TIME' },
+      BOOKS.nifty,
+      today,
+      today,
+    );
+    assert.strictEqual(done.liveWouldTake, false, 'today TIME already done — Live would not enter');
+    assert.ok(!done.skipReason || !/20 minutes/.test(done.skipReason));
+    const openRow = markLiveParity(
+      { liveWouldTake: false },
+      { entryTime: '09:50', exitTime: '15:15', exitReason: 'CLOSE' },
+      BOOKS.nifty,
+      today,
+      today,
+    );
+    const hmNow = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false,
+    }).format(new Date());
+    const [hh, mm] = hmNow.split(':').map(Number);
+    const mins = hh * 60 + mm;
+    if (mins >= 9 * 60 + 50 && mins < 15 * 60 + 15) {
+      assert.strictEqual(openRow.liveWouldTake, true, 'today OPEN CLOSE row — Live would enter/hold');
+    }
+    assert.ok(!openRow.skipReason || !/20 minutes/.test(openRow.skipReason));
     assert.strictEqual(sized.capitalSource, 'mine');
     assert.strictEqual(sized.capitalRs, 120000);
     assert.strictEqual(sized.maxLots, 3);
