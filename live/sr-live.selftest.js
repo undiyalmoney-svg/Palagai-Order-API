@@ -12,8 +12,9 @@ assert.deepStrictEqual(SPEC.crude.opts, exitOptsFor('crude'));
 // moved 12 -> 8). Check shape and coherence instead.
 const n = SPEC.nifty.opts;
 assert.ok(n.maxRetestBars > 0, 'Nifty must have the entry meter');
-assert.strictEqual(n.lockArmPts, 0, 'index lock scratches CE/PE; hold to session CLOSE');
-assert.strictEqual(n.giveUpBar, 0, 'give-up scratches CE/PE; hold to session CLOSE');
+assert.strictEqual(n.lockArmPts, 0, 'index lock scratches CE/PE; do not arm a lock');
+assert.strictEqual(n.giveUpBar, 4, 'stall give-up after 4 bars with no +12');
+assert.strictEqual(n.giveUpMinPts, 12);
 assert.strictEqual(n.targetByScore[1], 0, 'no +20 index TARGET on option books');
 assert.strictEqual(n.timeStopBars, 6, 'TIME 6 cuts August CLOSE session holds');
 assert.strictEqual(n.failStop, false, 'FAIL on a 1-bar wall close scratches the move');

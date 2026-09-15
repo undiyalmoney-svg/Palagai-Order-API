@@ -51,8 +51,11 @@ const LOT_UNITS = Object.freeze({ nifty: 65, banknifty: 30, crude: 10 });
  */
 const DAY_LOSS_STOP_RS = 3500;
 const DAY_PROFIT_TARGET_RS = 3500;
-/** Trade Bot (Nifty + Bank): one directional ATM option per book per day. */
-const MAX_TRADES_PER_DAY = 1;
+/** Trade Bot (Nifty + Bank): up to two directional ATM options per book per day.
+ *  1/day was the 15.4 peak of the TIME/stop/structure grid (Jun–Sep option ₹59,175).
+ *  2/day is the only knob that strictly raises Jun–Sep net without an August
+ *  CLOSE bucket (option ₹95,225, Aug +₹10,216, CLOSE n=0). Not 4-lot / not NRML. */
+const MAX_TRADES_PER_DAY = 2;
 
 /** Default position size per instrument. */
 const DEFAULT_LOTS = Object.freeze({ nifty: 1, banknifty: 1, crude: 5 });
@@ -110,7 +113,12 @@ const EXIT_RULES = Object.freeze({
     // ₹30,444 loss (NET −₹10,281), 20 CLOSE holds = −₹18,137. TIME 6 (30 min)
     // on the same entries flips Aug to +₹7,875 and keeps Jun/Jul/Sep green.
     // FAIL stays off (1-bar wall close still scratches the move). TARGET 0.
-    lockArmPts: 0, lockAtPts: 0, giveUpBar: 0, giveUpMinPts: 0,
+    // 15.5: stall give-up (no +12 index pts by bar 4) on top of TIME 6. Kite
+    // Jun–Sep 2026 option ₹ with max 2/day: ₹95,225 → ₹98,568, PF 2.99 → 3.21,
+    // loss ₹47,964 → ₹44,537. Does not LOCK/TARGET-scratch the 15 Sep 10:35 PE
+    // (still TIME +₹802 / 30 min). Index lock +20/10 was rejected: that PE
+    // became LOCK +₹269 at 11:00.
+    lockArmPts: 0, lockAtPts: 0, giveUpBar: 4, giveUpMinPts: 12,
     minScore: 1,
     capStopToDayBudget: true,
     failStop: false,
@@ -181,7 +189,10 @@ const EXIT_RULES = Object.freeze({
     // TIME 6 + ₹2,500 index/option stop. Product stays MIS (not NRML).
     // Not +20 TARGET. Session-hold without a stop was August's Bank CLOSE
     // bucket (CE 20 Aug −₹3,074 / −190 pts).
+    // 15.5 same stall give-up as Nifty (bar 4 / +12). Bank lock 50/25 was
+    // rejected: 15 Sep 13:35 PE TIME +₹1,211 became LOCK +₹323 in 10 min.
     lockArmPts: 0, lockAtPts: 0,
+    giveUpBar: 4, giveUpMinPts: 12,
     targetByScore: { 1: 0, 2: 0, 3: 0 },
     structureExit: true,
     minStructurePts: 80,
@@ -238,5 +249,5 @@ module.exports = {
   EXIT_RULES, CUT_LOSS_RS, LOT_UNITS, DEFAULT_LOTS, OPTION_SL_MAX_RS, exitOptsFor,
   DAY_LOSS_STOP_RS, DAY_PROFIT_TARGET_RS, MAX_TRADES_PER_DAY, paperVehicleFor,
   STRATEGY_ID: 'sr-breakout',
-  STRATEGY_VERSION: 'sr-breakout.2026-09-15.4',
+  STRATEGY_VERSION: 'sr-breakout.2026-09-15.5',
 };

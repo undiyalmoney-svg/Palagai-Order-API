@@ -1,8 +1,8 @@
 'use strict';
 /**
- * Trade Bot DNA: one directional ATM option per day.
+ * Trade Bot DNA: up to two directional ATM options per book per day.
  * TIME 6 flattens the August session-hold losers. FAIL stays off.
- * TARGET stays 0. Bank has a rupee stop (re-measured on this TIME DNA).
+ * TARGET stays 0. Stall give-up bar 4 / +12. Bank has a rupee stop.
  */
 const assert = require('assert');
 const { runSrBreakout } = require('./sr-breakout');
@@ -11,18 +11,22 @@ const {
 } = require('./sr-strategy-config');
 const { SPEC } = require('./sr-live');
 
-assert.strictEqual(STRATEGY_VERSION, 'sr-breakout.2026-09-15.4');
+assert.strictEqual(STRATEGY_VERSION, 'sr-breakout.2026-09-15.5');
 assert.strictEqual(EXIT_RULES.nifty.structureExit, true);
 assert.strictEqual(EXIT_RULES.banknifty.structureExit, true);
 assert.strictEqual(EXIT_RULES.nifty.minStructurePts, 40);
 assert.strictEqual(EXIT_RULES.banknifty.minStructurePts, 80);
-assert.strictEqual(MAX_TRADES_PER_DAY, 1);
+assert.strictEqual(MAX_TRADES_PER_DAY, 2);
 assert.strictEqual(EXIT_RULES.nifty.failStop, false);
 assert.strictEqual(EXIT_RULES.nifty.timeStopBars, 6);
 assert.strictEqual(EXIT_RULES.nifty.minScore, 1);
+assert.strictEqual(EXIT_RULES.nifty.giveUpBar, 4);
+assert.strictEqual(EXIT_RULES.nifty.giveUpMinPts, 12);
 assert.strictEqual(EXIT_RULES.nifty.targetByScore[1], 0);
 assert.strictEqual(EXIT_RULES.banknifty.failStop, false);
 assert.strictEqual(EXIT_RULES.banknifty.timeStopBars, 6);
+assert.strictEqual(EXIT_RULES.banknifty.giveUpBar, 4);
+assert.strictEqual(EXIT_RULES.banknifty.giveUpMinPts, 12);
 assert.strictEqual(CUT_LOSS_RS.banknifty, 2500);
 assert.strictEqual(OPTION_SL_MAX_RS.banknifty, 2500);
 assert.ok(exitOptsFor('banknifty').stopPts > 0);
@@ -94,8 +98,9 @@ assert.ok(scratched.trades[0].exitTime <= '11:35',
 assert.ok(held.trades.length >= 1);
 assert.notStrictEqual(held.trades[0].exitReason, 'FAIL',
   `new DNA must not FAIL-scratch, got ${held.trades[0].exitReason} @ ${held.trades[0].exitTime}`);
-assert.strictEqual(held.trades[0].exitReason, 'TIME');
-assert.strictEqual(held.trades.length, 1, `one trade/day, got ${held.trades.length}`);
+assert.ok(held.trades[0].exitReason === 'TIME' || held.trades[0].exitReason === 'GIVEUP',
+  `TIME 6 or stall give-up, got ${held.trades[0].exitReason}`);
+assert.ok(held.trades.length <= MAX_TRADES_PER_DAY, `max ${MAX_TRADES_PER_DAY}/day, got ${held.trades.length}`);
 const outMin = held.trades[0].exitTime.split(':').map(Number);
 const inMin = held.trades[0].entryTime.split(':').map(Number);
 const heldBars = ((outMin[0] * 60 + outMin[1]) - (inMin[0] * 60 + inMin[1])) / 5;
@@ -120,9 +125,11 @@ const timeSix = runSrBreakout(grind, {
 });
 const sessionHold = runSrBreakout(grind, { ...base, ...exitOptsFor('nifty') });
 assert.strictEqual(timeSix.trades[0].exitReason, 'TIME');
-assert.strictEqual(sessionHold.trades[0].exitReason, 'TIME',
-  `shared DNA is TIME 6, got ${sessionHold.trades[0].exitReason}`);
-assert.strictEqual(sessionHold.trades[0].exitTime, timeSix.trades[0].exitTime);
+assert.ok(sessionHold.trades[0].exitReason === 'TIME' || sessionHold.trades[0].exitReason === 'GIVEUP',
+  `shared DNA is TIME 6 / give-up, got ${sessionHold.trades[0].exitReason}`);
+if (sessionHold.trades[0].exitReason === 'TIME') {
+  assert.strictEqual(sessionHold.trades[0].exitTime, timeSix.trades[0].exitTime);
+}
 
 console.log('sr-one-day.selftest: ok', {
   failOld: { reason: scratched.trades[0].exitReason, out: scratched.trades[0].exitTime, n: scratched.trades.length },

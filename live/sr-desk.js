@@ -547,7 +547,7 @@ async function runSrDesk({ authorization, fromDate, toDate, capitalRs, capitalSo
         label: book.name,
         sitOut: false,
         spec: { engine: ENGINE, strategy: STRATEGY_ID },
-        specText: `${book.name} S/R ${STRATEGY_VERSION} · 1 ATM CE/PE/day · TIME 6 · day ±₹${DAY_LOSS_STOP_RS}`,
+        specText: `${book.name} S/R ${STRATEGY_VERSION} · ≤2 ATM CE/PE/day · TIME 6 · day ±₹${DAY_LOSS_STOP_RS}`,
         totals: summarize(mapped),
         trades: mapped,
         chart: (() => {
@@ -628,7 +628,7 @@ async function runSrDesk({ authorization, fromDate, toDate, capitalRs, capitalSo
     coreBooks: booksOut.filter((b) => b.id === 'nifty' || b.id === 'bank' || b.id === 'crude'),
     deskChart: { books: booksOut.filter((b) => b.chart).map((b) => b.chart) },
     note:
-      'This desk trades only Nifty 50 and Bank Nifty. With-trend S/R wall break + retest, one ATM CE or PE per book per day (qty 65 / 30, MIS). Holds ~30 minutes (6×5m TIME) unless the rupee stop hits first (Nifty ₹5,000 / Bank ₹2,500), or the INDEX completes the same measured-move the chart draws (STRUCTURE). Not FAIL on a 1-bar close through the wall, not a +20 index TARGET. Paper ₹ shadows Live: ATM CE/PE premium × lot, minus ₹20/lot. In/Out are NSE 5-minute option OHLC when the range is ≤14 days, otherwise modeled weekly premium. Live rests an option SL. Crude stays off.',
+      'This desk trades only Nifty 50 and Bank Nifty. With-trend S/R wall break + retest, up to two ATM CE or PE per book per day (qty 65 / 30, MIS). Holds ~30 minutes (6×5m TIME) unless the rupee stop hits first (Nifty ₹5,000 / Bank ₹2,500), the trade makes no +12 index pts by bar 4 (give-up), or the INDEX completes the same measured-move the chart draws (STRUCTURE). Not FAIL on a 1-bar close through the wall, not a +20 index TARGET. Paper ₹ shadows Live: ATM CE/PE premium × lot, minus ₹20/lot. In/Out are NSE 5-minute option OHLC when the range is ≤14 days, otherwise modeled weekly premium. Live rests an option SL. Crude stays off.',
     instruments: booksOut
       .filter((b) => b.id === 'nifty' || b.id === 'bank')
       .map((b) => instrumentRow({ id: b.id, name: b.label }, b.trades || [])),

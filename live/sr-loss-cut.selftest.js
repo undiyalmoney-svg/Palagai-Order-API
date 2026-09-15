@@ -16,7 +16,7 @@ assert.strictEqual(exitOptsFor('nifty', 1).failStop, false);
 assert.strictEqual(exitOptsFor('banknifty', 1).timeStopBars, 6);
 assert.strictEqual(exitOptsFor('banknifty', 1).failStop, false);
 assert.ok(exitOptsFor('banknifty', 1).stopPts > 0, 'Bank now has a rupee index stop');
-assert.strictEqual(MAX_TRADES_PER_DAY, 1);
+assert.strictEqual(MAX_TRADES_PER_DAY, 2);
 assert.strictEqual(PLAYBOOK.maxTradesPerDay, 2);
 assert.strictEqual(PLAYBOOK.entryEndHm, '19:00');
 assert.strictEqual(PLAYBOOK.skipFadePriorDay, true);
