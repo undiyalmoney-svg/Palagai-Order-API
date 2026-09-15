@@ -104,18 +104,16 @@ const EXIT_RULES = Object.freeze({
   //     (default 0 = off); leave it off unless a longer study says otherwise.
   nifty: Object.freeze({
     wallMode: 'intraday', retest: true, timeStopBars: 6, maxRetestBars: 2,
-    // +8/5 lock was best on INDEX ₹ and a loser on CE/PE (5 pts × 0.41 × 65
-    // ≈ ₹133 before charges; last week TARGET/LOCK in pts, net −₹3k option).
-    // Arm at the 20-pt target, lock 12 pts (~₹320 option) so a lock can pay.
-    lockArmPts: 20, lockAtPts: 12, giveUpBar: 2, giveUpMinPts: 8,
+    // 15 Sep 2026 Kite (the book the desk must match):
+    //   Bank 56000 PE BUY 13:38 @ 489 → TARGET flatten 13:40 @ 487.40 (scratch).
+    //   Re-buy 13:41 @ 505.30, Nifty 23200 PE 13:42 @ 133.35, both SELL 14:13
+    //   @ 536 / 141.25 → option ₹ +369 / +513. Hold was ~6×5m bars, not +20 index.
+    // Index TARGET/LOCK/GIVEUP scratch the CE/PE. Hold to TIME 6 unless FAIL/STOP.
+    lockArmPts: 0, lockAtPts: 0, giveUpBar: 0, giveUpMinPts: 0,
     minScore: 1,
     capStopToDayBudget: true,
-    // FAIL-STOP (close back through the broken 15m wall). Invalidation, not a
-    // rupee cut. Bank failStop stays off. Kite 5m 2026-06-01→09-14:
-    //   failStop off  57W/15L  loss ₹11,126  net ₹56,300
-    //   failStop on   53W/19L  loss ₹5,603   net ₹58,175
     failStop: true,
-    targetByScore: { 1: 20, 2: 20, 3: 20 },
+    targetByScore: { 1: 0, 2: 0, 3: 0 },
   }),
   // Bank — 6 bars + profit lock armed at +20/12 on options.
   // 2026-08-10→09-08 looked better at 4-bar TIME (one loser −40.6 → −8 pts).
@@ -172,9 +170,10 @@ const EXIT_RULES = Object.freeze({
   banknifty: Object.freeze({
     wallMode: 'intraday', timeStopBars: 6,
     retest: true, maxRetestBars: 2,
-    // Same option problem as Nifty: lock-at-5 does not clear CE/PE charges.
-    lockArmPts: 20, lockAtPts: 12,
-    targetByScore: { 1: 20, 2: 20, 3: 20 },
+    // Same as Nifty: do not flatten CE/PE on +20 index TARGET. Hold 6 bars
+    // (15 Sep 2026 Bank 56000 PE 13:41→14:13). Option SL is the money stop.
+    lockArmPts: 0, lockAtPts: 0,
+    targetByScore: { 1: 0, 2: 0, 3: 0 },
   }),
   // Crude — had NO time exit, so losers rode to the 23:20 square-off (average
   // hold 179 min). 18 bars cuts that to ~69 min. IN-SAMPLE ONLY (89 days) and
@@ -228,5 +227,5 @@ module.exports = {
   EXIT_RULES, CUT_LOSS_RS, LOT_UNITS, DEFAULT_LOTS, OPTION_SL_MAX_RS, exitOptsFor,
   DAY_LOSS_STOP_RS, DAY_PROFIT_TARGET_RS, paperVehicleFor,
   STRATEGY_ID: 'sr-breakout',
-  STRATEGY_VERSION: 'sr-breakout.2026-09-14.1',
+  STRATEGY_VERSION: 'sr-breakout.2026-09-15.1',
 };
