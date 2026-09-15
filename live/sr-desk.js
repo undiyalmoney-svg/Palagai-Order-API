@@ -20,6 +20,7 @@ const {
   LOT_UNITS,
   DAY_LOSS_STOP_RS,
   DAY_PROFIT_TARGET_RS,
+  MAX_TRADES_PER_DAY,
   OPTION_SL_MAX_RS,
   STRATEGY_ID,
   STRATEGY_VERSION,
@@ -515,7 +516,7 @@ async function runSrDesk({ authorization, fromDate, toDate, capitalRs, capitalSo
         gapLo: book.gapLo,
         gapHi: book.gapHi,
         targetByScore: book.targetByScore,
-        maxTradesPerDay: 3,
+        maxTradesPerDay: MAX_TRADES_PER_DAY,
         dayLossStop,
         dayProfitTarget,
         reportFromDate: fromDate,
@@ -540,7 +541,7 @@ async function runSrDesk({ authorization, fromDate, toDate, capitalRs, capitalSo
         label: book.name,
         sitOut: false,
         spec: { engine: ENGINE, strategy: STRATEGY_ID },
-        specText: `${book.name} S/R ${STRATEGY_VERSION} · 1 ATM ${book.name === 'Nifty 50' ? 'CE/PE' : 'CE/PE'} · day ±₹${DAY_LOSS_STOP_RS}`,
+        specText: `${book.name} S/R ${STRATEGY_VERSION} · 1 ATM CE/PE/day · hold to 15:15 · day ±₹${DAY_LOSS_STOP_RS}`,
         totals: summarize(mapped),
         trades: mapped,
         bars: Array.isArray(candles) ? candles.length : 0,
@@ -602,7 +603,7 @@ async function runSrDesk({ authorization, fromDate, toDate, capitalRs, capitalSo
     books: booksOut,
     coreBooks: booksOut.filter((b) => b.id === 'nifty' || b.id === 'bank' || b.id === 'crude'),
     note:
-      'This desk trades only Nifty 50 and Bank Nifty (S/R wall-break, with-trend). No Crude, no stocks. Paper ₹ shadows Live: ATM CE/PE premium × lot (Nifty 65 / Bank 30), minus ₹20/lot. Signals still fire on the index (day brake ±₹3,500). In/Out are NSE 5-minute option OHLC when the range is ≤14 days, otherwise modeled weekly premium. SL ₹ is the option-premium stop Live rests on Kite. Live buys one ATM CE or PE. Crude stays off.',
+      'This desk trades only Nifty 50 and Bank Nifty (S/R wall-break, with-trend). One ATM CE or PE per book per day, held to 15:15 CLOSE unless the rupee stop hits — not TIME 6, not FAIL on a 1-bar close through the wall, not a +20 index TARGET. Product stays MIS. Paper ₹ shadows Live: ATM CE/PE premium × lot (Nifty 65 / Bank 30), minus ₹20/lot. In/Out are NSE 5-minute option OHLC when the range is ≤14 days, otherwise modeled weekly premium. Live rests an option SL. Crude stays off.',
     instruments: booksOut
       .filter((b) => b.id === 'nifty' || b.id === 'bank')
       .map((b) => instrumentRow({ id: b.id, name: b.label }, b.trades || [])),

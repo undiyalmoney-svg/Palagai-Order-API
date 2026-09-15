@@ -106,15 +106,15 @@ function holdPx(_i, min) {
   const hold = runSrBreakout(bars.concat(sessionBars(iso, holdPx, 12 * 60 + 30)), {
     ...opts,
     ...exitOptsFor('nifty'),
-    failStop: false,
   });
   assert.ok(hold.trades.length >= 1);
-  assert.strictEqual(hold.trades[0].exitReason, 'TIME',
-    `shared DNA must hold to TIME 6, got ${hold.trades[0].exitReason} @ ${hold.trades[0].exitTime}`);
+  assert.notStrictEqual(hold.trades[0].exitReason, 'TIME',
+    `shared DNA must not TIME-flatten at 30 min, got ${hold.trades[0].exitReason} @ ${hold.trades[0].exitTime}`);
+  assert.notStrictEqual(hold.trades[0].exitReason, 'FAIL');
   const inMin = 11 * 60 + 25;
   const outMin = hold.trades[0].exitTime.split(':').map(Number);
   const heldBars = ((outMin[0] * 60 + outMin[1]) - inMin) / 5;
-  assert.ok(heldBars >= 5 && heldBars <= 7, `hold should be ~6×5m, got ${heldBars} bars`);
+  assert.ok(heldBars > 7, `hold should run past TIME 6, got ${heldBars} bars`);
 }
 
 console.log('sr-open-fill.selftest: ok', {

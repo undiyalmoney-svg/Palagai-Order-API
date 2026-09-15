@@ -51,6 +51,8 @@ const LOT_UNITS = Object.freeze({ nifty: 65, banknifty: 30, crude: 10 });
  */
 const DAY_LOSS_STOP_RS = 3500;
 const DAY_PROFIT_TARGET_RS = 3500;
+/** Trade Bot (Nifty + Bank): one directional ATM option per book per day. */
+const MAX_TRADES_PER_DAY = 1;
 
 /** Default position size per instrument. */
 const DEFAULT_LOTS = Object.freeze({ nifty: 1, banknifty: 1, crude: 5 });
@@ -103,16 +105,16 @@ const EXIT_RULES = Object.freeze({
   //     rather than removing the damage. The option exists in the engine
   //     (default 0 = off); leave it off unless a longer study says otherwise.
   nifty: Object.freeze({
-    wallMode: 'intraday', retest: true, timeStopBars: 6, maxRetestBars: 2,
-    // 15 Sep 2026 Kite (the book the desk must match):
-    //   Bank 56000 PE BUY 13:38 @ 489 → TARGET flatten 13:40 @ 487.40 (scratch).
-    //   Re-buy 13:41 @ 505.30, Nifty 23200 PE 13:42 @ 133.35, both SELL 14:13
-    //   @ 536 / 141.25 → option ₹ +369 / +513. Hold was ~6×5m bars, not +20 index.
-    // Index TARGET/LOCK/GIVEUP scratch the CE/PE. Hold to TIME 6 unless FAIL/STOP.
+    wallMode: 'intraday', retest: true, timeStopBars: 0, maxRetestBars: 2,
+    // 1-day 1-trade hold (15 Sep 2026 DNA bump):
+    //   TIME 6 flattened winners at ~30 min. FAIL scratched 11:20 / 12:35 on a
+    //   1-bar close back through the wall. The book we want is one directional
+    //   ATM CE or PE held through the S/R box to 15:15 CLOSE (unless STOP).
+    // Index TARGET/LOCK/GIVEUP stay off. FAIL stays off (Bank already was).
     lockArmPts: 0, lockAtPts: 0, giveUpBar: 0, giveUpMinPts: 0,
     minScore: 1,
     capStopToDayBudget: true,
-    failStop: true,
+    failStop: false,
     targetByScore: { 1: 0, 2: 0, 3: 0 },
   }),
   // Bank — 6 bars + profit lock armed at +20/12 on options.
@@ -168,10 +170,11 @@ const EXIT_RULES = Object.freeze({
   //     Rs301,110 vs Rs283,075) at identical -Rs8,580 losses. Requiring a
   //     pullback already excludes the spent, over-extended moves.
   banknifty: Object.freeze({
-    wallMode: 'intraday', timeStopBars: 6,
+    wallMode: 'intraday', timeStopBars: 0,
     retest: true, maxRetestBars: 2,
-    // Same as Nifty: do not flatten CE/PE on +20 index TARGET. Hold 6 bars
-    // (15 Sep 2026 Bank 56000 PE 13:41→14:13). Option SL is the money stop.
+    failStop: false,
+    // Same as Nifty: one ATM CE/PE, hold to 15:15 CLOSE, not +20 TARGET / TIME 6.
+    // Option SL is the money stop. Product stays MIS (not NRML).
     lockArmPts: 0, lockAtPts: 0,
     targetByScore: { 1: 0, 2: 0, 3: 0 },
   }),
@@ -225,7 +228,7 @@ function paperVehicleFor(instrumentKey, liveVehicle, requested) {
 
 module.exports = {
   EXIT_RULES, CUT_LOSS_RS, LOT_UNITS, DEFAULT_LOTS, OPTION_SL_MAX_RS, exitOptsFor,
-  DAY_LOSS_STOP_RS, DAY_PROFIT_TARGET_RS, paperVehicleFor,
+  DAY_LOSS_STOP_RS, DAY_PROFIT_TARGET_RS, MAX_TRADES_PER_DAY, paperVehicleFor,
   STRATEGY_ID: 'sr-breakout',
-  STRATEGY_VERSION: 'sr-breakout.2026-09-15.1',
+  STRATEGY_VERSION: 'sr-breakout.2026-09-15.2',
 };

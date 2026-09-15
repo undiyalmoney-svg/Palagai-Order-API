@@ -5,6 +5,7 @@ const crudeBot = require('./crude-bot-desk');
 const { preflightLive, firstFail } = require('./live-preflight');
 const { parseTradeBotWindow } = require('./trade-bot-dates');
 const { lotsFromAvailableFunds, crudeLotsFromAvailableFunds } = require('./daily-desk-defaults');
+const { MAX_TRADES_PER_DAY } = require('./sr-strategy-config');
 const { getOptionOhlcAndPrice } = require('./option-ohlc');
 const { findEntryExitWait, getLastFound, parseUniverse } = require('./ee-wait-research');
 const {
@@ -26,7 +27,7 @@ async function health(_req, res) {
   res.json({
     status: 'ok',
     service: 'palagai-live-control',
-    note: 'Trade Bot paper/live: Nifty + Bank S/R wall-break (walk-forward). Not a straddle. Paper ₹ is index×lot. Live buys one ATM CE or PE. Day ±₹3,500. Crude off.',
+    note: 'Trade Bot paper/live: Nifty + Bank S/R. One ATM CE/PE per book per day, hold to 15:15. Not a straddle. Paper ₹ is CE/PE × lot. Live MIS. Day ±₹3,500. Crude off.',
     version: APP_VERSION,
     appBuild: APP_BUILD,
     dnaId: LIVE_GREEN_DNA.id,
@@ -337,6 +338,7 @@ async function start(req, res) {
         instruments: ['nifty', 'banknifty'],
         lots,
         lotsByInstrument: { nifty: lots, banknifty: lots },
+        maxTradesPerDay: MAX_TRADES_PER_DAY,
         authorization,
         liveAssistant: assistant,
       });
@@ -349,7 +351,7 @@ async function start(req, res) {
         lots,
         liveAssistant: assistant,
         note:
-          'Live is S/R Nifty + Bank. It buys one ATM CE or PE when the engine fires. Lots follow Kite available funds (₹40,000 per lot). Get Token if the assistant turns red.',
+          'Live is S/R Nifty + Bank. One ATM CE or PE per book per day, held to 15:15 unless the rupee stop hits. MIS, not NRML. Lots follow Kite available funds (₹40,000 per lot). Get Token if the assistant turns red.',
       });
     } catch (err) {
       const detail = err.message || String(err);

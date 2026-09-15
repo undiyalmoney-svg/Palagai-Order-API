@@ -11,7 +11,7 @@
 const https = require('https');
 const market = require('./kite-market');
 // Exit/entry rules come from the SHARED config so Paper and Live cannot drift.
-const { exitOptsFor, CUT_LOSS_RS, DEFAULT_LOTS, DAY_LOSS_STOP_RS, DAY_PROFIT_TARGET_RS, LOT_UNITS, paperVehicleFor, STRATEGY_ID, STRATEGY_VERSION } = require('./sr-strategy-config');
+const { exitOptsFor, CUT_LOSS_RS, DEFAULT_LOTS, DAY_LOSS_STOP_RS, DAY_PROFIT_TARGET_RS, MAX_TRADES_PER_DAY, LOT_UNITS, paperVehicleFor, STRATEGY_ID, STRATEGY_VERSION } = require('./sr-strategy-config');
 const store = require('./live.store');
 const { runSrBreakout } = require('./sr-breakout');
 const { observe, history: obsHistory, confirmLiveEntry, confirmLiveExit } = require('./sr-observe');
@@ -257,7 +257,7 @@ async function srBreakout(req, res) {
       const dayProfitTargetRs = numOr(body.dayProfitTargetRs, DAY_PROFIT_TARGET_RS);
       const dayLossStop = dayLossStopRs > 0 ? dayLossStopRs / perPoint : 0;
       const dayProfitTarget = dayProfitTargetRs > 0 ? dayProfitTargetRs / perPoint : 0;
-      const maxTradesPerDay = Math.max(1, numOr(body.maxTradesPerDay, 3));
+      const maxTradesPerDay = Math.max(1, numOr(body.maxTradesPerDay, MAX_TRADES_PER_DAY));
       // AUTO per instrument (no selector): each instrument runs its own eligible
       // strategy. An explicit body.strategy still works as a research override,
       // but only if it passes the gate; otherwise fall back to the instrument's

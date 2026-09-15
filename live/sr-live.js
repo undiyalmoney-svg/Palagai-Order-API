@@ -12,7 +12,7 @@ const { archiveSrInstruments, instrumentsWithArchive } = require('./instrument-a
 const { connectMongo, getDb } = require('./live.mongo');
 const { runSrBreakout } = require('./sr-breakout');
 // Exit/entry rules come from the SHARED config so Live and Paper cannot drift.
-const { exitOptsFor, DEFAULT_LOTS, DAY_LOSS_STOP_RS, DAY_PROFIT_TARGET_RS, LOT_UNITS, OPTION_SL_MAX_RS, STRATEGY_ID, STRATEGY_VERSION } = require('./sr-strategy-config');
+const { exitOptsFor, DEFAULT_LOTS, DAY_LOSS_STOP_RS, DAY_PROFIT_TARGET_RS, MAX_TRADES_PER_DAY, LOT_UNITS, OPTION_SL_MAX_RS, STRATEGY_ID, STRATEGY_VERSION } = require('./sr-strategy-config');
 const { LiveBroker } = require('./live-broker');
 const { approveLiveStart, approveLiveEntry } = require('./engine/risk');
 const { confirmDirection, selectTradeExpiry, liveTransactionType } = require('./engine/pipeline');
@@ -354,7 +354,7 @@ function numOr(v, d) {
 /** Update max-trades / day rupee brakes on a running session. Does not flatten. */
 function applyDeskLimits(config, body = {}) {
   const next = { ...(config || {}) };
-  next.maxTradesPerDay = Math.max(1, numOr(body.maxTradesPerDay, next.maxTradesPerDay || 3));
+  next.maxTradesPerDay = Math.max(1, numOr(body.maxTradesPerDay, next.maxTradesPerDay || MAX_TRADES_PER_DAY));
   if (body.dayLossStopRs != null && body.dayLossStopRs !== '') {
     next.dayLossStopRs = numOr(body.dayLossStopRs, 0);
   }
@@ -403,7 +403,7 @@ async function start(userId, body = {}) {
     instruments: keys,
     lots: Math.max(1, numOr(lotsByInstrument[keys[0]], numOr(body.lots, 1))),
     lotsByInstrument,
-    maxTradesPerDay: Math.max(1, numOr(body.maxTradesPerDay, 3)),
+    maxTradesPerDay: Math.max(1, numOr(body.maxTradesPerDay, MAX_TRADES_PER_DAY)),
     dayLossStopRs: numOr(body.dayLossStopRs, DAY_LOSS_STOP_RS),
     dayProfitTargetRs: numOr(body.dayProfitTargetRs, DAY_PROFIT_TARGET_RS),
     entryPts: body.entryPts != null && body.entryPts !== '' ? numOr(body.entryPts, null) : null,

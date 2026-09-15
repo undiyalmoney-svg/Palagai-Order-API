@@ -14,7 +14,7 @@
  *     appends observation rows to a local JSONL log.
  *   - Missing option fields (e.g. IV, absent from Kite /quote) are marked
  *     UNAVAILABLE, never filled.
- *   - Daily caps (3 trades, ±₹3,500) gate whether a signal becomes a paper
+ *   - Daily caps (1 trade, ±₹3,500) gate whether a signal becomes a paper
  *     ENTRY record vs an ARMED/skipped note.
  *
  * Storage: append-only JSONL at sr-observations/observations.jsonl (gitignored).
@@ -27,7 +27,7 @@ const market = require('./kite-market');
 const optionStore = require('./sr-option-store');
 const { runSrBreakout } = require('./sr-breakout');
 const { EXECUTION_MODE } = require('./sr-execution-guard');
-const { LOT_UNITS, exitOptsFor } = require('./sr-strategy-config');
+const { LOT_UNITS, exitOptsFor, MAX_TRADES_PER_DAY } = require('./sr-strategy-config');
 
 // Approved paper exit rule (configurable). Loser is NOT held to premium-zero;
 // the option premium is a risk boundary, not the normal stop.
@@ -47,7 +47,7 @@ function optionCosts(entryPrem, exitPrem, qty) {
 const DIR = path.join(__dirname, '..', 'sr-observations');
 const LOG = path.join(DIR, 'observations.jsonl');
 const MIN_SAMPLE = 30;          // first-validation threshold (Buildia spec)
-const LOT_DAY_LOSS = 3500, LOT_DAY_PROFIT = 3500, MAX_TRADES_DAY = 3;
+const LOT_DAY_LOSS = 3500, LOT_DAY_PROFIT = 3500, MAX_TRADES_DAY = MAX_TRADES_PER_DAY;
 
 // Underlying config — mirrors sr-breakout.controller INSTRUMENTS (not re-tuned).
 const INSTR = {
