@@ -9,7 +9,7 @@ const { exitOptsFor, MAX_TRADES_PER_DAY, STRATEGY_VERSION } = require('./sr-stra
 const { SPEC, FRESH_MINUTES, mergeStructureOntoLiveTrades } = require('./sr-live');
 const { BOOKS, mapTrade } = require('./sr-desk');
 
-assert.strictEqual(STRATEGY_VERSION, 'sr-breakout.2026-09-15.5');
+assert.strictEqual(STRATEGY_VERSION, 'sr-breakout.2026-09-15.6');
 assert.strictEqual(MAX_TRADES_PER_DAY, 2);
 assert.strictEqual(FRESH_MINUTES, 20);
 assert.deepStrictEqual(SPEC.nifty.opts, exitOptsFor('nifty'), 'Live Nifty opts === Paper exitOptsFor');

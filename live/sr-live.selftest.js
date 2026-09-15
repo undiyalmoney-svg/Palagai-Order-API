@@ -26,6 +26,8 @@ assert.strictEqual(SPEC.banknifty.opts.minStructurePts, 80);
 assert.strictEqual(OPTION_SL_MAX_RS.nifty, 5000);
 assert.strictEqual(OPTION_SL_MAX_RS.banknifty, 2500, 'Bank TIME-6 DNA re-measured a ₹2,500 option cap');
 assert.strictEqual(SPEC.banknifty.opts.lockArmPts, 0, 'Bank index lock scratches the PE');
+assert.strictEqual(SPEC.banknifty.opts.sessionAlign, true, 'Bank skips CE below day-open / PE above it');
+assert.ok(!SPEC.nifty.opts.sessionAlign, 'Nifty session-align costs net; leave off');
 assert.strictEqual(SPEC.banknifty.opts.timeStopBars, 6);
 assert.strictEqual(SPEC.banknifty.opts.failStop, false);
 assert.strictEqual(SPEC.banknifty.opts.targetByScore[1], 0);

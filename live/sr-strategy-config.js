@@ -196,6 +196,12 @@ const EXIT_RULES = Object.freeze({
     targetByScore: { 1: 0, 2: 0, 3: 0 },
     structureExit: true,
     minStructurePts: 80,
+    // 15.6: skip Bank CE below the day's first print / PE above it (causal
+    // cousin of "CE on a down day"). Jun–Sep option ₹ 98,568 → 103,089
+    // (PF 3.21 → 3.49, loss ₹44,537 → ₹41,460, Aug still +₹9,957). Does not
+    // scratch 15 Sep Nifty 10:35 PE TIME +₹802 or Bank 13:35 PE TIME +₹1,211.
+    // Same filter on Nifty costs ₹10k net — Bank only.
+    sessionAlign: true,
   }),
   // Crude — had NO time exit, so losers rode to the 23:20 square-off (average
   // hold 179 min). 18 bars cuts that to ~69 min. IN-SAMPLE ONLY (89 days) and
@@ -249,5 +255,5 @@ module.exports = {
   EXIT_RULES, CUT_LOSS_RS, LOT_UNITS, DEFAULT_LOTS, OPTION_SL_MAX_RS, exitOptsFor,
   DAY_LOSS_STOP_RS, DAY_PROFIT_TARGET_RS, MAX_TRADES_PER_DAY, paperVehicleFor,
   STRATEGY_ID: 'sr-breakout',
-  STRATEGY_VERSION: 'sr-breakout.2026-09-15.5',
+  STRATEGY_VERSION: 'sr-breakout.2026-09-15.6',
 };

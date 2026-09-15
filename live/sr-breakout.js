@@ -126,6 +126,10 @@ function runSrBreakout(bars5, opts) {
   const minScore = num(opts.minScore, 0);
   const minBodyPts = num(opts.minBodyPts, 0);
   const maxBodyPts = num(opts.maxBodyPts, 0);
+  // Optional autopsy knobs (default off). skipWeekdays = Date#getDay IST (Mon=1).
+  // sessionAlign: skip CE below the day's first print, PE above it.
+  const skipWeekdays = Array.isArray(opts.skipWeekdays) ? opts.skipWeekdays : [];
+  const sessionAlign = !!opts.sessionAlign;
   // STRUCTURE: take profit when the INDEX completes the same measured-move
   // the chart draws (teal box far edge). Off unless height >= minStructurePts
   // so a 3-bar noise range cannot flatten the 15:15 hold.
@@ -152,6 +156,15 @@ function runSrBreakout(bars5, opts) {
   }
   const day5 = new Map();
   for (const b of bars5) { const d = ymd(b.date); if (!day5.has(d)) day5.set(d, []); day5.get(d).push(b); }
+  function againstSession(dir, px, day) {
+    if (!sessionAlign) return false;
+    const dayBars = day5.get(day) || [];
+    const open = dayBars.length ? Number(dayBars[0].open) : 0;
+    if (!(open > 0) || !(px > 0)) return false;
+    if (dir > 0 && px < open) return true;
+    if (dir < 0 && px > open) return true;
+    return false;
+  }
 
   const n = bars15.length;
   const isPH = new Array(n).fill(false), isPL = new Array(n).fill(false);
@@ -172,6 +185,10 @@ function runSrBreakout(bars5, opts) {
     if (cutHm && b.hm >= cutHm) continue;
     if (i < trendBars) continue;
     if (reportFromDate && b.d < reportFromDate) continue;  // warm-up day: skip trade
+    if (skipWeekdays.length) {
+      const wd = new Date(`${b.d}T12:00:00+05:30`).getDay();
+      if (skipWeekdays.includes(wd)) continue;
+    }
 
     // Resolve the wall(s) for this bar per mode.
     let wallHi = lastRes, wallLo = lastSup;
@@ -250,6 +267,7 @@ function runSrBreakout(bars5, opts) {
       entry = level; entryTime = hhmm(fillBar.date); retestTime = entryTime;
       entryAt = fillBar.date;
       after = after.slice(hi + 1);
+      if (againstSession(dir, entry, b.d)) continue;
       // LIVE/PAPER SAME CODE: the retest bar is enough to be IN the trade.
       // Requiring a *following* 5m bar meant Live only saw the signal after that
       // bar could already wick TARGET — Kite got no order (9 Sep 11:50).
@@ -278,6 +296,7 @@ function runSrBreakout(bars5, opts) {
       const hit = (day5.get(b.d) || []).find((x) => hhmm(x.date) === entryTime);
       entryAt = hit ? hit.date : `${b.d}T${entryTime}:00+05:30`;
     }
+    if (againstSession(dir, entry, b.d)) continue;
     const boxSeed = {
       dir, level, wallHi, wallLo, breakLow: b.l, breakHigh: b.h,
       lookFromHm, lookToHm, breakoutTime, entryTime, entryPrice: entry,
