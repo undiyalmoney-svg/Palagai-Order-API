@@ -41,7 +41,7 @@ const BOOKS = {
     entryPts: 27,
     gapLo: 100,
     gapHi: 175,
-    targetByScore: { 1: 20, 2: 25, 3: 30 },
+    targetByScore: { 1: 0, 2: 0, 3: 0 },
   },
   banknifty: {
     id: 'bank',
@@ -55,7 +55,7 @@ const BOOKS = {
     entryPts: 60,
     gapLo: 275,
     gapHi: 465,
-    targetByScore: { 1: 40, 2: 50, 3: 60 },
+    targetByScore: { 1: 0, 2: 0, 3: 0 },
   },
 };
 

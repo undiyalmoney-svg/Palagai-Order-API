@@ -28,7 +28,7 @@ const SPEC = {
     key: 'nifty', name: 'Nifty 50', token: '256265', unitsPerLot: LOT_UNITS.nifty,
     bookId: NIFTY_50_INSTRUMENT.id, root: 'NIFTY', step: 50, spotKey: 'NSE:NIFTY 50',
     session: { entryStartHm: '09:45', entryEndHm: '14:30', squareOffHm: '15:15' },
-    entryPts: 27, gapLo: 100, gapHi: 175, targetByScore: { 1: 20, 2: 25, 3: 30 },
+    entryPts: 27, gapLo: 100, gapHi: 175, targetByScore: { 1: 0, 2: 0, 3: 0 },
     // Cash Nifty 50 cannot be traded. Live BUYS the ATM weekly option
     // (CE on a bullish break, PE on a bearish break) — same as Bank/Crude.
     // Do not sell futures or sell premium.
@@ -40,7 +40,7 @@ const SPEC = {
     bookId: BANK_NIFTY_INSTRUMENT.id, root: 'BANKNIFTY', step: 100, spotKey: 'NSE:NIFTY BANK',
     exchange: 'NFO',
     session: { entryStartHm: '09:45', entryEndHm: '14:30', squareOffHm: '15:15' },
-    entryPts: 60, gapLo: 275, gapHi: 465, targetByScore: { 1: 40, 2: 50, 3: 60 },
+    entryPts: 60, gapLo: 275, gapHi: 465, targetByScore: { 1: 0, 2: 0, 3: 0 },
     opts: exitOptsFor('banknifty'),
   },
   crude: {

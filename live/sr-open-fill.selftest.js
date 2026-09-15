@@ -10,6 +10,7 @@
 const assert = require('assert');
 const { runSrBreakout } = require('./sr-breakout');
 const { decideLiveAction, liveTransactionType, SPEC } = require('./sr-live');
+const { exitOptsFor } = require('./sr-strategy-config');
 
 function hmStr(min) {
   return String(Math.floor(min / 60)).padStart(2, '0') + ':' + String(min % 60).padStart(2, '0');
@@ -82,6 +83,39 @@ const full = runSrBreakout(bars.concat(sessionBars(iso, signalPx)), opts);
 assert.ok(full.trades.length >= 1);
 assert.ok(full.trades[0].exitReason === 'TARGET' || full.trades[0].points <= -15,
   `later bars should complete the short, got ${full.trades[0].exitReason} ${full.trades[0].points}`);
+
+function holdPx(_i, min) {
+  if (min < 11 * 60 + 15) {
+    const px = 23555 + (min % 15) * 0.1;
+    return { o: px, c: px - 0.3, h: px + 2, l: px - 3 };
+  }
+  if (min === 11 * 60 + 15) return { o: 23550, c: 23495, h: 23552, l: 23490 };
+  if (min === 11 * 60 + 20) return { o: 23495, c: 23488, h: 23498, l: 23485 };
+  if (min === 11 * 60 + 25) return { o: 23488, c: 23520, h: 23580, l: 23484 };
+  // After fill: grind in favor ~2 pts/bar, never close back through the wall.
+  // Index +20 TARGET would still be open at bar 6; TIME 6 must flatten.
+  const n = Math.floor((min - (11 * 60 + 30)) / 5);
+  const c = 23518 - (n + 1) * 2;
+  return { o: c + 1, c, h: c + 2, l: c - 8 };
+}
+{
+  const withTarget = runSrBreakout(bars.concat(sessionBars(iso, holdPx, 12 * 60 + 30)), opts);
+  assert.ok(withTarget.trades.length >= 1);
+  assert.strictEqual(withTarget.trades[0].exitReason, 'TARGET',
+    `index +20 still scratches, got ${withTarget.trades[0].exitReason} @ ${withTarget.trades[0].exitTime}`);
+  const hold = runSrBreakout(bars.concat(sessionBars(iso, holdPx, 12 * 60 + 30)), {
+    ...opts,
+    ...exitOptsFor('nifty'),
+    failStop: false,
+  });
+  assert.ok(hold.trades.length >= 1);
+  assert.strictEqual(hold.trades[0].exitReason, 'TIME',
+    `shared DNA must hold to TIME 6, got ${hold.trades[0].exitReason} @ ${hold.trades[0].exitTime}`);
+  const inMin = 11 * 60 + 25;
+  const outMin = hold.trades[0].exitTime.split(':').map(Number);
+  const heldBars = ((outMin[0] * 60 + outMin[1]) - inMin) / 5;
+  assert.ok(heldBars >= 5 && heldBars <= 7, `hold should be ~6×5m, got ${heldBars} bars`);
+}
 
 console.log('sr-open-fill.selftest: ok', {
   fill: { in: open.entryTime, reason: open.exitReason, pts: open.points, opt: open.option },

@@ -34,7 +34,7 @@ const INSTRUMENTS = {
     // real money (Rs4,000 -> Rs788k combined, Rs3,000 -> worse still), so do not
     // shrink this without re-running the train/test split.
     session: { entryStartHm: '09:45', entryEndHm: '14:30', squareOffHm: '15:15' },
-    entryPts: 27, gapLo: 100, gapHi: 175, targetByScore: { 1: 20, 2: 25, 3: 30 },
+    entryPts: 27, gapLo: 100, gapHi: 175, targetByScore: { 1: 0, 2: 0, 3: 0 },
   },
   banknifty: {
     key: 'banknifty', name: 'Bank Nifty', token: '260105', unitsPerLot: LOT_UNITS.banknifty, 
@@ -49,7 +49,7 @@ const INSTRUMENTS = {
     // tell those apart from real failures, so it cuts the winners. The 4-bar time
     // exit already caps the worst trade at -Rs4,538 without that damage.
     session: { entryStartHm: '09:45', entryEndHm: '14:30', squareOffHm: '15:15' },
-    entryPts: 60, gapLo: 275, gapHi: 465, targetByScore: { 1: 40, 2: 50, 3: 60 },
+    entryPts: 60, gapLo: 275, gapHi: 465, targetByScore: { 1: 0, 2: 0, 3: 0 },
   },
   crude: {
     // PROVISIONAL / under observation — only ~80 days of history, not enough to
