@@ -141,8 +141,8 @@ assert.strictEqual(bankMapped.exitClock, '12:20:00 PM');
 assert.strictEqual(bankMapped.entryHm, '12:05:00');
 assert.strictEqual(bankMapped.exitHm, '12:20:00');
 assert.ok(bankMapped.entryPrice < 5000, `bank premium must not be index, got ${bankMapped.entryPrice}`);
-assert.strictEqual(bankMapped.stopPts, null, 'Bank has no index rupee cut-off');
-assert.strictEqual(bankMapped.indexStop, null);
+assert.strictEqual(bankMapped.stopPts, 2500 / 30, 'Bank TIME-6 DNA uses a ₹2,500 index cut');
+assert.ok(bankMapped.indexStop > bankMapped.indexEntry, 'Bank PE SL sits above index entry');
 assert.ok(
   bankMapped.slTrigger > 0 && bankMapped.slTrigger < bankMapped.optionEntryPremium,
   `Bank option SL still parks below fill (${bankMapped.slTrigger})`,

@@ -1,27 +1,31 @@
 'use strict';
 /**
- * Trade Bot DNA: one directional ATM option per day, hold the structure.
- * FAIL must not scratch a 1-bar close back through the wall.
- * TIME 6 must not flatten a still-working move at 30 minutes.
+ * Trade Bot DNA: one directional ATM option per day.
+ * TIME 6 flattens the August session-hold losers. FAIL stays off.
+ * TARGET stays 0. Bank has a rupee stop (re-measured on this TIME DNA).
  */
 const assert = require('assert');
 const { runSrBreakout } = require('./sr-breakout');
 const {
-  EXIT_RULES, exitOptsFor, MAX_TRADES_PER_DAY, STRATEGY_VERSION,
+  EXIT_RULES, CUT_LOSS_RS, OPTION_SL_MAX_RS, exitOptsFor, MAX_TRADES_PER_DAY, STRATEGY_VERSION,
 } = require('./sr-strategy-config');
 const { SPEC } = require('./sr-live');
 
-assert.strictEqual(STRATEGY_VERSION, 'sr-breakout.2026-09-15.3');
+assert.strictEqual(STRATEGY_VERSION, 'sr-breakout.2026-09-15.4');
 assert.strictEqual(EXIT_RULES.nifty.structureExit, true);
 assert.strictEqual(EXIT_RULES.banknifty.structureExit, true);
 assert.strictEqual(EXIT_RULES.nifty.minStructurePts, 40);
 assert.strictEqual(EXIT_RULES.banknifty.minStructurePts, 80);
 assert.strictEqual(MAX_TRADES_PER_DAY, 1);
 assert.strictEqual(EXIT_RULES.nifty.failStop, false);
-assert.strictEqual(EXIT_RULES.nifty.timeStopBars, 0);
+assert.strictEqual(EXIT_RULES.nifty.timeStopBars, 6);
+assert.strictEqual(EXIT_RULES.nifty.minScore, 1);
 assert.strictEqual(EXIT_RULES.nifty.targetByScore[1], 0);
 assert.strictEqual(EXIT_RULES.banknifty.failStop, false);
-assert.strictEqual(EXIT_RULES.banknifty.timeStopBars, 0);
+assert.strictEqual(EXIT_RULES.banknifty.timeStopBars, 6);
+assert.strictEqual(CUT_LOSS_RS.banknifty, 2500);
+assert.strictEqual(OPTION_SL_MAX_RS.banknifty, 2500);
+assert.ok(exitOptsFor('banknifty').stopPts > 0);
 assert.deepStrictEqual(SPEC.nifty.opts, exitOptsFor('nifty'));
 assert.deepStrictEqual(SPEC.banknifty.opts, exitOptsFor('banknifty'));
 
@@ -61,7 +65,6 @@ function failPx(min) {
   if (min === 11 * 60 + 15) return { o: 23550, c: 23495, h: 23552, l: 23490 };
   if (min === 11 * 60 + 20) return { o: 23495, c: 23488, h: 23498, l: 23485 };
   if (min === 11 * 60 + 25) return { o: 23488, c: 23520, h: 23580, l: 23484 };
-  // 1-bar close back through the broken wall (~23552) — old FAIL scratch.
   if (min === 11 * 60 + 30) return { o: 23518, c: 23570, h: 23575, l: 23510 };
   const n = Math.floor((min - (11 * 60 + 35)) / 5);
   const c = 23490 - n * 3;
@@ -91,12 +94,12 @@ assert.ok(scratched.trades[0].exitTime <= '11:35',
 assert.ok(held.trades.length >= 1);
 assert.notStrictEqual(held.trades[0].exitReason, 'FAIL',
   `new DNA must not FAIL-scratch, got ${held.trades[0].exitReason} @ ${held.trades[0].exitTime}`);
-assert.notStrictEqual(held.trades[0].exitReason, 'TIME');
+assert.strictEqual(held.trades[0].exitReason, 'TIME');
 assert.strictEqual(held.trades.length, 1, `one trade/day, got ${held.trades.length}`);
 const outMin = held.trades[0].exitTime.split(':').map(Number);
 const inMin = held.trades[0].entryTime.split(':').map(Number);
 const heldBars = ((outMin[0] * 60 + outMin[1]) - (inMin[0] * 60 + inMin[1])) / 5;
-assert.ok(heldBars > 6, `must hold past 6×5m, got ${heldBars} bars (${held.trades[0].entryTime}→${held.trades[0].exitTime})`);
+assert.ok(heldBars <= 6, `TIME 6 must flatten by 6×5m, got ${heldBars} bars (${held.trades[0].entryTime}→${held.trades[0].exitTime})`);
 
 function grindPx(min) {
   if (min < 11 * 60 + 15) {
@@ -117,9 +120,9 @@ const timeSix = runSrBreakout(grind, {
 });
 const sessionHold = runSrBreakout(grind, { ...base, ...exitOptsFor('nifty') });
 assert.strictEqual(timeSix.trades[0].exitReason, 'TIME');
-assert.notStrictEqual(sessionHold.trades[0].exitReason, 'TIME');
-assert.ok(sessionHold.trades[0].exitTime > timeSix.trades[0].exitTime,
-  `session hold ${sessionHold.trades[0].exitTime} must outlast TIME 6 ${timeSix.trades[0].exitTime}`);
+assert.strictEqual(sessionHold.trades[0].exitReason, 'TIME',
+  `shared DNA is TIME 6, got ${sessionHold.trades[0].exitReason}`);
+assert.strictEqual(sessionHold.trades[0].exitTime, timeSix.trades[0].exitTime);
 
 console.log('sr-one-day.selftest: ok', {
   failOld: { reason: scratched.trades[0].exitReason, out: scratched.trades[0].exitTime, n: scratched.trades.length },

@@ -23,7 +23,7 @@
  * -Rs5,374. The two must scale the same way or the caps are meaningless above
  * one lot.
  */
-const CUT_LOSS_RS = Object.freeze({ nifty: 5000, banknifty: 0, crude: 2500 });
+const CUT_LOSS_RS = Object.freeze({ nifty: 5000, banknifty: 2500, crude: 2500 });
 // Nifty's cut-off is a TOTAL rupee figure (see above), so the rupee risk is the
 // same at any lot size and only the point distance moves.
 // A Rs2,000 ceiling was tried and REVERTED. It does cap the worst single trade
@@ -63,7 +63,7 @@ const DEFAULT_LOTS = Object.freeze({ nifty: 1, banknifty: 1, crude: 5 });
  * rupee stop). Nifty/Crude match the index cut so the stop is the strategy,
  * not Trap v2.
  */
-const OPTION_SL_MAX_RS = Object.freeze({ nifty: 5000, banknifty: 0, crude: 2500 });
+const OPTION_SL_MAX_RS = Object.freeze({ nifty: 5000, banknifty: 2500, crude: 2500 });
 
 /**
  * Entry + exit rules per instrument. Every value here was walk-forward tested
@@ -105,19 +105,18 @@ const EXIT_RULES = Object.freeze({
   //     rather than removing the damage. The option exists in the engine
   //     (default 0 = off); leave it off unless a longer study says otherwise.
   nifty: Object.freeze({
-    wallMode: 'intraday', retest: true, timeStopBars: 0, maxRetestBars: 2,
-    // 1-day 1-trade hold (15 Sep 2026 DNA bump):
-    //   TIME 6 flattened winners at ~30 min. FAIL scratched 11:20 / 12:35 on a
-    //   1-bar close back through the wall. The book we want is one directional
-    //   ATM CE or PE held through the S/R box to 15:15 CLOSE (unless STOP).
-    // Index TARGET/LOCK/GIVEUP stay off. FAIL stays off (Bank already was).
+    wallMode: 'intraday', retest: true, timeStopBars: 6, maxRetestBars: 2,
+    // 15 Sep 2026 hold-to-close blew August paper: option ₹20,163 profit vs
+    // ₹30,444 loss (NET −₹10,281), 20 CLOSE holds = −₹18,137. TIME 6 (30 min)
+    // on the same entries flips Aug to +₹7,875 and keeps Jun/Jul/Sep green.
+    // FAIL stays off (1-bar wall close still scratches the move). TARGET 0.
     lockArmPts: 0, lockAtPts: 0, giveUpBar: 0, giveUpMinPts: 0,
     minScore: 1,
     capStopToDayBudget: true,
     failStop: false,
     targetByScore: { 1: 0, 2: 0, 3: 0 },
-    // Same wall the chart draws. Take profit only when the teal box is a real
-    // measured move (≥40 Nifty pts), else hold to 15:15 CLOSE.
+    // Same wall the chart draws. Take profit when the teal box is a real
+    // measured move (≥40 Nifty pts) before TIME 6; else flatten at 30 min.
     structureExit: true,
     minStructurePts: 40,
   }),
@@ -150,9 +149,11 @@ const EXIT_RULES = Object.freeze({
   //     confidence score all return 92-98% win across every bucket. An upper
   //     body cap did help while Bank entered on the raw breakout, but the
   //     retest supersedes it (see below).
-  //   failStop / rupee cut-off — both harmful: 9 bars + failStop is
-  //     -Rs239,478 (PF 0.67), and a Rs4,000 cut turns +Rs213,758 into
-  //     -Rs202,151, because 84% of trades that dip past -Rs3,000 still win.
+  //   failStop — still harmful on this window (Aug −₹335, not green).
+  //   rupee cut-off WITHOUT TIME (session hold) — still harmful: Bank ₹5,000
+  //     alone made Aug −₹11,044. WITH TIME 6 the recovery those stops killed
+  //     does not happen inside 30 min, so Bank ₹2,500 RAISES Jun–Sep net
+  //     ₹51,936 → ₹59,175 and keeps every month green.
   //   capStopToDayBudget is NOT set here, and cannot be: it only tightens an
   //     existing stop, and Bank deliberately has none. Giving Bank a Rs3,500
   //     stop so the day cap could bind turns +Rs211,022 into -Rs211,330
@@ -174,11 +175,12 @@ const EXIT_RULES = Object.freeze({
   //     Rs301,110 vs Rs283,075) at identical -Rs8,580 losses. Requiring a
   //     pullback already excludes the spent, over-extended moves.
   banknifty: Object.freeze({
-    wallMode: 'intraday', timeStopBars: 0,
+    wallMode: 'intraday', timeStopBars: 6,
     retest: true, maxRetestBars: 2,
     failStop: false,
-    // Same as Nifty: one ATM CE/PE, hold to 15:15 CLOSE, not +20 TARGET / TIME 6.
-    // Option SL is the money stop. Product stays MIS (not NRML).
+    // TIME 6 + ₹2,500 index/option stop. Product stays MIS (not NRML).
+    // Not +20 TARGET. Session-hold without a stop was August's Bank CLOSE
+    // bucket (CE 20 Aug −₹3,074 / −190 pts).
     lockArmPts: 0, lockAtPts: 0,
     targetByScore: { 1: 0, 2: 0, 3: 0 },
     structureExit: true,
@@ -236,5 +238,5 @@ module.exports = {
   EXIT_RULES, CUT_LOSS_RS, LOT_UNITS, DEFAULT_LOTS, OPTION_SL_MAX_RS, exitOptsFor,
   DAY_LOSS_STOP_RS, DAY_PROFIT_TARGET_RS, MAX_TRADES_PER_DAY, paperVehicleFor,
   STRATEGY_ID: 'sr-breakout',
-  STRATEGY_VERSION: 'sr-breakout.2026-09-15.3',
+  STRATEGY_VERSION: 'sr-breakout.2026-09-15.4',
 };

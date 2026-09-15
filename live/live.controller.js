@@ -27,7 +27,7 @@ async function health(_req, res) {
   res.json({
     status: 'ok',
     service: 'palagai-live-control',
-    note: 'Trade Bot paper/live: Nifty + Bank S/R. One ATM CE/PE per book per day, hold to 15:15. Not a straddle. Paper ₹ is CE/PE × lot. Live MIS. Day ±₹3,500. Crude off.',
+    note: 'Trade Bot paper/live: Nifty + Bank S/R. One ATM CE/PE per book per day, TIME 6 unless rupee stop / STRUCTURE. Not a straddle. Paper ₹ is CE/PE × lot. Live MIS. Day ±₹3,500. Crude off.',
     version: APP_VERSION,
     appBuild: APP_BUILD,
     dnaId: LIVE_GREEN_DNA.id,
