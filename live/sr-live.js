@@ -11,6 +11,7 @@ const optionStore = require('./sr-option-store');
 const { archiveSrInstruments, instrumentsWithArchive } = require('./instrument-archive');
 const { connectMongo, getDb } = require('./live.mongo');
 const { runSrBreakout } = require('./sr-breakout');
+const { chartPayload } = require('./sr-structure');
 // Exit/entry rules come from the SHARED config so Live and Paper cannot drift.
 const { exitOptsFor, DEFAULT_LOTS, DAY_LOSS_STOP_RS, DAY_PROFIT_TARGET_RS, MAX_TRADES_PER_DAY, LOT_UNITS, OPTION_SL_MAX_RS, STRATEGY_ID, STRATEGY_VERSION } = require('./sr-strategy-config');
 const { LiveBroker } = require('./live-broker');
@@ -81,7 +82,7 @@ function signalId(key, trade) {
  *  day the engine parks CLOSE on the last fetched 5-min bar (always <= now),
  *  which means "still open in the replay", not "session square-off done".
  *  Treating CLOSE as flat skipped every Monday buy even with Live on. */
-const ENGINE_DONE = new Set(['TARGET', 'TIME', 'FAIL', 'STOP', 'LOCK', 'GIVEUP']);
+const ENGINE_DONE = new Set(['TARGET', 'TIME', 'FAIL', 'STOP', 'LOCK', 'GIVEUP', 'STRUCTURE']);
 
 function stopDistancePts(trade, spec) {
   const fromOpts = Number(spec?.opts?.stopPts);
@@ -306,6 +307,27 @@ function liveTradesFromBroker(session) {
   return rows;
 }
 
+function mergeStructureOntoLiveTrades(rows, deskChart) {
+  const books = (deskChart && deskChart.books) || [];
+  return (rows || []).map((row) => {
+    const book = books.find((b) => b.id === row.instrumentId || b.label === row.instrumentName);
+    if (!book) return row;
+    const want = String(row.entryTime || '').replace(/.*T/, '').slice(0, 5);
+    const hit = (book.trades || []).find((t) => {
+      const hm = String(t.entryTime || '').replace(/.*T/, '').slice(0, 5);
+      return hm && hm === want;
+    }) || (!want ? (book.trades || []).slice(-1)[0] : null);
+    if (!hit) return row;
+    return {
+      ...row,
+      structure: hit.structure || row.structure || null,
+      indexEntry: hit.entryPrice != null ? hit.entryPrice : row.indexEntry,
+      indexExit: hit.exitPrice != null ? hit.exitPrice : row.indexExit,
+      level: hit.level,
+    };
+  });
+}
+
 function statusPayload(session) {
   const trades = liveTradesFromBroker(session);
   const positions = trades.map((t) => ({
@@ -337,7 +359,8 @@ function statusPayload(session) {
     strategyVersion: STRATEGY_VERSION,
     openSignals: Object.fromEntries(session.openSignal),
     positions,
-    trades,
+    trades: mergeStructureOntoLiveTrades(trades, session.deskChart),
+    deskChart: session.deskChart || null,
     kitePnl: session.broker && typeof session.broker.moneySnapshot === 'function'
       ? session.broker.moneySnapshot()
       : { closedRs: 0, openRs: 0, netRs: 0, legs: [] },
@@ -832,6 +855,26 @@ async function onTick(session) {
           // kept for the Paper/Live equality self-test.
           ...exitOptsFor(key, lots),
         });
+        const chart = chartPayload(candles, trades, {
+          id: spec.bookId, label: spec.name, fromHm: '09:15', toHm: spec.session.squareOffHm,
+        });
+        chart.trades = (trades || []).map((t) => ({
+          date: t.date,
+          entryTime: t.entryTime,
+          exitTime: t.exitTime,
+          exitReason: t.exitReason,
+          side: t.side,
+          option: t.option,
+          entryPrice: t.entryPrice,
+          exitPrice: t.exitPrice,
+          level: t.level,
+          structure: t.structure || null,
+        }));
+        session.deskChart = session.deskChart || { books: [] };
+        session.deskChart.books = [
+          ...(session.deskChart.books || []).filter((b) => b.id !== spec.bookId),
+          chart,
+        ];
         const last = trades[trades.length - 1];
         watchBits.push(
           last
@@ -965,4 +1008,5 @@ function status(userId) {
 module.exports = {
   start, stop, status, decideLiveAction, applyDeskLimits, signalId, hmToMin,
   engineTradeStillOpen, engineBookHasOpenTrade, mustExitHeldForNewLeg, matchHeldEngineTrade, pickOption, pickIndexFuture, selectNearestFut, liveTransactionType, liveTradesFromBroker, SPEC, FRESH_MINUTES, _sessions: sessions,
+  mergeStructureOntoLiveTrades,
 };

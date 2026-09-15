@@ -21,6 +21,8 @@
  * in POINTS; the caller applies lot / point-value for rupees.
  */
 
+const { structureOf } = require('./sr-structure');
+
 const PIVOT = 5;
 
 const hhmm = d => String(d).slice(11, 16);
@@ -124,6 +126,11 @@ function runSrBreakout(bars5, opts) {
   const minScore = num(opts.minScore, 0);
   const minBodyPts = num(opts.minBodyPts, 0);
   const maxBodyPts = num(opts.maxBodyPts, 0);
+  // STRUCTURE: take profit when the INDEX completes the same measured-move
+  // the chart draws (teal box far edge). Off unless height >= minStructurePts
+  // so a 3-bar noise range cannot flatten the 15:15 hold.
+  const structureExit = !!opts.structureExit;
+  const minStructurePts = num(opts.minStructurePts, 0);
 
   const bars15 = to15(bars5);
   const orbByDay = new Map();
@@ -168,6 +175,7 @@ function runSrBreakout(bars5, opts) {
 
     // Resolve the wall(s) for this bar per mode.
     let wallHi = lastRes, wallLo = lastSup;
+    let lookFromHm = b.hm, lookToHm = b.hm;
     if (wallMode === 'orb') {
       if (!(orbFromHm && orbToHm) || b.hm < orbToHm) continue;
       const or = orbOf(b.d);
@@ -176,10 +184,14 @@ function runSrBreakout(bars5, opts) {
       if (maxOrbPts > 0 && (or.hi - or.lo) > maxOrbPts) continue;
       wallHi = or.hi;
       wallLo = or.lo;
+      lookFromHm = orbFromHm;
+      lookToHm = orbToHm;
     } else if (wallMode === 'intraday') {
       // prior N 15-min candles on the SAME day (need them, else skip)
       if (i < intradayLookback || bars15[i - intradayLookback].d !== b.d) continue;
       wallHi = -Infinity; wallLo = Infinity;
+      lookFromHm = bars15[i - intradayLookback].hm;
+      lookToHm = bars15[i - 1].hm;
       for (let k = i - intradayLookback; k < i; k++) { if (bars15[k].d !== b.d) { wallHi = null; break; } wallHi = Math.max(wallHi, bars15[k].h); wallLo = Math.min(wallLo, bars15[k].l); }
       if (wallHi == null) continue;
     }
@@ -245,13 +257,18 @@ function runSrBreakout(bars5, opts) {
         const px = Number(fillBar.close) || entry;
         const ptsOpen = dir * (px - entry);
         st.trades++; st.pnl += ptsOpen;
-        trades.push({
+        trades.push(withStructure({
           date: b.d, side: dir > 0 ? 'BUY' : 'SELL', option: dir > 0 ? 'CE' : 'PE',
           confidence: score, entryTime, entryAt, entryPrice: round2(entry), level: round2(level),
+          wallHi: round2(wallHi), wallLo: round2(wallLo),
           breakoutTime, breakoutPrice: round2(breakoutPrice), retestTime,
           bodyPts: round2(body), target, exitTime: entryTime, exitAt: fillBar.date, exitPrice: round2(px),
           exitReason: 'CLOSE', points: round2(ptsOpen), openAtFill: true,
-        });
+        }, {
+          dir, level, wallHi, wallLo, breakLow: b.l, breakHigh: b.h,
+          lookFromHm, lookToHm, breakoutTime, entryTime, exitTime: entryTime,
+          entryPrice: entry, exitPrice: px, exitReason: 'CLOSE', openAtFill: true,
+        }));
         if (dayLossStop > 0 && st.pnl <= -dayLossStop) st.stopped = true;
         if (dayProfitTarget > 0 && st.pnl >= dayProfitTarget) st.stopped = true;
         continue;
@@ -261,6 +278,12 @@ function runSrBreakout(bars5, opts) {
       const hit = (day5.get(b.d) || []).find((x) => hhmm(x.date) === entryTime);
       entryAt = hit ? hit.date : `${b.d}T${entryTime}:00+05:30`;
     }
+    const boxSeed = {
+      dir, level, wallHi, wallLo, breakLow: b.l, breakHigh: b.h,
+      lookFromHm, lookToHm, breakoutTime, entryTime, entryPrice: entry,
+    };
+    const boxH = (structureOf(boxSeed) || {}).height || 0;
+    const useStructure = structureExit && boxH > 0 && boxH >= minStructurePts;
     let exit = after[after.length - 1].close;
     let exitTime = hhmm(after[after.length - 1].date);
     let exitAt = after[after.length - 1].date;
@@ -289,6 +312,7 @@ function runSrBreakout(bars5, opts) {
       // HARD STOP: adverse excursion hit the cut-off → out at the stop price.
       // Deliberately evaluated before the target (see stopPts above).
       if (effStop > 0 && adv <= -effStop) { exit = entry - dir * effStop; exitTime = hhmm(bar.date); exitAt = bar.date; reason = 'STOP'; break; }
+      if (useStructure && fav >= boxH) { exit = entry + dir * boxH; exitTime = hhmm(bar.date); exitAt = bar.date; reason = 'STRUCTURE'; break; }
       if (target > 0 && fav >= target) { exit = entry + dir * target; exitTime = hhmm(bar.date); exitAt = bar.date; reason = 'TARGET'; break; }
       if (lockArmPts > 0 && fav >= lockArmPts) locked = true;
       // GIVE-UP: no meaningful progress by the checkpoint bar → stop waiting.
@@ -306,12 +330,17 @@ function runSrBreakout(bars5, opts) {
     }
     const pts = dir * (exit - entry);
     st.trades++; st.pnl += pts;
-    trades.push({
+    trades.push(withStructure({
       date: b.d, side: dir > 0 ? 'BUY' : 'SELL', option: dir > 0 ? 'CE' : 'PE',
       confidence: score, entryTime, entryAt, entryPrice: round2(entry), level: round2(level),
+      wallHi: round2(wallHi), wallLo: round2(wallLo),
       breakoutTime, breakoutPrice: round2(breakoutPrice), retestTime,
       bodyPts: round2(body), target, exitTime, exitAt, exitPrice: round2(exit), exitReason: reason, points: round2(pts),
-    });
+    }, {
+      dir, level, wallHi, wallLo, breakLow: b.l, breakHigh: b.h,
+      lookFromHm, lookToHm, breakoutTime, entryTime, exitTime,
+      entryPrice: entry, exitPrice: exit, exitReason: reason, openAtFill: false,
+    }));
     // daily risk stop (checked after the trade completes)
     if (dayLossStop > 0 && st.pnl <= -dayLossStop) st.stopped = true;
     if (dayProfitTarget > 0 && st.pnl >= dayProfitTarget) st.stopped = true;
@@ -333,6 +362,11 @@ function runSrBreakout(bars5, opts) {
   return { trades, summary };
 }
 
+function withStructure(trade, boxArgs) {
+  const structure = structureOf(boxArgs);
+  if (structure) trade.structure = structure;
+  return trade;
+}
 function num(v, d) { const n = Number(v); return Number.isFinite(n) ? n : d; }
 function round2(x) { return Math.round((Number(x) || 0) * 100) / 100; }
 function addHm(hm, addMin) {
@@ -342,4 +376,4 @@ function addHm(hm, addMin) {
   return String(Math.floor(wrap / 60)).padStart(2, '0') + ':' + String(wrap % 60).padStart(2, '0');
 }
 
-module.exports = { runSrBreakout, to15 };
+module.exports = { runSrBreakout, to15, structureOf };

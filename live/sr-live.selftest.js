@@ -17,6 +17,10 @@ assert.strictEqual(n.giveUpBar, 0, 'give-up scratches CE/PE; hold to session CLO
 assert.strictEqual(n.targetByScore[1], 0, 'no +20 index TARGET on option books');
 assert.strictEqual(n.timeStopBars, 0, 'TIME 6 cut winners; hold to 15:15 CLOSE');
 assert.strictEqual(n.failStop, false, 'FAIL on a 1-bar wall close scratches the move');
+assert.strictEqual(n.structureExit, true, 'measured-move STRUCTURE uses the same box the chart draws');
+assert.strictEqual(n.minStructurePts, 40);
+assert.strictEqual(SPEC.banknifty.opts.structureExit, true);
+assert.strictEqual(SPEC.banknifty.opts.minStructurePts, 80);
 assert.strictEqual(OPTION_SL_MAX_RS.nifty, 5000);
 assert.strictEqual(OPTION_SL_MAX_RS.banknifty, 0, 'Bank keeps no rupee option cap');
 assert.strictEqual(SPEC.banknifty.opts.lockArmPts, 0, 'Bank index lock scratches the PE');
@@ -163,6 +167,8 @@ assert.strictEqual(engineTradeStillOpen(locked, '11:59'), true);
 assert.strictEqual(engineTradeStillOpen(locked, '12:00'), false);
 assert.strictEqual(engineBookHasOpenTrade([locked], '12:16'), false, 'two closed index trades must flatten leftover Kite PE');
 assert.strictEqual(engineBookHasOpenTrade([{ ...trade, exitReason: 'CLOSE', exitTime: '12:15' }], '12:16'), true);
+assert.strictEqual(engineTradeStillOpen({ ...trade, exitReason: 'STRUCTURE', exitTime: '11:00' }, '10:59'), true);
+assert.strictEqual(engineTradeStillOpen({ ...trade, exitReason: 'STRUCTURE', exitTime: '11:00' }, '11:00'), false);
 
 // onTick's loop variable is `key`. A typo exitOptsFor(k, lots) throws
 // "k is not defined" on every Nifty/Bank/Crude tick and blocks Live.

@@ -11,7 +11,11 @@ const {
 } = require('./sr-strategy-config');
 const { SPEC } = require('./sr-live');
 
-assert.strictEqual(STRATEGY_VERSION, 'sr-breakout.2026-09-15.2');
+assert.strictEqual(STRATEGY_VERSION, 'sr-breakout.2026-09-15.3');
+assert.strictEqual(EXIT_RULES.nifty.structureExit, true);
+assert.strictEqual(EXIT_RULES.banknifty.structureExit, true);
+assert.strictEqual(EXIT_RULES.nifty.minStructurePts, 40);
+assert.strictEqual(EXIT_RULES.banknifty.minStructurePts, 80);
 assert.strictEqual(MAX_TRADES_PER_DAY, 1);
 assert.strictEqual(EXIT_RULES.nifty.failStop, false);
 assert.strictEqual(EXIT_RULES.nifty.timeStopBars, 0);

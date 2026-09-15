@@ -8,6 +8,7 @@ const { blackScholesPrice, realizedVolAnnualized } = require('./bs-option-pricer
 const defaultMarket = require('./kite-market');
 const { lotsFromAvailableFunds } = require('./daily-desk-defaults');
 const { runSrBreakout } = require('./sr-breakout');
+const { chartPayload } = require('./sr-structure');
 const { computeProtectiveSlTrigger } = require('./strategy-core.cjs');
 const {
   optionRupees,
@@ -325,6 +326,11 @@ function mapTrade(t, book, lots, perPoint, vol) {
     allocated: true,
     pnlSource: 'index_x_lot_sr',
     lots,
+    quantity: book.unitsPerLot * lots,
+    level: t.level != null ? Number(t.level) : null,
+    wallHi: t.wallHi != null ? Number(t.wallHi) : null,
+    wallLo: t.wallLo != null ? Number(t.wallLo) : null,
+    structure: t.structure || null,
     spec: { engine: ENGINE, strategy: STRATEGY_ID, version: STRATEGY_VERSION },
   };
   return applyLiveOptionRupees(attachProtectiveSl(row, book));
@@ -541,9 +547,27 @@ async function runSrDesk({ authorization, fromDate, toDate, capitalRs, capitalSo
         label: book.name,
         sitOut: false,
         spec: { engine: ENGINE, strategy: STRATEGY_ID },
-        specText: `${book.name} S/R ${STRATEGY_VERSION} · 1 ATM CE/PE/day · hold to 15:15 · day ±₹${DAY_LOSS_STOP_RS}`,
+        specText: `${book.name} S/R ${STRATEGY_VERSION} · 1 ATM CE/PE/day · S/R box hold · day ±₹${DAY_LOSS_STOP_RS}`,
         totals: summarize(mapped),
         trades: mapped,
+        chart: (() => {
+          const chart = chartPayload(candles, trades, {
+            id: book.id, label: book.name, fromHm: '09:15', toHm: book.session.squareOffHm,
+          });
+          chart.trades = (trades || []).map((t) => ({
+            date: t.date,
+            entryTime: t.entryTime,
+            exitTime: t.exitTime,
+            exitReason: t.exitReason,
+            side: t.side,
+            option: t.option,
+            entryPrice: t.entryPrice,
+            exitPrice: t.exitPrice,
+            level: t.level,
+            structure: t.structure || null,
+          }));
+          return chart;
+        })(),
         bars: Array.isArray(candles) ? candles.length : 0,
         status: mapped.length ? 'taken' : 'waiting',
         why: instrumentRow(book, mapped).why,
@@ -602,8 +626,9 @@ async function runSrDesk({ authorization, fromDate, toDate, capitalRs, capitalSo
     specText: taken.map((t) => `${t.instrumentName} S/R ×${t.lots}`).join(' · '),
     books: booksOut,
     coreBooks: booksOut.filter((b) => b.id === 'nifty' || b.id === 'bank' || b.id === 'crude'),
+    deskChart: { books: booksOut.filter((b) => b.chart).map((b) => b.chart) },
     note:
-      'This desk trades only Nifty 50 and Bank Nifty (S/R wall-break, with-trend). One ATM CE or PE per book per day, held to 15:15 CLOSE unless the rupee stop hits — not TIME 6, not FAIL on a 1-bar close through the wall, not a +20 index TARGET. Product stays MIS. Paper ₹ shadows Live: ATM CE/PE premium × lot (Nifty 65 / Bank 30), minus ₹20/lot. In/Out are NSE 5-minute option OHLC when the range is ≤14 days, otherwise modeled weekly premium. Live rests an option SL. Crude stays off.',
+      'This desk trades only Nifty 50 and Bank Nifty. With-trend S/R wall break + retest, one ATM CE or PE per book per day (qty 65 / 30, MIS). Holds the S/R box to 15:15 CLOSE unless the rupee stop hits, or the INDEX completes the same measured-move the chart draws (STRUCTURE). Not TIME 6, not FAIL on a 1-bar close through the wall, not a +20 index TARGET. Paper ₹ shadows Live: ATM CE/PE premium × lot, minus ₹20/lot. In/Out are NSE 5-minute option OHLC when the range is ≤14 days, otherwise modeled weekly premium. Live rests an option SL. Crude stays off.',
     instruments: booksOut
       .filter((b) => b.id === 'nifty' || b.id === 'bank')
       .map((b) => instrumentRow({ id: b.id, name: b.label }, b.trades || [])),
@@ -639,4 +664,5 @@ module.exports = {
   nextWeeklyExpiry,
   formatClock12,
   summarize,
+  chartPayload,
 };

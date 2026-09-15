@@ -116,6 +116,10 @@ const EXIT_RULES = Object.freeze({
     capStopToDayBudget: true,
     failStop: false,
     targetByScore: { 1: 0, 2: 0, 3: 0 },
+    // Same wall the chart draws. Take profit only when the teal box is a real
+    // measured move (≥40 Nifty pts), else hold to 15:15 CLOSE.
+    structureExit: true,
+    minStructurePts: 40,
   }),
   // Bank — 6 bars + profit lock armed at +20/12 on options.
   // 2026-08-10→09-08 looked better at 4-bar TIME (one loser −40.6 → −8 pts).
@@ -177,6 +181,8 @@ const EXIT_RULES = Object.freeze({
     // Option SL is the money stop. Product stays MIS (not NRML).
     lockArmPts: 0, lockAtPts: 0,
     targetByScore: { 1: 0, 2: 0, 3: 0 },
+    structureExit: true,
+    minStructurePts: 80,
   }),
   // Crude — had NO time exit, so losers rode to the 23:20 square-off (average
   // hold 179 min). 18 bars cuts that to ~69 min. IN-SAMPLE ONLY (89 days) and
@@ -230,5 +236,5 @@ module.exports = {
   EXIT_RULES, CUT_LOSS_RS, LOT_UNITS, DEFAULT_LOTS, OPTION_SL_MAX_RS, exitOptsFor,
   DAY_LOSS_STOP_RS, DAY_PROFIT_TARGET_RS, MAX_TRADES_PER_DAY, paperVehicleFor,
   STRATEGY_ID: 'sr-breakout',
-  STRATEGY_VERSION: 'sr-breakout.2026-09-15.2',
+  STRATEGY_VERSION: 'sr-breakout.2026-09-15.3',
 };
