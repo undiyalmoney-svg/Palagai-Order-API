@@ -553,7 +553,7 @@ async function runSrDesk({ authorization, fromDate, toDate, capitalRs, capitalSo
         label: book.name,
         sitOut: false,
         spec: { engine: ENGINE, strategy: STRATEGY_ID },
-        specText: `${book.name} S/R ${STRATEGY_VERSION} · ≤2 ATM CE/PE/day · TIME 6 · day ±₹${DAY_LOSS_STOP_RS}`,
+        specText: `${book.name} S/R ${STRATEGY_VERSION} · ≤2 ATM CE/PE/day · TIME ${exitOptsFor(book.key).timeStopBars || 0} · day ±₹${DAY_LOSS_STOP_RS}`,
         totals: summarize(mapped),
         trades: mapped,
         chart: (() => {

@@ -130,6 +130,9 @@ function runSrBreakout(bars5, opts) {
   // sessionAlign: skip CE below the day's first print, PE above it.
   const skipWeekdays = Array.isArray(opts.skipWeekdays) ? opts.skipWeekdays : [];
   const sessionAlign = !!opts.sessionAlign;
+  // After a STOP on this book-day, skip remaining entries (do not "revenge"
+  // the cut). Default off — 15.6 takes the second slot after a stop.
+  const haltAfterStop = !!opts.haltAfterStop;
   // STRUCTURE: take profit when the INDEX completes the same measured-move
   // the chart draws (teal box far edge). Off unless height >= minStructurePts
   // so a 3-bar noise range cannot flatten the 15:15 hold.
@@ -217,6 +220,7 @@ function runSrBreakout(bars5, opts) {
     let st = dayState.get(b.d);
     if (!st) { st = { trades: 0, pnl: 0, stopped: false }; dayState.set(b.d, st); }
     if (st.stopped || st.trades >= maxTradesPerDay) continue;
+    if (haltAfterStop && st.haltStop) continue;
 
     const body = b.c - b.o;
     const trend = b.c - bars15[i - trendBars].c;
@@ -361,6 +365,7 @@ function runSrBreakout(bars5, opts) {
       entryPrice: entry, exitPrice: exit, exitReason: reason, openAtFill: false,
     }));
     // daily risk stop (checked after the trade completes)
+    if (reason === 'STOP' && haltAfterStop) st.haltStop = true;
     if (dayLossStop > 0 && st.pnl <= -dayLossStop) st.stopped = true;
     if (dayProfitTarget > 0 && st.pnl >= dayProfitTarget) st.stopped = true;
   }

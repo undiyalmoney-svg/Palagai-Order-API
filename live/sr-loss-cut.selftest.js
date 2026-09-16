@@ -10,10 +10,10 @@ const { PLAYBOOK } = require('./crude-bot-desk');
 
 assert.strictEqual(EXIT_RULES.nifty.failStop, false);
 assert.ok(!EXIT_RULES.banknifty.failStop, 'Bank must not get failStop');
-assert.strictEqual(EXIT_RULES.banknifty.timeStopBars, 6);
+assert.strictEqual(EXIT_RULES.banknifty.timeStopBars, 8);
 assert.strictEqual(EXIT_RULES.nifty.timeStopBars, 6);
 assert.strictEqual(exitOptsFor('nifty', 1).failStop, false);
-assert.strictEqual(exitOptsFor('banknifty', 1).timeStopBars, 6);
+assert.strictEqual(exitOptsFor('banknifty', 1).timeStopBars, 8);
 assert.strictEqual(exitOptsFor('banknifty', 1).failStop, false);
 assert.ok(exitOptsFor('banknifty', 1).stopPts > 0, 'Bank now has a rupee index stop');
 assert.strictEqual(MAX_TRADES_PER_DAY, 2);

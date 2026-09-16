@@ -98,27 +98,33 @@ function score(candles, patch) {
 const candles = JSON.parse(fs.readFileSync(CACHE, 'utf8'));
 const paperEqLive = JSON.stringify(exitOptsFor('nifty')) === JSON.stringify(SPEC.nifty.opts)
   && JSON.stringify(exitOptsFor('banknifty')) === JSON.stringify(SPEC.banknifty.opts);
-const v14 = score(candles, { maxTradesPerDay: 1, giveOff: true, sessionAlignOff: true });
-const v15 = score(candles, { sessionAlignOff: true });
-const v16 = score(candles, {});
+const v14 = score(candles, { maxTradesPerDay: 1, giveOff: true, sessionAlignOff: true, banknifty: { timeStopBars: 6 } });
+const v15 = score(candles, { sessionAlignOff: true, banknifty: { timeStopBars: 6 } });
+const v16 = score(candles, { banknifty: { timeStopBars: 6 } });
+const v17 = score(candles, {});
 const out = {
   strategyVersion: STRATEGY_VERSION,
   maxTradesPerDay: MAX_TRADES_PER_DAY,
   paperEqualsLive: paperEqLive,
+  bankTimeStopBars: exitOptsFor('banknifty').timeStopBars,
+  niftyTimeStopBars: exitOptsFor('nifty').timeStopBars,
   bankSessionAlign: !!exitOptsFor('banknifty').sessionAlign,
   niftySessionAlign: !!exitOptsFor('nifty').sessionAlign,
   niftyGive: { bar: exitOptsFor('nifty').giveUpBar, min: exitOptsFor('nifty').giveUpMinPts },
   before_15_4: v14,
   after_15_5: v15,
   after_15_6: v16,
+  after_15_7: v17,
 };
 console.log(JSON.stringify(out, null, 2));
-if (STRATEGY_VERSION !== 'sr-breakout.2026-09-15.6') process.exit(1);
+if (STRATEGY_VERSION !== 'sr-breakout.2026-09-16.7') process.exit(1);
 if (!paperEqLive) process.exit(2);
 if (!exitOptsFor('banknifty').sessionAlign) process.exit(6);
 if (exitOptsFor('nifty').sessionAlign) process.exit(7);
-if (v16.aug < 0) process.exit(3);
-if (v16.net <= v15.net) process.exit(4);
+if (exitOptsFor('banknifty').timeStopBars !== 8) process.exit(10);
+if (exitOptsFor('nifty').timeStopBars !== 6) process.exit(11);
+if (v17.aug < 0) process.exit(3);
+if (v17.net <= v16.net) process.exit(4);
 if (v14.net !== 59175) {
   console.error('unexpected 15.4 baseline', v14.net);
   process.exit(5);
@@ -130,4 +136,8 @@ if (v15.net !== 98568) {
 if (v16.net !== 103089) {
   console.error('unexpected 15.6 net', v16.net);
   process.exit(9);
+}
+if (v17.net !== 108303) {
+  console.error('unexpected 15.7 net', v17.net);
+  process.exit(12);
 }

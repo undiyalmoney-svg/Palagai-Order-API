@@ -128,7 +128,11 @@ const EXIT_RULES = Object.freeze({
     structureExit: true,
     minStructurePts: 40,
   }),
-  // Bank — 6 bars + profit lock armed at +20/12 on options.
+  // Bank — 8 bars (40 min) TIME. 15.6 was TIME 6; 16 Sep hunt on Jun–Sep
+  // option ₹ (Trade Bot month UI) lifts TIME 8 to ₹108,303 vs 15.6 ₹103,089
+  // with every month still green (Aug ₹9,957 → ₹10,648). TIME 0 / session
+  // hold is rejected (Aug CLOSE bleed). Nifty stays TIME 6 — TIME 8 there
+  // turns the 16 Sep 11:50 PE into a STOP and drops Jun–Sep net.
   // 2026-08-10→09-08 looked better at 4-bar TIME (one loser −40.6 → −8 pts).
   // Kite 5m 2026-06-01→09-14 (live token) reverses that: 4-bar TIME
   //   loss ₹6,142 → ₹7,469  net ₹79,698 → ₹77,792  (one extra loser).
@@ -183,7 +187,7 @@ const EXIT_RULES = Object.freeze({
   //     Rs301,110 vs Rs283,075) at identical -Rs8,580 losses. Requiring a
   //     pullback already excludes the spent, over-extended moves.
   banknifty: Object.freeze({
-    wallMode: 'intraday', timeStopBars: 6,
+    wallMode: 'intraday', timeStopBars: 8,
     retest: true, maxRetestBars: 2,
     failStop: false,
     // TIME 6 + ₹2,500 index/option stop. Product stays MIS (not NRML).
@@ -201,6 +205,8 @@ const EXIT_RULES = Object.freeze({
     // (PF 3.21 → 3.49, loss ₹44,537 → ₹41,460, Aug still +₹9,957). Does not
     // scratch 15 Sep Nifty 10:35 PE TIME +₹802 or Bank 13:35 PE TIME +₹1,211.
     // Same filter on Nifty costs ₹10k net — Bank only.
+    // 15.7: TIME 8 (not 6). Same session-align. Bank ₹2,500 stop stays —
+    // tightening to ₹1,500 cuts 16 Sep STOP but costs ~₹12k Jun–Sep.
     sessionAlign: true,
   }),
   // Crude — had NO time exit, so losers rode to the 23:20 square-off (average
@@ -255,5 +261,5 @@ module.exports = {
   EXIT_RULES, CUT_LOSS_RS, LOT_UNITS, DEFAULT_LOTS, OPTION_SL_MAX_RS, exitOptsFor,
   DAY_LOSS_STOP_RS, DAY_PROFIT_TARGET_RS, MAX_TRADES_PER_DAY, paperVehicleFor,
   STRATEGY_ID: 'sr-breakout',
-  STRATEGY_VERSION: 'sr-breakout.2026-09-15.6',
+  STRATEGY_VERSION: 'sr-breakout.2026-09-16.7',
 };
