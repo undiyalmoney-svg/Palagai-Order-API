@@ -1,6 +1,6 @@
 'use strict';
 const assert = require('assert');
-const { overlayPaperWithLiveFills, liveWhy, liveFillsFromSnap, clockOf } = require('./sr-paper-live-overlay');
+const { overlayPaperWithLiveFills, liveWhy, liveFillsFromSnap, liveFillsFromKiteOrders, clockOf } = require('./sr-paper-live-overlay');
 
 assert.strictEqual(clockOf('2026-09-16T11:20:00+0530'), '11:20');
 assert.strictEqual(liveWhy({ closedBy: 'sl' }, { exitReason: 'STOP' }), 'STOP');
@@ -58,5 +58,25 @@ const snap = {
   },
 };
 assert.strictEqual(liveFillsFromSnap(snap).length, 2);
+
+{
+  const kite = liveFillsFromKiteOrders([
+    { tag: 'PALAGAI', transaction_type: 'BUY', status: 'COMPLETE', filled_quantity: 30, average_price: 776.75, tradingsymbol: 'BANKNIFTY26SEP56200CE', order_timestamp: '2026-09-16 10:51:42' },
+    { tag: 'PALAGAISL', transaction_type: 'SELL', status: 'COMPLETE', filled_quantity: 30, average_price: 735.1, tradingsymbol: 'BANKNIFTY26SEP56200CE', order_timestamp: '2026-09-16 11:19:05', trigger_price: 735.1 },
+    { tag: 'PALAGAI', transaction_type: 'BUY', status: 'COMPLETE', filled_quantity: 65, average_price: 144.15, tradingsymbol: 'NIFTY2692223200PE', order_timestamp: '2026-09-16 11:30:05' },
+    { tag: 'PALAGAI', transaction_type: 'SELL', status: 'COMPLETE', filled_quantity: 65, average_price: 138.75, tradingsymbol: 'NIFTY2692223200PE', order_timestamp: '2026-09-16 11:40:36' },
+  ], '2026-09-16');
+  assert.strictEqual(kite.length, 2);
+  const npe = kite.find((f) => /PE$/.test(f.tradingSymbol));
+  const bce = kite.find((f) => /CE$/.test(f.tradingSymbol));
+  assert.strictEqual(npe.entryPremium, 144.15);
+  assert.strictEqual(npe.exitPremium, 138.75);
+  assert.strictEqual(npe.closedBy, 'exit');
+  assert.strictEqual(bce.closedBy, 'sl');
+  const fromKite = overlayPaperWithLiveFills(paper, kite);
+  assert.strictEqual(fromKite[0].exitReason, 'GIVEUP');
+  assert.strictEqual(fromKite[0].optionPnlRs, -351);
+  assert.ok(/Live filled 11:20 GIVEUP/.test(fromKite[1].skipReason));
+}
 
 console.log('sr-paper-live-overlay.selftest: ok');

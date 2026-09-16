@@ -55,6 +55,52 @@ function unitsOf(row) {
   return per * lots;
 }
 
+function liveFillsFromKiteOrders(orders, dayIso) {
+  const buys = [];
+  const sells = [];
+  for (const o of orders || []) {
+    const tag = String(o.tag || '');
+    if (!/^PALAGAI/i.test(tag)) continue;
+    if (String(o.status || '').toUpperCase() !== 'COMPLETE') continue;
+    const ts = String(o.order_timestamp || o.exchange_timestamp || '');
+    if (dayIso && !ts.startsWith(dayIso)) continue;
+    const qty = Number(o.filled_quantity || o.quantity || 0);
+    const px = Number(o.average_price || 0);
+    if (!(qty > 0) || !(px > 0)) continue;
+    const rec = {
+      tradingSymbol: o.tradingsymbol,
+      instrumentId: /BANKNIFTY/i.test(o.tradingsymbol || '') ? 'bank-nifty' : 'nifty-50',
+      quantity: qty,
+      entryTime: ts,
+    };
+    const side = String(o.transaction_type || '').toUpperCase();
+    if (side === 'BUY' && tag.toUpperCase() === 'PALAGAI') buys.push({ ...rec, entryPremium: px });
+    if (side === 'SELL') {
+      sells.push({
+        ...rec,
+        exitPremium: px,
+        closedBy: /SL/i.test(tag) ? 'sl' : 'exit',
+        slTrigger: /SL/i.test(tag) ? Number(o.trigger_price || px) || px : null,
+      });
+    }
+  }
+  const used = new Set();
+  const out = [];
+  for (const buy of buys) {
+    const sell = sells.find((s) => !used.has(s) && s.tradingSymbol === buy.tradingSymbol && String(s.entryTime) >= String(buy.entryTime));
+    if (sell) used.add(sell);
+    out.push({
+      ...buy,
+      status: 'flat',
+      exitPremium: sell ? sell.exitPremium : null,
+      closedBy: sell ? sell.closedBy : 'exit',
+      slTrigger: sell && sell.slTrigger,
+      quantity: buy.quantity,
+    });
+  }
+  return out;
+}
+
 function liveFillsFromSnap(snap) {
   const broker = snap && snap.broker;
   if (!broker) return [];
@@ -205,6 +251,7 @@ module.exports = {
   bookKey,
   liveWhy,
   liveFillsFromSnap,
+  liveFillsFromKiteOrders,
   matchLiveFill,
   overlayPaperWithLiveFills,
   overlayDeskBooks,

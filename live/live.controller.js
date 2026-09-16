@@ -6,7 +6,8 @@ const { preflightLive, firstFail } = require('./live-preflight');
 const { parseTradeBotWindow } = require('./trade-bot-dates');
 const { lotsFromAvailableFunds, crudeLotsFromAvailableFunds } = require('./daily-desk-defaults');
 const persist = require('./desk-live-persist');
-const { liveFillsFromSnap } = require('./sr-paper-live-overlay');
+const { liveFillsFromSnap, liveFillsFromKiteOrders } = require('./sr-paper-live-overlay');
+const { kiteService } = require('../services/kite.service');
 const { MAX_TRADES_PER_DAY } = require('./sr-strategy-config');
 const { getOptionOhlcAndPrice } = require('./option-ohlc');
 const { findEntryExitWait, getLastFound, parseUniverse } = require('./ee-wait-research');
@@ -390,6 +391,15 @@ async function start(req, res) {
   }
   try {
     const snap = persist.load('sr', uid);
+    let liveFills = liveFillsFromSnap(snap);
+    if (window.today && !liveFills.some((f) => Number(f.entryPremium || f.optionEntryPremium) > 0)) {
+      try {
+        const res = await kiteService.getOrders(authorization);
+        liveFills = liveFillsFromKiteOrders(res.data?.data || [], window.fromDate);
+      } catch {
+        /* overlay optional — paper still runs on 5m */
+      }
+    }
     const out = await runSrDesk({
       authorization,
       fromDate: window.fromDate,
@@ -399,7 +409,7 @@ async function start(req, res) {
       liveMoney: false,
     }, {
       liveSnap: snap,
-      liveFills: liveFillsFromSnap(snap),
+      liveFills,
     });
     res.json({
       ...out,
