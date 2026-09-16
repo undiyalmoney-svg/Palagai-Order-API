@@ -11,11 +11,11 @@ const {
 } = require('./sr-strategy-config');
 const { SPEC } = require('./sr-live');
 
-assert.strictEqual(STRATEGY_VERSION, 'sr-breakout.2026-09-16.7');
-assert.strictEqual(EXIT_RULES.nifty.structureExit, true);
-assert.strictEqual(EXIT_RULES.banknifty.structureExit, true);
-assert.strictEqual(EXIT_RULES.nifty.minStructurePts, 40);
-assert.strictEqual(EXIT_RULES.banknifty.minStructurePts, 80);
+assert.strictEqual(STRATEGY_VERSION, 'sr-breakout.2026-09-16.8');
+assert.strictEqual(EXIT_RULES.nifty.structureExit, false);
+assert.strictEqual(EXIT_RULES.banknifty.structureExit, false);
+assert.strictEqual(EXIT_RULES.nifty.minStructurePts, 0);
+assert.strictEqual(EXIT_RULES.banknifty.minStructurePts, 0);
 assert.strictEqual(MAX_TRADES_PER_DAY, 2);
 assert.strictEqual(EXIT_RULES.nifty.failStop, false);
 assert.strictEqual(EXIT_RULES.nifty.timeStopBars, 6);
@@ -29,8 +29,8 @@ assert.strictEqual(EXIT_RULES.banknifty.giveUpBar, 4);
 assert.strictEqual(EXIT_RULES.banknifty.giveUpMinPts, 12);
 assert.strictEqual(EXIT_RULES.banknifty.sessionAlign, true);
 assert.ok(!EXIT_RULES.nifty.sessionAlign);
-assert.strictEqual(CUT_LOSS_RS.banknifty, 2500);
-assert.strictEqual(OPTION_SL_MAX_RS.banknifty, 2500);
+assert.strictEqual(CUT_LOSS_RS.banknifty, 3500);
+assert.strictEqual(OPTION_SL_MAX_RS.banknifty, 3500);
 assert.ok(exitOptsFor('banknifty').stopPts > 0);
 assert.deepStrictEqual(SPEC.nifty.opts, exitOptsFor('nifty'));
 assert.deepStrictEqual(SPEC.banknifty.opts, exitOptsFor('banknifty'));

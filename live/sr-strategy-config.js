@@ -23,7 +23,7 @@
  * -Rs5,374. The two must scale the same way or the caps are meaningless above
  * one lot.
  */
-const CUT_LOSS_RS = Object.freeze({ nifty: 5000, banknifty: 2500, crude: 2500 });
+const CUT_LOSS_RS = Object.freeze({ nifty: 5000, banknifty: 3500, crude: 2500 });
 // Nifty's cut-off is a TOTAL rupee figure (see above), so the rupee risk is the
 // same at any lot size and only the point distance moves.
 // A Rs2,000 ceiling was tried and REVERTED. It does cap the worst single trade
@@ -66,7 +66,7 @@ const DEFAULT_LOTS = Object.freeze({ nifty: 1, banknifty: 1, crude: 5 });
  * rupee stop). Nifty/Crude match the index cut so the stop is the strategy,
  * not Trap v2.
  */
-const OPTION_SL_MAX_RS = Object.freeze({ nifty: 5000, banknifty: 2500, crude: 2500 });
+const OPTION_SL_MAX_RS = Object.freeze({ nifty: 5000, banknifty: 3500, crude: 2500 });
 
 /**
  * Entry + exit rules per instrument. Every value here was walk-forward tested
@@ -123,10 +123,12 @@ const EXIT_RULES = Object.freeze({
     capStopToDayBudget: true,
     failStop: false,
     targetByScore: { 1: 0, 2: 0, 3: 0 },
-    // Same wall the chart draws. Take profit when the teal box is a real
-    // measured move (≥40 Nifty pts) before TIME 6; else flatten at 30 min.
-    structureExit: true,
-    minStructurePts: 40,
+    // 15.8: STRUCTURE take-profit OFF. The chart still draws the box; we do
+    // not flatten when the index completes it. Walk-forward TRAIN 2021-01..
+    // 2025-12 (60/60 green, closeN=1) preferred TIME 6 + box off over TIME 0
+    // (TIME 0 recreates August CLOSE bleed on 2026 OOS).
+    structureExit: false,
+    minStructurePts: 0,
   }),
   // Bank — 8 bars (40 min) TIME. 15.6 was TIME 6; 16 Sep hunt on Jun–Sep
   // option ₹ (Trade Bot month UI) lifts TIME 8 to ₹108,303 vs 15.6 ₹103,089
@@ -198,8 +200,11 @@ const EXIT_RULES = Object.freeze({
     lockArmPts: 0, lockAtPts: 0,
     giveUpBar: 4, giveUpMinPts: 12,
     targetByScore: { 1: 0, 2: 0, 3: 0 },
-    structureExit: true,
-    minStructurePts: 80,
+    // 15.8: STRUCTURE off + Bank cut ₹3,500 (was ₹2,500). TRAIN 2021-01..
+    // 2025-12 freeze among TIME 6/8 anti-CLOSE variants. OOS 2026-01..09-16
+    // 9/9 green, no CLOSE bucket. TIME 0 / TIME 12 vetoed (CLOSE returns).
+    structureExit: false,
+    minStructurePts: 0,
     // 15.6: skip Bank CE below the day's first print / PE above it (causal
     // cousin of "CE on a down day"). Jun–Sep option ₹ 98,568 → 103,089
     // (PF 3.21 → 3.49, loss ₹44,537 → ₹41,460, Aug still +₹9,957). Does not
@@ -207,6 +212,8 @@ const EXIT_RULES = Object.freeze({
     // Same filter on Nifty costs ₹10k net — Bank only.
     // 15.7: TIME 8 (not 6). Same session-align. Bank ₹2,500 stop stays —
     // tightening to ₹1,500 cuts 16 Sep STOP but costs ~₹12k Jun–Sep.
+    // 15.8: Bank ₹3,500. Same TIME 8 / sessionAlign. 16 Sep paper STOP is
+    // worse (−₹1,864 vs −₹1,354); Sep month and 2026 OOS still greener.
     sessionAlign: true,
   }),
   // Crude — had NO time exit, so losers rode to the 23:20 square-off (average
@@ -261,5 +268,5 @@ module.exports = {
   EXIT_RULES, CUT_LOSS_RS, LOT_UNITS, DEFAULT_LOTS, OPTION_SL_MAX_RS, exitOptsFor,
   DAY_LOSS_STOP_RS, DAY_PROFIT_TARGET_RS, MAX_TRADES_PER_DAY, paperVehicleFor,
   STRATEGY_ID: 'sr-breakout',
-  STRATEGY_VERSION: 'sr-breakout.2026-09-16.7',
+  STRATEGY_VERSION: 'sr-breakout.2026-09-16.8',
 };

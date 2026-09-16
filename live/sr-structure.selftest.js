@@ -9,7 +9,7 @@ const { exitOptsFor, MAX_TRADES_PER_DAY, STRATEGY_VERSION } = require('./sr-stra
 const { SPEC, decideLiveAction, mergeStructureOntoLiveTrades } = require('./sr-live');
 const { BOOKS, mapTrade } = require('./sr-desk');
 
-assert.strictEqual(STRATEGY_VERSION, 'sr-breakout.2026-09-16.7');
+assert.strictEqual(STRATEGY_VERSION, 'sr-breakout.2026-09-16.8');
 assert.strictEqual(MAX_TRADES_PER_DAY, 2);
 assert.deepStrictEqual(SPEC.nifty.opts, exitOptsFor('nifty'), 'Live Nifty opts === Paper exitOptsFor');
 assert.deepStrictEqual(SPEC.crude.opts, exitOptsFor('crude'), 'Live Crude opts === Paper exitOptsFor');
@@ -112,40 +112,45 @@ const liveRun = runSrBreakout(day, { ...base, ...liveOpts });
 assert.ok(paperRun.trades.length >= 1, 'wide-wall day must print');
 assert.strictEqual(paperRun.trades[0].exitReason, liveRun.trades[0].exitReason);
 assert.strictEqual(paperRun.trades[0].exitTime, liveRun.trades[0].exitTime);
-assert.strictEqual(paperRun.trades[0].exitReason, 'STRUCTURE');
-assert.ok(paperRun.trades[0].structure);
+assert.notStrictEqual(paperRun.trades[0].exitReason, 'STRUCTURE', '15.8 DNA does not STRUCTURE-exit');
+assert.ok(paperRun.trades[0].structure, 'boxes still attach when STRUCTURE exit is off');
 assert.ok(paperRun.trades[0].structure.height >= 40);
-assert.strictEqual(paperRun.trades[0].structure.wall, paperRun.trades[0].level);
+
+const structOn = runSrBreakout(day, { ...base, structureExit: true, minStructurePts: 40 });
+assert.strictEqual(structOn.trades[0].exitReason, 'STRUCTURE');
+assert.ok(structOn.trades[0].structure);
+assert.ok(structOn.trades[0].structure.height >= 40);
+assert.strictEqual(structOn.trades[0].structure.wall, structOn.trades[0].level);
 assert.strictEqual(
-  paperRun.trades[0].structure.measuredMove,
-  paperRun.trades[0].level + paperRun.trades[0].structure.height,
+  structOn.trades[0].structure.measuredMove,
+  structOn.trades[0].level + structOn.trades[0].structure.height,
 );
 
 const noStruct = runSrBreakout(day, { ...base, structureExit: false });
 assert.notStrictEqual(noStruct.trades[0].exitReason, 'STRUCTURE');
 assert.ok(noStruct.trades[0].structure, 'boxes still attach when STRUCTURE exit is off');
 
-const chart = chartPayload(day, paperRun.trades, { id: 'nifty', label: 'Nifty 50' });
+const chart = chartPayload(day, structOn.trades, { id: 'nifty', label: 'Nifty 50' });
 assert.ok(chart.days[iso].length > 20);
 const compact = compactSessionBars(day, iso);
 assert.strictEqual(compact[0].o != null, true);
 
-const mapped = mapTrade(paperRun.trades[0], BOOKS.nifty, 1, 65);
+const mapped = mapTrade(structOn.trades[0], BOOKS.nifty, 1, 65);
 assert.ok(mapped.structure);
 assert.strictEqual(mapped.quantity, 65);
 assert.strictEqual(mapped.lots, 1);
 
 const merged = mergeStructureOntoLiveTrades(
-  [{ instrumentName: 'Nifty 50', instrumentId: 'nifty', entryTime: paperRun.trades[0].entryTime, optionSymbol: 'NIFTY25AUG24100CE' }],
-  { books: [{ id: 'nifty', label: 'Nifty 50', trades: paperRun.trades }] },
+  [{ instrumentName: 'Nifty 50', instrumentId: 'nifty', entryTime: structOn.trades[0].entryTime, optionSymbol: 'NIFTY25AUG24100CE' }],
+  { books: [{ id: 'nifty', label: 'Nifty 50', trades: structOn.trades }] },
 );
 assert.ok(merged[0].structure);
-assert.strictEqual(merged[0].structure.wall, paperRun.trades[0].structure.wall);
+assert.strictEqual(merged[0].structure.wall, structOn.trades[0].structure.wall);
 
 console.log('sr-structure.selftest: ok', {
-  reason: paperRun.trades[0].exitReason,
-  in: paperRun.trades[0].entryTime,
-  out: paperRun.trades[0].exitTime,
-  height: paperRun.trades[0].structure.height,
-  wall: paperRun.trades[0].structure.wall,
+  dnaReason: paperRun.trades[0].exitReason,
+  structReason: structOn.trades[0].exitReason,
+  in: structOn.trades[0].entryTime,
+  out: structOn.trades[0].exitTime,
+  height: structOn.trades[0].structure.height,
 });

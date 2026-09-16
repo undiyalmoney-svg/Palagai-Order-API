@@ -35,6 +35,13 @@ function runBook(key, candles, from, to, patch) {
     merged.giveUpMinPts = 0;
   }
   if (patch.sessionAlignOff) merged.sessionAlign = false;
+  if (patch.legacyStructure) {
+    merged.structureExit = true;
+    merged.minStructurePts = key === 'nifty' ? 40 : 80;
+  }
+  if (patch.bankCut2500 && key === 'banknifty') {
+    merged.stopPts = 2500 / perPoint;
+  }
   const { trades } = runSrBreakout(candles || [], {
     entryPts: book.entryPts, trendBars: 20, gapLo: book.gapLo, gapHi: book.gapHi,
     targetByScore: book.targetByScore, maxTradesPerDay: maxTrades,
@@ -98,10 +105,11 @@ function score(candles, patch) {
 const candles = JSON.parse(fs.readFileSync(CACHE, 'utf8'));
 const paperEqLive = JSON.stringify(exitOptsFor('nifty')) === JSON.stringify(SPEC.nifty.opts)
   && JSON.stringify(exitOptsFor('banknifty')) === JSON.stringify(SPEC.banknifty.opts);
-const v14 = score(candles, { maxTradesPerDay: 1, giveOff: true, sessionAlignOff: true, banknifty: { timeStopBars: 6 } });
-const v15 = score(candles, { sessionAlignOff: true, banknifty: { timeStopBars: 6 } });
-const v16 = score(candles, { banknifty: { timeStopBars: 6 } });
-const v17 = score(candles, {});
+const v14 = score(candles, { maxTradesPerDay: 1, giveOff: true, sessionAlignOff: true, legacyStructure: true, bankCut2500: true, banknifty: { timeStopBars: 6 } });
+const v15 = score(candles, { sessionAlignOff: true, legacyStructure: true, bankCut2500: true, banknifty: { timeStopBars: 6 } });
+const v16 = score(candles, { legacyStructure: true, bankCut2500: true, banknifty: { timeStopBars: 6 } });
+const v17 = score(candles, { legacyStructure: true, bankCut2500: true });
+const v18 = score(candles, {});
 const out = {
   strategyVersion: STRATEGY_VERSION,
   maxTradesPerDay: MAX_TRADES_PER_DAY,
@@ -111,20 +119,26 @@ const out = {
   bankSessionAlign: !!exitOptsFor('banknifty').sessionAlign,
   niftySessionAlign: !!exitOptsFor('nifty').sessionAlign,
   niftyGive: { bar: exitOptsFor('nifty').giveUpBar, min: exitOptsFor('nifty').giveUpMinPts },
+  structureExit: !!exitOptsFor('nifty').structureExit,
+  bankStopPts: exitOptsFor('banknifty').stopPts,
   before_15_4: v14,
   after_15_5: v15,
   after_15_6: v16,
   after_15_7: v17,
+  after_15_8: v18,
 };
 console.log(JSON.stringify(out, null, 2));
-if (STRATEGY_VERSION !== 'sr-breakout.2026-09-16.7') process.exit(1);
+if (STRATEGY_VERSION !== 'sr-breakout.2026-09-16.8') process.exit(1);
 if (!paperEqLive) process.exit(2);
 if (!exitOptsFor('banknifty').sessionAlign) process.exit(6);
 if (exitOptsFor('nifty').sessionAlign) process.exit(7);
 if (exitOptsFor('banknifty').timeStopBars !== 8) process.exit(10);
 if (exitOptsFor('nifty').timeStopBars !== 6) process.exit(11);
-if (v17.aug < 0) process.exit(3);
-if (v17.net <= v16.net) process.exit(4);
+if (exitOptsFor('nifty').structureExit) process.exit(13);
+if (exitOptsFor('banknifty').structureExit) process.exit(14);
+if (Math.abs(exitOptsFor('banknifty').stopPts - 3500 / 30) > 1e-9) process.exit(15);
+if (v18.aug < 0) process.exit(3);
+if (v18.net <= v17.net) process.exit(4);
 if (v14.net !== 59175) {
   console.error('unexpected 15.4 baseline', v14.net);
   process.exit(5);
@@ -140,4 +154,8 @@ if (v16.net !== 103089) {
 if (v17.net !== 108303) {
   console.error('unexpected 15.7 net', v17.net);
   process.exit(12);
+}
+if (v18.net !== 113186) {
+  console.error('unexpected 15.8 net', v18.net);
+  process.exit(16);
 }

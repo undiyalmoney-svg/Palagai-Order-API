@@ -141,7 +141,7 @@ assert.strictEqual(bankMapped.exitClock, '12:20:00 PM');
 assert.strictEqual(bankMapped.entryHm, '12:05:00');
 assert.strictEqual(bankMapped.exitHm, '12:20:00');
 assert.ok(bankMapped.entryPrice < 5000, `bank premium must not be index, got ${bankMapped.entryPrice}`);
-assert.strictEqual(bankMapped.stopPts, 2500 / 30, 'Bank TIME-8 DNA keeps a ₹2,500 index cut');
+assert.strictEqual(bankMapped.stopPts, 3500 / 30, 'Bank 15.8 DNA uses a ₹3,500 index cut');
 assert.ok(bankMapped.indexStop > bankMapped.indexEntry, 'Bank PE SL sits above index entry');
 assert.ok(
   bankMapped.slTrigger > 0 && bankMapped.slTrigger < bankMapped.optionEntryPremium,
@@ -225,8 +225,8 @@ assert.strictEqual(nseMarked.entryOhlc.close, 524);
 assert.strictEqual(nseMarked.exitPrice, 518.4);
 assert.ok(nseMarked.slTrigger > 0 && nseMarked.slTrigger < 524, `overlay must keep option SL below fill (${nseMarked.slTrigger})`);
 assert.ok(
-  Math.abs((nseMarked.optionEntryPremium - nseMarked.slTrigger) - (2500 / 30)) < 1,
-  `Bank option SL must be full ₹2500/lot pts not 0.5× (${nseMarked.slTrigger})`,
+  Math.abs((nseMarked.optionEntryPremium - nseMarked.slTrigger) - (3500 / 30)) < 1,
+  `Bank option SL must be full ₹3500/lot pts not 0.5× (${nseMarked.slTrigger})`,
 );
 assert.strictEqual(nseMarked.pnlSource, 'option_x_lot_live');
 assert.strictEqual(nseMarked.optionPnlRs, Math.round((518.4 - 524) * 30));
@@ -322,8 +322,8 @@ Promise.resolve()
       date: '2026-09-11T10:00:00+0530',
       open: 923.4,
       high: 930,
-      low: 800,
-      close: 820,
+      low: 780,
+      close: 790,
     };
     return overlayNseOptionOhlc(
       { ...bankTarget },
