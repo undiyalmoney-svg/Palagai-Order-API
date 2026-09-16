@@ -11,7 +11,7 @@ const {
 } = require('./sr-strategy-config');
 const { SPEC } = require('./sr-live');
 
-assert.strictEqual(STRATEGY_VERSION, 'sr-breakout.2026-09-16.8');
+assert.strictEqual(STRATEGY_VERSION, 'sr-breakout.2026-09-16.9');
 assert.strictEqual(EXIT_RULES.nifty.structureExit, false);
 assert.strictEqual(EXIT_RULES.banknifty.structureExit, false);
 assert.strictEqual(EXIT_RULES.nifty.minStructurePts, 0);
@@ -34,6 +34,14 @@ assert.strictEqual(OPTION_SL_MAX_RS.banknifty, 3500);
 assert.ok(exitOptsFor('banknifty').stopPts > 0);
 assert.deepStrictEqual(SPEC.nifty.opts, exitOptsFor('nifty'));
 assert.deepStrictEqual(SPEC.banknifty.opts, exitOptsFor('banknifty'));
+assert.strictEqual(EXIT_RULES.nifty.retest, true);
+assert.strictEqual(EXIT_RULES.banknifty.retest, true);
+assert.strictEqual(EXIT_RULES.nifty.confirm, 'retest');
+assert.strictEqual(EXIT_RULES.banknifty.confirm, 'retest');
+assert.strictEqual(EXIT_RULES.nifty.confirmAfterBreakout, true);
+assert.strictEqual(EXIT_RULES.banknifty.confirmAfterBreakout, true);
+assert.strictEqual(EXIT_RULES.nifty.maxRetestBars, 2);
+assert.strictEqual(EXIT_RULES.banknifty.maxRetestBars, 2);
 
 function hmStr(min) {
   return String(Math.floor(min / 60)).padStart(2, '0') + ':' + String(min % 60).padStart(2, '0');

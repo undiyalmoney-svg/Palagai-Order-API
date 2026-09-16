@@ -43,11 +43,21 @@ function structureOf(args) {
   const entryHm = args.entryTime || null;
   const exitHm = args.exitTime || null;
   const breakoutTime = args.breakoutTime || entryHm;
+  const confirmHm = args.confirmationTime || args.retestTime || null;
+  const breakoutPrice = Number.isFinite(Number(args.breakoutPrice))
+    ? round2(args.breakoutPrice)
+    : round2(args.entryPrice);
+  const confirmPrice = Number.isFinite(Number(args.confirmationPrice))
+    ? round2(args.confirmationPrice)
+    : round2(args.entryPrice);
   return {
     wall: round2(wall),
     wallHi: round2(wallHi),
     wallLo: round2(wallLo),
+    support: round2(wallLo),
+    resistance: round2(wallHi),
     dir,
+    option: args.option || (dir > 0 ? 'CE' : 'PE'),
     height: round2(height),
     adverseExtreme: round2(adverse),
     measuredMove: round2(measured),
@@ -63,6 +73,8 @@ function structureOf(args) {
       fromHm: entryHm || breakoutTime,
       toHm: exitHm,
     },
+    breakout: { hm: breakoutTime, price: breakoutPrice },
+    confirm: confirmHm ? { hm: confirmHm, price: confirmPrice } : null,
     entry: { hm: entryHm, price: round2(args.entryPrice) },
     exit: args.openAtFill
       ? null
@@ -82,21 +94,98 @@ function compactSessionBars(bars5, day, fromHm = '09:15', toHm = '15:30') {
     }));
 }
 
+function lastYmd(candles) {
+  let d = '';
+  for (const b of candles || []) {
+    const x = ymd(b.date);
+    if (x > d) d = x;
+  }
+  return d || null;
+}
+
 function chartPayload(candles, trades, meta = {}) {
   const days = {};
   const list = trades || [];
   const seen = new Set();
+  const fromHm = meta.fromHm || '09:15';
+  const toHm = meta.toHm || '15:30';
   for (const t of list) {
     const d = t.date || String(t.entryTime || '').slice(0, 10);
     if (!d || seen.has(d)) continue;
     seen.add(d);
-    days[d] = compactSessionBars(candles, d, meta.fromHm || '09:15', meta.toHm || '15:30');
+    days[d] = compactSessionBars(candles, d, fromHm, toHm);
+  }
+  const sessionDay = meta.sessionDay || lastYmd(candles);
+  if (sessionDay && !days[sessionDay]) {
+    days[sessionDay] = compactSessionBars(candles, sessionDay, fromHm, toHm);
   }
   return {
     id: meta.id || null,
     label: meta.label || meta.name || null,
+    sessionDay: sessionDay || null,
     days,
   };
 }
 
-module.exports = { structureOf, compactSessionBars, chartPayload, round2, hhmm, ymd };
+function tradeChartRow(t) {
+  const confirmationTime = t.confirmationTime || t.retestTime || null;
+  const confirmationPrice = t.confirmationPrice != null
+    ? Number(t.confirmationPrice)
+    : (t.level != null ? Number(t.level) : null);
+  const wallHi = t.wallHi != null ? Number(t.wallHi) : null;
+  const wallLo = t.wallLo != null ? Number(t.wallLo) : null;
+  return {
+    date: t.date,
+    breakoutTime: t.breakoutTime || null,
+    breakoutPrice: t.breakoutPrice != null ? Number(t.breakoutPrice) : null,
+    confirmationTime,
+    confirmationPrice,
+    retestTime: t.retestTime || confirmationTime,
+    entryTime: t.entryTime,
+    entryPrice: t.entryPrice,
+    exitTime: t.exitTime,
+    exitPrice: t.exitPrice,
+    exitReason: t.exitReason,
+    openAtFill: !!t.openAtFill,
+    side: t.side,
+    option: t.option,
+    level: t.level,
+    wallHi,
+    wallLo,
+    resistance: wallHi,
+    support: wallLo,
+    structure: t.structure || null,
+  };
+}
+
+function hmMark(hm, price, extra) {
+  if (!hm || price == null || !Number.isFinite(Number(price))) return null;
+  return extra ? { hm, price: Number(price), ...extra } : { hm, price: Number(price) };
+}
+
+/** Same book-chart shape for Paper desk and Live status. */
+function bookChartPayload(candles, trades, meta = {}) {
+  const chart = chartPayload(candles, trades, meta);
+  const rows = (trades || []).map(tradeChartRow);
+  chart.trades = rows;
+  const day = chart.sessionDay;
+  const focus = [...rows].reverse().find((t) => t.date === day) || rows[rows.length - 1] || null;
+  chart.candles = (day && chart.days[day]) || [];
+  chart.resistance = focus ? focus.resistance : null;
+  chart.support = focus ? focus.support : null;
+  chart.breakout = focus ? hmMark(focus.breakoutTime, focus.breakoutPrice) : null;
+  chart.confirmation = focus ? hmMark(focus.confirmationTime, focus.confirmationPrice) : null;
+  chart.entry = focus ? hmMark(focus.entryTime, focus.entryPrice, { option: focus.option || null }) : null;
+  if (focus && focus.structure && focus.structure.exit == null) {
+    chart.exit = null;
+  } else {
+    chart.exit = focus ? hmMark(focus.exitTime, focus.exitPrice, { reason: focus.exitReason || null }) : null;
+  }
+  chart.option = focus ? focus.option || null : null;
+  return chart;
+}
+
+module.exports = {
+  structureOf, compactSessionBars, chartPayload, bookChartPayload, tradeChartRow,
+  round2, hhmm, ymd,
+};

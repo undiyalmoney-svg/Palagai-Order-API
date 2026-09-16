@@ -8,7 +8,7 @@ const { blackScholesPrice, realizedVolAnnualized } = require('./bs-option-pricer
 const defaultMarket = require('./kite-market');
 const { lotsFromAvailableFunds } = require('./daily-desk-defaults');
 const { runSrBreakout } = require('./sr-breakout');
-const { chartPayload } = require('./sr-structure');
+const { bookChartPayload } = require('./sr-structure');
 const {
   overlayPaperWithLiveFills,
   overlayDeskBooks,
@@ -337,6 +337,12 @@ function mapTrade(t, book, lots, perPoint, vol) {
     level: t.level != null ? Number(t.level) : null,
     wallHi: t.wallHi != null ? Number(t.wallHi) : null,
     wallLo: t.wallLo != null ? Number(t.wallLo) : null,
+    breakoutTime: t.breakoutTime || null,
+    breakoutPrice: t.breakoutPrice != null ? Number(t.breakoutPrice) : null,
+    confirmationTime: t.confirmationTime || t.retestTime || null,
+    confirmationPrice: t.confirmationPrice != null ? Number(t.confirmationPrice) : (t.level != null ? Number(t.level) : null),
+    retestTime: t.retestTime || t.confirmationTime || null,
+    option: t.option || direction,
     structure: t.structure || null,
     spec: { engine: ENGINE, strategy: STRATEGY_ID, version: STRATEGY_VERSION },
   };
@@ -463,8 +469,8 @@ function instrumentRow(book, trades) {
     netRs: tot.netRs,
     riskRs: DAY_LOSS_STOP_RS,
     why: tot.trades
-      ? `Taken · ${book.name} S/R ×${trades[0]?.lots || 1}`
-      : `No ${book.name} S/R print yet — waiting for a with-trend wall break.`,
+      ? `Taken · ${book.name} S/R → breakout → confirm (retest) → ATM ${trades[0]?.option || 'CE/PE'} ×${trades[0]?.lots || 1}`
+      : `No ${book.name} print yet — waiting for S/R → breakout → confirm (retest) → enter ATM CE/PE.`,
   };
 }
 
@@ -553,27 +559,13 @@ async function runSrDesk({ authorization, fromDate, toDate, capitalRs, capitalSo
         label: book.name,
         sitOut: false,
         spec: { engine: ENGINE, strategy: STRATEGY_ID },
-        specText: `${book.name} S/R ${STRATEGY_VERSION} · ≤2 ATM CE/PE/day · TIME ${exitOptsFor(book.key).timeStopBars || 0} · day ±₹${DAY_LOSS_STOP_RS}`,
+        specText: `${book.name} S/R ${STRATEGY_VERSION} · S/R → breakout → confirm (retest) → ATM CE/PE · ≤2/day · TIME ${exitOptsFor(book.key).timeStopBars || 0} · day ±₹${DAY_LOSS_STOP_RS}`,
         totals: summarize(mapped),
         trades: mapped,
-        chart: (() => {
-          const chart = chartPayload(candles, trades, {
-            id: book.id, label: book.name, fromHm: '09:15', toHm: book.session.squareOffHm,
-          });
-          chart.trades = (trades || []).map((t) => ({
-            date: t.date,
-            entryTime: t.entryTime,
-            exitTime: t.exitTime,
-            exitReason: t.exitReason,
-            side: t.side,
-            option: t.option,
-            entryPrice: t.entryPrice,
-            exitPrice: t.exitPrice,
-            level: t.level,
-            structure: t.structure || null,
-          }));
-          return chart;
-        })(),
+        chart: bookChartPayload(candles, trades, {
+          id: book.id, label: book.name, fromHm: '09:15', toHm: book.session.squareOffHm,
+          sessionDay: toDate,
+        }),
         bars: Array.isArray(candles) ? candles.length : 0,
         status: mapped.length ? 'taken' : 'waiting',
         why: instrumentRow(book, mapped).why,
@@ -647,8 +639,9 @@ async function runSrDesk({ authorization, fromDate, toDate, capitalRs, capitalSo
     books: booksOut,
     coreBooks: booksOut.filter((b) => b.id === 'nifty' || b.id === 'bank' || b.id === 'crude'),
     deskChart: { books: booksOut.filter((b) => b.chart).map((b) => b.chart) },
+    play: 'S/R → breakout → confirm (retest) → enter ATM CE/PE',
     note:
-      'This desk trades only Nifty 50 and Bank Nifty. With-trend S/R wall break + retest, up to two ATM CE or PE per book per day (qty 65 / 30, MIS). Nifty holds ~30 minutes (6×5m TIME); Bank holds ~40 minutes (8×5m TIME) unless the rupee stop hits first (Nifty ₹5,000 / Bank ₹3,500) or the trade makes no +12 index pts by bar 4 (give-up). The chart still draws the S/R box; 15.8 does not flatten on that measured-move. Bank does not buy CE below the day\'s open or PE above it. Not FAIL on a 1-bar close through the wall, not a +20 index TARGET. Paper ₹ shadows Live: ATM CE/PE premium × lot, minus ₹20/lot. In/Out are NSE 5-minute option OHLC when the range is ≤14 days, otherwise modeled weekly premium. If Live already filled today, Why and ₹ overlay those Kite In/Out (not a later CLOSE bar). Protective option SL uses the same ₹cap / lot pts as Paper (not a 0.5× index haircut). Crude stays off.',
+      'S/R → breakout → confirm (retest) → enter ATM CE/PE. Same play on Paper and Live, Nifty 50 and Bank Nifty. Up to two ATM CE or PE per book per day (qty 65 / 30, MIS). Nifty holds ~30 minutes (6×5m TIME); Bank holds ~40 minutes (8×5m TIME) unless the rupee stop hits first (Nifty ₹5,000 / Bank ₹3,500) or the trade makes no +12 index pts by bar 4 (give-up). Two 5m diagrams mark support, resistance, breakout, confirm, and entry. The box is still drawn; 15.8 does not flatten on that measured-move. Bank does not buy CE below the day\'s open or PE above it. Not FAIL on a 1-bar close through the wall, not a +20 index TARGET. Paper ₹ shadows Live: ATM CE/PE premium × lot, minus ₹20/lot. Crude stays off.',
     instruments: booksOut
       .filter((b) => b.id === 'nifty' || b.id === 'bank')
       .map((b) => instrumentRow({ id: b.id, name: b.label }, b.trades || [])),
@@ -667,7 +660,7 @@ async function runSrDesk({ authorization, fromDate, toDate, capitalRs, capitalSo
     trades: allTrades,
     message: allTrades.length
       ? undefined
-      : 'No S/R print in this window (need a with-trend wall break). Run 2 months on session days.',
+      : 'No print in this window — waiting for S/R → breakout → confirm (retest) → enter ATM CE/PE.',
   };
 }
 
@@ -686,5 +679,5 @@ module.exports = {
   nextWeeklyExpiry,
   formatClock12,
   summarize,
-  chartPayload,
+  bookChartPayload,
 };

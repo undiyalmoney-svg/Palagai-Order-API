@@ -9,7 +9,7 @@ const { exitOptsFor, MAX_TRADES_PER_DAY, STRATEGY_VERSION } = require('./sr-stra
 const { SPEC, decideLiveAction, mergeStructureOntoLiveTrades } = require('./sr-live');
 const { BOOKS, mapTrade } = require('./sr-desk');
 
-assert.strictEqual(STRATEGY_VERSION, 'sr-breakout.2026-09-16.8');
+assert.strictEqual(STRATEGY_VERSION, 'sr-breakout.2026-09-16.9');
 assert.strictEqual(MAX_TRADES_PER_DAY, 2);
 assert.deepStrictEqual(SPEC.nifty.opts, exitOptsFor('nifty'), 'Live Nifty opts === Paper exitOptsFor');
 assert.deepStrictEqual(SPEC.crude.opts, exitOptsFor('crude'), 'Live Crude opts === Paper exitOptsFor');
@@ -132,6 +132,12 @@ assert.ok(noStruct.trades[0].structure, 'boxes still attach when STRUCTURE exit 
 
 const chart = chartPayload(day, structOn.trades, { id: 'nifty', label: 'Nifty 50' });
 assert.ok(chart.days[iso].length > 20);
+assert.ok(paperRun.trades[0].breakoutTime);
+assert.ok(paperRun.trades[0].confirmationTime);
+assert.notStrictEqual(paperRun.trades[0].breakoutTime, paperRun.trades[0].entryTime);
+assert.strictEqual(paperRun.trades[0].confirmationTime, paperRun.trades[0].retestTime);
+assert.ok(paperRun.trades[0].structure.breakout);
+assert.ok(paperRun.trades[0].structure.confirm);
 const compact = compactSessionBars(day, iso);
 assert.strictEqual(compact[0].o != null, true);
 
@@ -139,6 +145,8 @@ const mapped = mapTrade(structOn.trades[0], BOOKS.nifty, 1, 65);
 assert.ok(mapped.structure);
 assert.strictEqual(mapped.quantity, 65);
 assert.strictEqual(mapped.lots, 1);
+const mappedPaper = mapTrade(paperRun.trades[0], BOOKS.nifty, 1, 65);
+assert.strictEqual(mappedPaper.confirmationTime, paperRun.trades[0].confirmationTime);
 
 const merged = mergeStructureOntoLiveTrades(
   [{ instrumentName: 'Nifty 50', instrumentId: 'nifty', entryTime: structOn.trades[0].entryTime, optionSymbol: 'NIFTY25AUG24100CE' }],

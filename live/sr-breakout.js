@@ -10,6 +10,9 @@
  *   - ENTRY: 15-min body >= entryPts closing beyond the level, IN THE TREND
  *       direction (trend = close vs close[trendBars] on 15-min).
  *       close>resistance & up-trend -> BUY (CE); close<support & down-trend -> SELL (PE).
+ *       When opts.retest is on, that close is only the BREAKOUT. Confirm =
+ *       a later 5m touch of the broken wall (retest). Entry is the confirm
+ *       bar, never the breakout close.
  *   - CONFIDENCE 1-3: 1 (with-trend) +1 big body (>=1.5x entryPts) +1 mid-gap
  *       (S/R gap within [gapLo,gapHi]). Higher score reaches bigger targets.
  *   - TARGET by confidence (targetByScore). Exit at +target or session square-off.
@@ -111,6 +114,9 @@ function runSrBreakout(bars5, opts) {
   // next trade a Rs1,500 stop, not Rs5,000. Default off for backward compat.
   const capStopToDayBudget = !!opts.capStopToDayBudget;
   const retest = !!opts.retest;                   // enter on the pullback to the broken level (NIFTY_RETEST_V1)
+  // After the 15m breakout close, not on that bar's own 5m prints. Default
+  // ON when retest is on so Paper/Live cannot look-ahead into the signal bar.
+  const confirmAfterBreakout = opts.confirmAfterBreakout != null ? !!opts.confirmAfterBreakout : !!retest;
   // ENTRY METER: reject a retest that takes too long to fill. A quick pullback
   // means the level is still being respected; a slow one means the move has
   // already stalled. Measured over 2024-01..2026-08: retests filling within
@@ -252,10 +258,13 @@ function runSrBreakout(bars5, opts) {
     if (minScore > 0 && score < minScore) continue;
 
     const breakoutPrice = b.c, breakoutTime = b.hm;
+    // 15m bucket 10:30 is 10:30/10:35/10:40 5m. Close (direction) is known at 10:45.
+    const confirmationCloseHm = addHm(b.hm, 15);
     let entry = b.c, entryTime = b.hm, retestTime = null, entryAt = null;
-    // ORB 15m close is only known at +10 minutes. Do not scan the signal bar's
-    // own 5m prints for a retest (that is look-ahead into the confirmation).
-    const afterHm = wallMode === 'orb' ? addHm(b.hm, 10) : b.hm;
+    // Do not scan the signal 15m bar's own 5m prints. That is look-ahead into
+    // the breakout and is a raw-breakout-bar entry. Same for pivot/intraday/orb:
+    // last 5m of the bucket is stamped +10, so first eligible 5m is > +10.
+    const afterHm = (wallMode === 'orb' || confirmAfterBreakout) ? addHm(b.hm, 10) : b.hm;
     let after = (day5.get(b.d) || []).filter(x => hhmm(x.date) > afterHm && hhmm(x.date) <= squareOffHm);
     if (!after.length) continue;
     if (retest) {
@@ -271,6 +280,14 @@ function runSrBreakout(bars5, opts) {
       entry = level; entryTime = hhmm(fillBar.date); retestTime = entryTime;
       entryAt = fillBar.date;
       after = after.slice(hi + 1);
+      // Confirm direction at the 15m close, then enter on a later (or same as
+      // that close) 5m retest. A fill still inside the signal 15m bar is the
+      // raw breakout, not the play.
+      const eMin = hmToMin(entryTime);
+      const bMin = hmToMin(breakoutTime);
+      const cMin = hmToMin(confirmationCloseHm);
+      if (eMin == null || bMin == null || eMin <= bMin) continue;
+      if (confirmAfterBreakout && (cMin == null || eMin < cMin)) continue;
       if (againstSession(dir, entry, b.d)) continue;
       // LIVE/PAPER SAME CODE: the retest bar is enough to be IN the trade.
       // Requiring a *following* 5m bar meant Live only saw the signal after that
@@ -284,18 +301,24 @@ function runSrBreakout(bars5, opts) {
           confidence: score, entryTime, entryAt, entryPrice: round2(entry), level: round2(level),
           wallHi: round2(wallHi), wallLo: round2(wallLo),
           breakoutTime, breakoutPrice: round2(breakoutPrice), retestTime,
+          confirmationTime: retestTime, confirmationPrice: round2(entry),
           bodyPts: round2(body), target, exitTime: entryTime, exitAt: fillBar.date, exitPrice: round2(px),
           exitReason: 'CLOSE', points: round2(ptsOpen), openAtFill: true,
         }, {
           dir, level, wallHi, wallLo, breakLow: b.l, breakHigh: b.h,
-          lookFromHm, lookToHm, breakoutTime, entryTime, exitTime: entryTime,
+          lookFromHm, lookToHm, breakoutTime, breakoutPrice, entryTime, exitTime: entryTime,
+          retestTime, confirmationTime: retestTime, confirmationPrice: entry,
+          option: dir > 0 ? 'CE' : 'PE',
           entryPrice: entry, exitPrice: px, exitReason: 'CLOSE', openAtFill: true,
         }));
         if (dayLossStop > 0 && st.pnl <= -dayLossStop) st.stopped = true;
         if (dayProfitTarget > 0 && st.pnl >= dayProfitTarget) st.stopped = true;
         continue;
       }
+    } else {
+      retestTime = null;
     }
+    if (retest && !retestTime) continue;
     if (!entryAt) {
       const hit = (day5.get(b.d) || []).find((x) => hhmm(x.date) === entryTime);
       entryAt = hit ? hit.date : `${b.d}T${entryTime}:00+05:30`;
@@ -303,7 +326,9 @@ function runSrBreakout(bars5, opts) {
     if (againstSession(dir, entry, b.d)) continue;
     const boxSeed = {
       dir, level, wallHi, wallLo, breakLow: b.l, breakHigh: b.h,
-      lookFromHm, lookToHm, breakoutTime, entryTime, entryPrice: entry,
+      lookFromHm, lookToHm, breakoutTime, breakoutPrice, entryTime, entryPrice: entry,
+      retestTime, confirmationTime: retestTime, confirmationPrice: retestTime ? entry : null,
+      option: dir > 0 ? 'CE' : 'PE',
     };
     const boxH = (structureOf(boxSeed) || {}).height || 0;
     const useStructure = structureExit && boxH > 0 && boxH >= minStructurePts;
@@ -358,10 +383,13 @@ function runSrBreakout(bars5, opts) {
       confidence: score, entryTime, entryAt, entryPrice: round2(entry), level: round2(level),
       wallHi: round2(wallHi), wallLo: round2(wallLo),
       breakoutTime, breakoutPrice: round2(breakoutPrice), retestTime,
+      confirmationTime: retestTime, confirmationPrice: retestTime != null ? round2(entry) : null,
       bodyPts: round2(body), target, exitTime, exitAt, exitPrice: round2(exit), exitReason: reason, points: round2(pts),
     }, {
       dir, level, wallHi, wallLo, breakLow: b.l, breakHigh: b.h,
-      lookFromHm, lookToHm, breakoutTime, entryTime, exitTime,
+      lookFromHm, lookToHm, breakoutTime, breakoutPrice, entryTime, exitTime,
+      retestTime, confirmationTime: retestTime, confirmationPrice: retestTime != null ? entry : null,
+      option: dir > 0 ? 'CE' : 'PE',
       entryPrice: entry, exitPrice: exit, exitReason: reason, openAtFill: false,
     }));
     // daily risk stop (checked after the trade completes)
@@ -393,6 +421,11 @@ function withStructure(trade, boxArgs) {
 }
 function num(v, d) { const n = Number(v); return Number.isFinite(n) ? n : d; }
 function round2(x) { return Math.round((Number(x) || 0) * 100) / 100; }
+function hmToMin(hm) {
+  const m = String(hm || '').match(/(\d{1,2}):(\d{2})/);
+  if (!m) return null;
+  return Number(m[1]) * 60 + Number(m[2]);
+}
 function addHm(hm, addMin) {
   const [H, M] = String(hm || '00:00').split(':').map(Number);
   const x = (H || 0) * 60 + (M || 0) + addMin;

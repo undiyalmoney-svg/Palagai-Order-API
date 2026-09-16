@@ -12,7 +12,8 @@ assert.deepStrictEqual(SPEC.crude.opts, exitOptsFor('crude'));
 // only breaks the test whenever a level is retuned (it did, when the lock arm
 // moved 12 -> 8). Check shape and coherence instead.
 const n = SPEC.nifty.opts;
-assert.ok(n.maxRetestBars > 0, 'Nifty must have the entry meter');
+assert.ok(n.retest && n.maxRetestBars === 2, 'Nifty confirm = retest within 2 bars');
+assert.strictEqual(n.confirm, 'retest');
 assert.strictEqual(n.lockArmPts, 0, 'index lock scratches CE/PE; do not arm a lock');
 assert.strictEqual(n.giveUpBar, 4, 'stall give-up after 4 bars with no +12');
 assert.strictEqual(n.giveUpMinPts, 12);
@@ -29,6 +30,10 @@ assert.strictEqual(OPTION_SL_MAX_RS.banknifty, 3500, 'Bank 15.8 DNA uses a ₹3,
 assert.strictEqual(SPEC.banknifty.opts.lockArmPts, 0, 'Bank index lock scratches the PE');
 assert.strictEqual(SPEC.banknifty.opts.sessionAlign, true, 'Bank skips CE below day-open / PE above it');
 assert.ok(!SPEC.nifty.opts.sessionAlign, 'Nifty session-align costs net; leave off');
+assert.ok(SPEC.banknifty.opts.retest && SPEC.banknifty.opts.maxRetestBars === 2, 'Bank confirm = retest');
+assert.strictEqual(SPEC.banknifty.opts.confirm, 'retest');
+assert.strictEqual(SPEC.nifty.opts.confirmAfterBreakout, true);
+assert.strictEqual(SPEC.banknifty.opts.confirmAfterBreakout, true);
 assert.strictEqual(SPEC.banknifty.opts.timeStopBars, 8, 'Bank TIME 8 raises Jun–Sep vs 15.6');
 assert.strictEqual(SPEC.banknifty.opts.failStop, false);
 assert.strictEqual(SPEC.banknifty.opts.targetByScore[1], 0);

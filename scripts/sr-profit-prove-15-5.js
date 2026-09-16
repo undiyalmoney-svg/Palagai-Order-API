@@ -128,7 +128,7 @@ const out = {
   after_15_8: v18,
 };
 console.log(JSON.stringify(out, null, 2));
-if (STRATEGY_VERSION !== 'sr-breakout.2026-09-16.8') process.exit(1);
+if (STRATEGY_VERSION !== 'sr-breakout.2026-09-16.9') process.exit(1);
 if (!paperEqLive) process.exit(2);
 if (!exitOptsFor('banknifty').sessionAlign) process.exit(6);
 if (exitOptsFor('nifty').sessionAlign) process.exit(7);

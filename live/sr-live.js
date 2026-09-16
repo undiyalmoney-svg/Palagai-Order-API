@@ -11,7 +11,7 @@ const optionStore = require('./sr-option-store');
 const { archiveSrInstruments, instrumentsWithArchive } = require('./instrument-archive');
 const { connectMongo, getDb } = require('./live.mongo');
 const { runSrBreakout } = require('./sr-breakout');
-const { chartPayload } = require('./sr-structure');
+const { bookChartPayload } = require('./sr-structure');
 // Exit/entry rules come from the SHARED config so Live and Paper cannot drift.
 const { exitOptsFor, DEFAULT_LOTS, DAY_LOSS_STOP_RS, DAY_PROFIT_TARGET_RS, MAX_TRADES_PER_DAY, LOT_UNITS, OPTION_SL_MAX_RS, STRATEGY_ID, STRATEGY_VERSION } = require('./sr-strategy-config');
 const { LiveBroker } = require('./live-broker');
@@ -466,7 +466,12 @@ function liveTradesFromBroker(session) {
 function mergeStructureOntoLiveTrades(rows, deskChart) {
   const books = (deskChart && deskChart.books) || [];
   return (rows || []).map((row) => {
-    const book = books.find((b) => b.id === row.instrumentId || b.label === row.instrumentName);
+    const book = books.find((b) => {
+      if (b.id === row.instrumentId || b.label === row.instrumentName) return true;
+      const bankBook = /bank/i.test(String(b.id || '')) || /bank/i.test(String(b.label || ''));
+      const bankRow = /bank/i.test(String(row.instrumentId || '')) || /bank/i.test(String(row.instrumentName || ''));
+      return bankBook === bankRow;
+    });
     if (!book) return row;
     const want = String(row.entryTime || '').replace(/.*T/, '').slice(0, 5);
     const hit = (book.trades || []).find((t) => {
@@ -480,6 +485,14 @@ function mergeStructureOntoLiveTrades(rows, deskChart) {
       indexEntry: hit.entryPrice != null ? hit.entryPrice : row.indexEntry,
       indexExit: hit.exitPrice != null ? hit.exitPrice : row.indexExit,
       level: hit.level,
+      wallHi: hit.wallHi != null ? hit.wallHi : row.wallHi,
+      wallLo: hit.wallLo != null ? hit.wallLo : row.wallLo,
+      breakoutTime: hit.breakoutTime || row.breakoutTime,
+      breakoutPrice: hit.breakoutPrice != null ? hit.breakoutPrice : row.breakoutPrice,
+      confirmationTime: hit.confirmationTime || hit.retestTime || row.confirmationTime,
+      confirmationPrice: hit.confirmationPrice != null ? hit.confirmationPrice : row.confirmationPrice,
+      retestTime: hit.retestTime || hit.confirmationTime || row.retestTime,
+      option: hit.option || row.option,
     };
   });
 }
@@ -599,7 +612,7 @@ async function start(userId, body = {}) {
     entryPts: body.entryPts != null && body.entryPts !== '' ? numOr(body.entryPts, null) : null,
   };
   session.status = 'running';
-  session.message = `S/R Live on · ${keys.join('+')} · ${session.config.lots} lot(s) · real MIS`;
+  session.message = `S/R Live on · S/R → breakout → confirm (retest) → ATM CE/PE · ${keys.join('+')} · ${session.config.lots} lot(s) · real MIS`;
   session.lastError = null;
   session.lastPreflight = body.liveAssistant || null;
   const prevSnap = persist.load('sr', session.userId);
@@ -1095,21 +1108,10 @@ async function onTick(session) {
           // kept for the Paper/Live equality self-test.
           ...exitOptsFor(key, lots),
         });
-        const chart = chartPayload(candles, trades, {
+        const chart = bookChartPayload(candles, trades, {
           id: spec.bookId, label: spec.name, fromHm: '09:15', toHm: spec.session.squareOffHm,
+          sessionDay: today,
         });
-        chart.trades = (trades || []).map((t) => ({
-          date: t.date,
-          entryTime: t.entryTime,
-          exitTime: t.exitTime,
-          exitReason: t.exitReason,
-          side: t.side,
-          option: t.option,
-          entryPrice: t.entryPrice,
-          exitPrice: t.exitPrice,
-          level: t.level,
-          structure: t.structure || null,
-        }));
         session.deskChart = session.deskChart || { books: [] };
         session.deskChart.books = [
           ...(session.deskChart.books || []).filter((b) => b.id !== spec.bookId),
