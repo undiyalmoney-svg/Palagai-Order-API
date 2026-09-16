@@ -943,6 +943,26 @@ async function onTick(session) {
     const cfg = session.config;
     const watchBits = [];
 
+    if (!session.capSeeded && session.broker && typeof session.broker.getOrders === 'function') {
+      session.capSeeded = true;
+      try {
+        const orders = await session.broker.getOrders(authorization);
+        const buys = palagaiCompletedBuys(orders, today);
+        const before = liveEntryCount(session);
+        for (const o of buys) markLiveFilled(session, kiteBuyEntryId(o));
+        if (liveEntryCount(session) > before) {
+          pushEvent(
+            session,
+            'RECONCILE',
+            `Counted ${buys.length} PALAGAI BUY fill(s) today toward the ${(session.config && session.config.maxTradesPerDay) || 2}/day cap`,
+          );
+        }
+      } catch (e) {
+        session.capSeeded = false;
+        pushEvent(session, 'ERROR', `entry-cap seed: ${e.message}`);
+      }
+    }
+
     for (const key of cfg.instruments) {
       const spec = SPEC[key];
       if (!spec) continue;
