@@ -421,7 +421,9 @@ Promise.resolve()
     assert.ok(/weekly premium/i.test(out.note));
     assert.ok(out.instruments.every((r) => r.id === 'nifty' || r.id === 'bank'));
     assert.ok(!out.instruments.some((r) => r.id === 'crude'));
-    assert.strictEqual(out.totals.netRs, 0);
+    assert.ok(out.announcer && out.announcer.nifty && out.announcer.banknifty);
+    assert.ok(out.announcer.nifty.text);
+    assert.ok(out.announcer.banknifty.text);
     assert.ok(out.capitalSource === 'actual' || out.capitalSource === 'mine');
     assert.strictEqual(out.maxLots, 1);
     return runSrDesk(

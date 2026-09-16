@@ -12,6 +12,7 @@ const { archiveSrInstruments, instrumentsWithArchive } = require('./instrument-a
 const { connectMongo, getDb } = require('./live.mongo');
 const { runSrBreakout } = require('./sr-breakout');
 const { bookChartPayload } = require('./sr-structure');
+const { announcerFromDesk, mergeAnnouncer } = require('./sr-announcer');
 // Exit/entry rules come from the SHARED config so Live and Paper cannot drift.
 const { exitOptsFor, DEFAULT_LOTS, DAY_LOSS_STOP_RS, DAY_PROFIT_TARGET_RS, MAX_TRADES_PER_DAY, LOT_UNITS, OPTION_SL_MAX_RS, STRATEGY_ID, STRATEGY_VERSION } = require('./sr-strategy-config');
 const { LiveBroker } = require('./live-broker');
@@ -517,6 +518,10 @@ function statusPayload(session) {
     slOrderId: t.slOrderId,
     slOn: !!t.slOn,
   }));
+  session.announcer = mergeAnnouncer(
+    session.announcer,
+    announcerFromDesk(session.deskChart || { books: [] }),
+  );
   return {
     status: 'ok',
     running: session.status === 'running',
@@ -539,6 +544,7 @@ function statusPayload(session) {
     positions,
     trades: mergeStructureOntoLiveTrades(trades, session.deskChart),
     deskChart: session.deskChart || null,
+    announcer: session.announcer,
     kitePnl: session.broker && typeof session.broker.moneySnapshot === 'function'
       ? session.broker.moneySnapshot()
       : { closedRs: 0, openRs: 0, netRs: 0, legs: [] },
@@ -1239,6 +1245,10 @@ async function onTick(session) {
     session.message = `S/R Live · ${watch}`;
     session.lastTickAt = new Date().toISOString();
     session.lastError = null;
+    session.announcer = mergeAnnouncer(
+      session.announcer,
+      announcerFromDesk(session.deskChart, { at: session.lastTickAt }),
+    );
     persistSrSession(session);
   } finally {
     session.tickBusy = false;
