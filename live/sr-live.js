@@ -160,8 +160,49 @@ function mergeLiveEnteredFromSnap(snap, dayIso) {
   return { live, seen };
 }
 
-function liveEntryCount(session) {
-  return session?.liveEntered instanceof Set ? session.liveEntered.size : 0;
+/** Map persist/kite ids onto nifty | banknifty | crude. BANKNIFTY before NIFTY. */
+function bookKeyFromEntryId(id) {
+  const parts = String(id || '').split('|');
+  const head = (parts[0] || '').toLowerCase();
+  if (head === 'nifty' || head === 'banknifty' || head === 'crude') return head;
+  const sym = (parts[1] || parts[0] || '').toUpperCase();
+  if (sym.startsWith('BANKNIFTY')) return 'banknifty';
+  if (sym.startsWith('CRUDEOIL')) return 'crude';
+  if (sym.startsWith('NIFTY')) return 'nifty';
+  return '';
+}
+
+/**
+ * Fills toward Paper's per-book maxTradesPerDay (Nifty 2, Bank 2), not one
+ * shared 2. Skip-ids live in `seen` and do not count.
+ */
+function liveEntryCount(session, key) {
+  const raw = session?.liveEntered;
+  const ids = raw instanceof Set ? [...raw] : Array.isArray(raw) ? raw : [];
+  if (!key) {
+    const books = [...new Set(ids.map(bookKeyFromEntryId).filter(Boolean))];
+    return books.reduce((n, k) => n + liveEntryCount(session, k), 0);
+  }
+  return ids.filter((id) => bookKeyFromEntryId(id) === key).length;
+}
+
+/** Raise this book's fill count to match today's PALAGAI BUYs without duplicating signal ids. */
+function seedLiveEntriesFromBuys(session, buys) {
+  const want = { nifty: 0, banknifty: 0, crude: 0 };
+  for (const o of buys || []) {
+    const k = bookKeyFromEntryId(kiteBuyEntryId(o));
+    if (want[k] != null) want[k] += 1;
+  }
+  let added = 0;
+  for (const k of Object.keys(want)) {
+    let have = liveEntryCount(session, k);
+    while (have < want[k]) {
+      markLiveFilled(session, `${k}|kite-seed|${have}`);
+      have += 1;
+      added += 1;
+    }
+  }
+  return added;
 }
 
 function alreadyHandled(session, id) {
@@ -518,7 +559,7 @@ async function start(userId, body = {}) {
   if (session.status === 'running') {
     session.config = applyDeskLimits(session.config, body);
     session.message =
-      `S/R Live on · max ${session.config.maxTradesPerDay}/day · ` +
+      `S/R Live on · max ${session.config.maxTradesPerDay}/book/day · ` +
       `day SL ₹${session.config.dayLossStopRs} · day PT ₹${session.config.dayProfitTargetRs} ` +
       `(open legs kept)`;
     pushEvent(session, 'CONFIG', session.message);
@@ -588,12 +629,12 @@ async function start(userId, body = {}) {
   try {
     const orders = await session.broker.getOrders(auth);
     const buys = palagaiCompletedBuys(orders, todayIso());
-    for (const o of buys) markLiveFilled(session, kiteBuyEntryId(o));
-    if (buys.length) {
+    const added = seedLiveEntriesFromBuys(session, buys);
+    if (added || buys.length) {
       pushEvent(
         session,
         'RECONCILE',
-        `Counted ${buys.length} PALAGAI BUY fill(s) today toward the ${session.config.maxTradesPerDay}/day cap`,
+        `Counted ${buys.length} PALAGAI BUY fill(s) today toward the ${session.config.maxTradesPerDay}/book/day cap`,
       );
     }
   } catch (e) {
@@ -898,13 +939,15 @@ async function pickFreshLiveEntry(session, authorization, spec, key, trades, hm,
     const risk = approveLiveEntry({
       sessionRunning: session.status === 'running',
       autoBotRunning: !!(auto && auto.status === 'running'),
-      enteredCount: liveEntryCount(session),
+      enteredCount: liveEntryCount(session, key),
       maxTradesPerDay: session.config && session.config.maxTradesPerDay,
       emergencyStop: !!(session.config && session.config.emergencyStop),
+      bookName: spec.name,
     });
     if (!risk.ok) {
       pushEvent(session, 'SKIP', `${t.entryTime} ${spec.name} risk: ${risk.reason}`);
-      markSeen(session, id);
+      // Do not markSeen: a shared-cap false skip used to burn the next Paper
+      // OPEN on this book (16 Sep 11:50 PE). Retry when this book's count allows.
       continue;
     }
     const fut = spec.vehicle === 'fut';
@@ -1015,12 +1058,12 @@ async function onTick(session) {
         const orders = await session.broker.getOrders(authorization);
         const buys = palagaiCompletedBuys(orders, today);
         const before = liveEntryCount(session);
-        for (const o of buys) markLiveFilled(session, kiteBuyEntryId(o));
+        seedLiveEntriesFromBuys(session, buys);
         if (liveEntryCount(session) > before) {
           pushEvent(
             session,
             'RECONCILE',
-            `Counted ${buys.length} PALAGAI BUY fill(s) today toward the ${(session.config && session.config.maxTradesPerDay) || 2}/day cap`,
+            `Counted ${buys.length} PALAGAI BUY fill(s) today toward the ${(session.config && session.config.maxTradesPerDay) || 2}/book/day cap`,
           );
         }
       } catch (e) {
@@ -1209,5 +1252,6 @@ module.exports = {
   engineTradeStillOpen, engineBookHasOpenTrade, mustExitHeldForNewLeg, matchHeldEngineTrade, pickOption, pickIndexFuture, selectNearestFut, liveTransactionType, liveTradesFromBroker, SPEC, _sessions: sessions,
   mergeStructureOntoLiveTrades, visibleLiveEvents, LIVE_STATUS_EVENTS,
   palagaiCompletedBuys, kiteBuyEntryId, mergeLiveEnteredFromSnap, liveEntryCount,
-  alreadyHandled, shouldLogSkip, markSeen, markLiveFilled, stitchFormingIndexBar, floorHm5,
+  bookKeyFromEntryId, seedLiveEntriesFromBuys, alreadyHandled, shouldLogSkip, markSeen, markLiveFilled,
+  stitchFormingIndexBar, floorHm5,
 };

@@ -354,7 +354,7 @@ async function start(req, res) {
         lots,
         liveAssistant: assistant,
         note:
-          'Live is S/R Nifty + Bank. One ATM CE or PE per book per day, held to 15:15 unless the rupee stop hits. MIS, not NRML. Lots follow Kite available funds (₹40,000 per lot). Get Token if the assistant turns red.',
+          'Live is S/R Nifty + Bank. Up to two ATM CE or PE per book per day (same as Paper). MIS, not NRML. Lots follow Kite available funds (₹40,000 per lot). Get Token if the assistant turns red.',
       });
     } catch (err) {
       const detail = err.message || String(err);
