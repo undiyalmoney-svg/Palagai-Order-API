@@ -1,6 +1,7 @@
 'use strict';
 const assert = require('assert');
-const { decideLiveAction, signalId, hmToMin, SPEC, applyDeskLimits, engineTradeStillOpen, engineBookHasOpenTrade, mustExitHeldForNewLeg, matchHeldEngineTrade, pickOption, selectNearestFut, liveTransactionType, liveTradesFromBroker, visibleLiveEvents, LIVE_STATUS_EVENTS } = require('./sr-live');
+const { decideLiveAction, signalId, hmToMin, SPEC, applyDeskLimits, engineTradeStillOpen, engineBookHasOpenTrade, mustExitHeldForNewLeg, matchHeldEngineTrade, pickOption, selectNearestFut, liveTransactionType, liveTradesFromBroker, visibleLiveEvents, LIVE_STATUS_EVENTS, palagaiCompletedBuys, kiteBuyEntryId, mergeLiveEnteredFromSnap, liveEntryCount, alreadyHandled, shouldLogSkip, markSeen, markLiveFilled } = require('./sr-live');
+const { approveLiveEntry } = require('./engine/risk');
 const { exitOptsFor, LOT_UNITS, OPTION_SL_MAX_RS } = require('./sr-strategy-config');
 
 assert.deepStrictEqual(SPEC.nifty.opts, exitOptsFor('nifty'), 'Live Nifty opts must match Paper shared config');
@@ -384,6 +385,67 @@ assert.strictEqual(summarizeOptionTrades([
   assert.strictEqual(shown[0].at, '40', 'status must drop the oldest 40 of an 80-row buffer');
   assert.strictEqual(shown[shown.length - 1].detail, '09:79', 'last row is the newest WATCH');
   assert.deepStrictEqual(visibleLiveEvents(many.slice(0, 10)).map((e) => e.at), many.slice(0, 10).map((e) => e.at));
+}
+
+{
+  const buys = palagaiCompletedBuys([
+    { tag: 'PALAGAI', transaction_type: 'BUY', status: 'COMPLETE', filled_quantity: 30, tradingsymbol: 'BANKNIFTY26SEP56200CE', order_timestamp: '2026-09-16 10:51:42' },
+    { tag: 'PALAGAISL', transaction_type: 'SELL', status: 'COMPLETE', filled_quantity: 30, tradingsymbol: 'BANKNIFTY26SEP56200CE', order_timestamp: '2026-09-16 11:19:05' },
+    { tag: 'PALAGAI', transaction_type: 'BUY', status: 'COMPLETE', filled_quantity: 65, tradingsymbol: 'NIFTY2692223200PE', order_timestamp: '2026-09-16 11:30:05' },
+    { tag: 'PALAGAI', transaction_type: 'SELL', status: 'COMPLETE', filled_quantity: 65, tradingsymbol: 'NIFTY2692223200PE', order_timestamp: '2026-09-16 11:40:36' },
+    { tag: 'PALAGAI', transaction_type: 'BUY', status: 'REJECTED', filled_quantity: 0, tradingsymbol: 'NIFTY2692223200PE', order_timestamp: '2026-09-16 11:59:00' },
+  ], '2026-09-16');
+  assert.strictEqual(buys.length, 2, 'only complete PALAGAI BUYs count — not SL, SELL, or rejects');
+  assert.ok(kiteBuyEntryId(buys[0]).startsWith('kite|BANKNIFTY26SEP56200CE|'));
+}
+
+{
+  const snap = {
+    savedAt: '2026-09-16T06:19:40.179Z',
+    entered: ['nifty|2026-09-16|11:20', 'banknifty|2026-09-16|10:50'],
+  };
+  const merged = mergeLiveEnteredFromSnap(snap, '2026-09-16');
+  assert.strictEqual(merged.live.size, 0, 'legacy entered skip-ids must not fill the live cap');
+  assert.ok(merged.seen.has('nifty|2026-09-16|11:20'));
+  assert.ok(merged.seen.has('banknifty|2026-09-16|10:50'));
+}
+
+{
+  const session = { liveEntered: new Set(), seen: new Set() };
+  markSeen(session, 'nifty|2026-09-16|11:20');
+  markSeen(session, 'banknifty|2026-09-16|10:50');
+  assert.strictEqual(liveEntryCount(session), 0, 'Paper GIVEUP/STOP skips do not consume max 2/day');
+  markLiveFilled(session, 'kite|BANKNIFTY26SEP56200CE|2026-09-16 10:51');
+  markLiveFilled(session, 'kite|NIFTY2692223200PE|2026-09-16 11:30');
+  assert.strictEqual(liveEntryCount(session), 2);
+  const closeRow = {
+    date: '2026-09-16', side: 'SELL', option: 'PE',
+    entryTime: '11:50', exitTime: '12:15', exitReason: 'CLOSE', entryPrice: 23219,
+  };
+  assert.strictEqual(decideLiveAction({
+    trade: closeRow, nowHm: '12:17', alreadyOpen: false, squareOffHm: '15:15',
+  }), 'enter', 'last-bar CLOSE is still OPEN on Paper');
+  const id = signalId('nifty', closeRow);
+  assert.strictEqual(alreadyHandled(session, id), false);
+  const risk = approveLiveEntry({
+    sessionRunning: true, autoBotRunning: false,
+    enteredCount: liveEntryCount(session), maxTradesPerDay: 2,
+  });
+  assert.strictEqual(risk.ok, false);
+  assert.match(risk.reason, /max 2 live entries today/);
+  markSeen(session, id);
+  assert.strictEqual(alreadyHandled(session, id), true, 'cap skip marks the CLOSE row seen — no retry');
+  assert.strictEqual(liveEntryCount(session), 2, 'cap skip must not increment the fill count');
+}
+
+{
+  const events = [];
+  const detail = '11:50 Nifty 50 risk: max 2 live entries today';
+  assert.strictEqual(shouldLogSkip(events, detail), true);
+  events.push({ action: 'SKIP', detail });
+  events.push({ action: 'WATCH', detail: '12:17 Nifty 50 2 · 11:50 PE CLOSE' });
+  assert.strictEqual(shouldLogSkip(events, detail), false, 'do not log the same SKIP every 15s');
+  assert.strictEqual(shouldLogSkip(events, '11:50 Nifty 50 TIME — Paper already exited or session over'), true);
 }
 
 console.log('sr-live.selftest: ok');

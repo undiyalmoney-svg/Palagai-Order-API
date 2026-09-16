@@ -77,6 +77,81 @@ function signalId(key, trade) {
   return `${key}|${trade.date}|${trade.entryTime}`;
 }
 
+function istYmd(iso) {
+  if (!iso) return '';
+  try {
+    return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date(iso));
+  } catch {
+    return String(iso).slice(0, 10);
+  }
+}
+
+/** Successful PALAGAI BUY fills (not SL tags). Used to restore the day cap after Stop/Start. */
+function palagaiCompletedBuys(orders, dayIso) {
+  const out = [];
+  for (const o of orders || []) {
+    if (String(o.tag || '') !== 'PALAGAI') continue;
+    if (String(o.transaction_type || '').toUpperCase() !== 'BUY') continue;
+    if (String(o.status || '').toUpperCase() !== 'COMPLETE') continue;
+    const ts = String(o.order_timestamp || o.exchange_timestamp || o.exchange_update_timestamp || '');
+    if (dayIso && !ts.startsWith(dayIso)) continue;
+    if (!(Number(o.filled_quantity || o.quantity || 0) > 0)) continue;
+    out.push(o);
+  }
+  return out;
+}
+
+function kiteBuyEntryId(order) {
+  const ts = String(order.order_timestamp || order.exchange_timestamp || '').slice(0, 16);
+  return `kite|${order.tradingsymbol}|${ts}`;
+}
+
+/**
+ * Legacy persist `entered` mixed Paper-skip ids with fills, so a Stop/Start
+ * counted GIVEUP/STOP as live entries and blocked the next Paper OPEN (11:50
+ * CLOSE skip-spam on 16 Sep). New snaps keep liveEntered vs seen apart.
+ */
+function mergeLiveEnteredFromSnap(snap, dayIso) {
+  const live = new Set();
+  const seen = new Set();
+  if (!snap) return { live, seen };
+  const ids = [...(snap.entered || []), ...(snap.liveEntered || []), ...(snap.seen || [])];
+  const sameDay = istYmd(snap.savedAt) === dayIso
+    || ids.some((id) => String(id).includes(`|${dayIso}|`));
+  if (!sameDay) return { live, seen };
+  for (const id of snap.liveEntered || []) live.add(String(id));
+  for (const id of snap.seen || []) seen.add(String(id));
+  for (const id of snap.entered || []) seen.add(String(id));
+  return { live, seen };
+}
+
+function liveEntryCount(session) {
+  return session?.liveEntered instanceof Set ? session.liveEntered.size : 0;
+}
+
+function alreadyHandled(session, id) {
+  return !!(session?.seen?.has(id) || session?.liveEntered?.has(id));
+}
+
+function shouldLogSkip(events, detail) {
+  return !(events || []).some((e) => e && e.action === 'SKIP' && e.detail === detail);
+}
+
+function markSeen(session, id) {
+  if (!session.seen) session.seen = new Set();
+  if (id) session.seen.add(id);
+}
+
+function markLiveFilled(session, id) {
+  if (!session.liveEntered) session.liveEntered = new Set();
+  if (!session.seen) session.seen = new Set();
+  if (id) {
+    session.liveEntered.add(id);
+    session.seen.add(id);
+  }
+  session.entered = session.liveEntered;
+}
+
 /** Engine actually finished this trade. CLOSE is not in this set: on a live
  *  day the engine parks CLOSE on the last fetched 5-min bar (always <= now),
  *  which means "still open in the replay", not "session square-off done".
@@ -161,6 +236,8 @@ function getSession(userId) {
       config: null,
       events: [],
       entered: new Set(),
+      liveEntered: new Set(),
+      seen: new Set(),
       openSignal: new Map(),
       lastTickAt: null,
       lastError: null,
@@ -185,7 +262,9 @@ function persistSrSession(session) {
     lastPreflight: session.lastPreflight,
     lastTickAt: session.lastTickAt,
     config: session.config,
-    entered: [...(session.entered || [])],
+    entered: [...(session.liveEntered || session.entered || [])],
+    liveEntered: [...(session.liveEntered || [])],
+    seen: [...(session.seen || [])],
     openSignal: session.openSignal ? Object.fromEntries(session.openSignal) : {},
     broker: persist.brokerSnapshot(session.broker),
     savedAt: new Date().toISOString(),
@@ -204,7 +283,10 @@ function hydrateSrSession(session) {
   session.lastPreflight = snap.lastPreflight || null;
   session.lastTickAt = snap.lastTickAt || null;
   session.config = snap.config || null;
-  session.entered = new Set(snap.entered || []);
+  const merged = mergeLiveEnteredFromSnap(snap, todayIso());
+  session.liveEntered = merged.live;
+  session.seen = merged.seen;
+  session.entered = session.liveEntered;
   session.openSignal = new Map(Object.entries(snap.openSignal || {}));
   session.broker = new LiveBroker({
     pushEvent: (a, d) => pushEvent(session, a, d),
@@ -215,7 +297,9 @@ function hydrateSrSession(session) {
 }
 
 function pushEvent(session, action, detail) {
-  session.events.push({ at: new Date().toISOString(), action, detail: String(detail || '') });
+  const text = String(detail || '');
+  if (action === 'SKIP' && !shouldLogSkip(session.events, text)) return;
+  session.events.push({ at: new Date().toISOString(), action, detail: text });
   if (session.events.length > 200) session.events.splice(0, session.events.length - 200);
   persistSrSession(session);
 }
@@ -357,7 +441,9 @@ function statusPayload(session) {
       ? { ok: false, checks: [{ id: 'tick', ok: false, detail: session.lastError }] }
       : session.lastPreflight || undefined,
     config: session.config,
-    entered: [...session.entered],
+    entered: [...(session.liveEntered || session.entered || [])],
+    liveEntered: [...(session.liveEntered || [])],
+    seen: [...(session.seen || [])],
     strategyId: STRATEGY_ID,
     strategyVersion: STRATEGY_VERSION,
     openSignals: Object.fromEntries(session.openSignal),
@@ -440,7 +526,11 @@ async function start(userId, body = {}) {
   session.message = `S/R Live on · ${keys.join('+')} · ${session.config.lots} lot(s) · real MIS`;
   session.lastError = null;
   session.lastPreflight = body.liveAssistant || null;
-  session.entered = new Set();
+  const prevSnap = persist.load('sr', session.userId);
+  const merged = mergeLiveEnteredFromSnap(prevSnap, todayIso());
+  session.seen = merged.seen;
+  session.liveEntered = merged.live;
+  session.entered = session.liveEntered;
   session.openSignal = new Map();
   session.broker = new LiveBroker({
     pushEvent: (a, d) => pushEvent(session, a, d),
@@ -459,6 +549,20 @@ async function start(userId, body = {}) {
     await session.broker.reconcileFromBroker(auth);
   } catch (e) {
     pushEvent(session, 'ERROR', `reconcile: ${e.message}`);
+  }
+  try {
+    const orders = await session.broker.getOrders(auth);
+    const buys = palagaiCompletedBuys(orders, todayIso());
+    for (const o of buys) markLiveFilled(session, kiteBuyEntryId(o));
+    if (buys.length) {
+      pushEvent(
+        session,
+        'RECONCILE',
+        `Counted ${buys.length} PALAGAI BUY fill(s) today toward the ${session.config.maxTradesPerDay}/day cap`,
+      );
+    }
+  } catch (e) {
+    pushEvent(session, 'ERROR', `entry-cap seed: ${e.message}`);
   }
   startTick(session);
   persistSrSession(session);
@@ -736,20 +840,22 @@ async function pickOption(authorization, spec, trade, session) {
 }
 
 async function pickFreshLiveEntry(session, authorization, spec, key, trades, hm, lots) {
+  if (!session.seen) session.seen = new Set();
+  if (!session.liveEntered) session.liveEntered = new Set();
   for (const t of trades) {
     const id = signalId(key, t);
-    if (session.entered.has(id)) continue;
+    if (alreadyHandled(session, id)) continue;
     const act = decideLiveAction({
       trade: t, nowHm: hm, alreadyOpen: false, squareOffHm: spec.session.squareOffHm,
     });
     if (act !== 'enter') {
-      if (act === 'skip' && !session.entered.has(id)) {
+      if (act === 'skip') {
         pushEvent(
           session,
           'SKIP',
           `${t.entryTime} ${spec.name} ${t.exitReason || ''} — Paper already exited or session over`,
         );
-        session.entered.add(id);
+        markSeen(session, id);
       }
       continue;
     }
@@ -757,12 +863,13 @@ async function pickFreshLiveEntry(session, authorization, spec, key, trades, hm,
     const risk = approveLiveEntry({
       sessionRunning: session.status === 'running',
       autoBotRunning: !!(auto && auto.status === 'running'),
-      enteredCount: session.entered.size,
+      enteredCount: liveEntryCount(session),
       maxTradesPerDay: session.config && session.config.maxTradesPerDay,
       emergencyStop: !!(session.config && session.config.emergencyStop),
     });
     if (!risk.ok) {
       pushEvent(session, 'SKIP', `${t.entryTime} ${spec.name} risk: ${risk.reason}`);
+      markSeen(session, id);
       continue;
     }
     const fut = spec.vehicle === 'fut';
@@ -774,7 +881,7 @@ async function pickFreshLiveEntry(session, authorization, spec, key, trades, hm,
       : await pickOption(authorization, spec, t, session);
     if (!option || !(option.instrumentToken > 0)) {
       pushEvent(session, 'SKIP', `${spec.name}: no ${fut ? 'Nifty future' : 'option contract'} to trade`);
-      session.entered.add(id);
+      markSeen(session, id);
       continue;
     }
     const rolled = !!(option.expiryRolled);
@@ -791,7 +898,9 @@ async function pickFreshLiveEntry(session, authorization, spec, key, trades, hm,
       `${t.entryTime} ${spec.name} enter ${option.tradingSymbol || spec.name}` +
         ` @ ${t.entryPrice} — Kite ${tx} + SL`,
     );
-    session.entered.add(id);
+    // Do not count toward the day cap until Kite accepts the BUY.
+    // Mark seen so the same CLOSE row is not dual-fired in this tick.
+    markSeen(session, id);
     session.openSignal.set(spec.bookId, id);
     return {
       option,
@@ -800,6 +909,7 @@ async function pickFreshLiveEntry(session, authorization, spec, key, trades, hm,
       indexStop: indexStopPrice(t, spec),
       indexTarget: t.side === 'BUY' ? t.entryPrice + (t.target || 20) : t.entryPrice - (t.target || 20),
       entryTime: t.entryTime,
+      signalId: id,
       direction: tx,
       vehicle: fut ? 'fut' : 'option',
       skipChargeGate: true,
@@ -809,6 +919,13 @@ async function pickFreshLiveEntry(session, authorization, spec, key, trades, hm,
     };
   }
   return null;
+}
+
+function recordFillAfterSync(session, bookId, intent) {
+  if (!intent || !intent.signalId) return;
+  const pos = session.broker && session.broker.positions.get(bookId);
+  if (pos && pos.status === 'open') markLiveFilled(session, intent.signalId);
+  else if (pos && pos.status === 'error' && session.seen) session.seen.delete(intent.signalId);
 }
 
 async function onTick(session) {
@@ -973,6 +1090,7 @@ async function onTick(session) {
           open,
           lots,
         });
+        recordFillAfterSync(session, bookId, open);
         const after = session.broker.positions.get(bookId);
         if (!open && (!after || after.status === 'flat' || after.status === 'error')) {
           const next = await pickFreshLiveEntry(session, authorization, spec, key, trades, hm, lots);
@@ -984,6 +1102,7 @@ async function onTick(session) {
               open: next,
               lots,
             });
+            recordFillAfterSync(session, bookId, next);
           }
         }
       } catch (e) {
@@ -1013,4 +1132,6 @@ module.exports = {
   start, stop, status, decideLiveAction, applyDeskLimits, signalId, hmToMin,
   engineTradeStillOpen, engineBookHasOpenTrade, mustExitHeldForNewLeg, matchHeldEngineTrade, pickOption, pickIndexFuture, selectNearestFut, liveTransactionType, liveTradesFromBroker, SPEC, _sessions: sessions,
   mergeStructureOntoLiveTrades, visibleLiveEvents, LIVE_STATUS_EVENTS,
+  palagaiCompletedBuys, kiteBuyEntryId, mergeLiveEnteredFromSnap, liveEntryCount,
+  alreadyHandled, shouldLogSkip, markSeen, markLiveFilled,
 };
