@@ -3,9 +3,9 @@
  * Retest fill on the LAST fetched 5m bar must still emit a trade (CLOSE/open).
  * Old code required a following bar, so Live never saw the fill until TARGET.
  *
- * A 15m bar labelled 11:30 is built from 11:30+11:35+11:40 5m. Truncating at
- * 11:45 (the first 5m AFTER that bucket) is the live-as-of case: the break is
- * known, the retest just printed, and there is no later bar yet.
+ * A 15m bar labelled 11:15 is built from 11:15+11:20+11:25 5m. Direction is
+ * known at 11:30. Truncating at the 11:30 retest 5m is the live-as-of case:
+ * confirm printed, the retest just printed, and there is no later bar yet.
  */
 const assert = require('assert');
 const { runSrBreakout } = require('./sr-breakout');
@@ -43,16 +43,16 @@ for (let d = 1; d <= 8; d++) {
 }
 const iso = '2026-08-11';
 function signalPx(_i, min) {
-  // 11:15 15m (11:15+11:20+11:25) dumps through the morning wall. At 11:26 the
-  // last 5m is the retest — Live must see OPEN then, not wait for 11:30.
+  // 11:15 15m dumps through the morning wall. Confirm at 11:30; retest wicks
+  // the wall on that first post-close 5m — Live must BUY then, not wait.
   if (min < 11 * 60 + 15) {
     const px = 23555 + (min % 15) * 0.1;
     return { o: px, c: px - 0.3, h: px + 2, l: px - 3 };
   }
   if (min === 11 * 60 + 15) return { o: 23550, c: 23495, h: 23552, l: 23490 };
-  if (min === 11 * 60 + 20) return { o: 23495, c: 23488, h: 23498, l: 23485 };
-  if (min === 11 * 60 + 25) return { o: 23488, c: 23520, h: 23580, l: 23484 };
-  if (min === 11 * 60 + 30) return { o: 23518, c: 23470, h: 23522, l: 23465 };
+  if (min === 11 * 60 + 20) return { o: 23495, c: 23480, h: 23498, l: 23475 };
+  if (min === 11 * 60 + 25) return { o: 23480, c: 23470, h: 23490, l: 23460 };
+  if (min === 11 * 60 + 30) return { o: 23470, c: 23485, h: 23555, l: 23465 };
   const px = 23470;
   return { o: px, c: px - 1, h: px + 1, l: px - 2 };
 }
@@ -65,17 +65,20 @@ const opts = {
   wallMode: 'intraday', retest: true, maxRetestBars: 2, minScore: 0,
 };
 
-const untilFill = bars.concat(sessionBars(iso, signalPx, 11 * 60 + 25));
+const untilSignal = bars.concat(sessionBars(iso, signalPx, 11 * 60 + 25));
+assert.strictEqual(runSrBreakout(untilSignal, opts).trades.length, 0,
+  'must not enter on the raw 15m breakout bar');
+const untilFill = bars.concat(sessionBars(iso, signalPx, 11 * 60 + 30));
 const atFill = runSrBreakout(untilFill, opts);
 assert.ok(atFill.trades.length >= 1, `fill bar must emit a trade, got ${atFill.trades.length}`);
 const open = atFill.trades[0];
 assert.strictEqual(open.side, 'SELL');
 assert.strictEqual(open.option, 'PE');
-assert.strictEqual(open.entryTime, '11:25');
+assert.strictEqual(open.entryTime, '11:30');
 assert.strictEqual(open.exitReason, 'CLOSE');
 assert.strictEqual(open.openAtFill, true);
 assert.strictEqual(decideLiveAction({
-  trade: open, nowHm: '11:26', alreadyOpen: false, squareOffHm: '15:15',
+  trade: open, nowHm: '11:31', alreadyOpen: false, squareOffHm: '15:15',
 }), 'enter', 'Live must BUY the PE at the fill bar, not wait for TARGET');
 assert.strictEqual(liveTransactionType(SPEC.nifty, open), 'BUY');
 
@@ -90,12 +93,13 @@ function holdPx(_i, min) {
     return { o: px, c: px - 0.3, h: px + 2, l: px - 3 };
   }
   if (min === 11 * 60 + 15) return { o: 23550, c: 23495, h: 23552, l: 23490 };
-  if (min === 11 * 60 + 20) return { o: 23495, c: 23488, h: 23498, l: 23485 };
-  if (min === 11 * 60 + 25) return { o: 23488, c: 23520, h: 23580, l: 23484 };
+  if (min === 11 * 60 + 20) return { o: 23495, c: 23480, h: 23498, l: 23475 };
+  if (min === 11 * 60 + 25) return { o: 23480, c: 23470, h: 23490, l: 23460 };
+  if (min === 11 * 60 + 30) return { o: 23470, c: 23485, h: 23555, l: 23465 };
   // After fill: grind in favor ~2 pts/bar, never close back through the wall.
   // Index +20 TARGET would still be open at bar 6; TIME 6 must flatten.
-  const n = Math.floor((min - (11 * 60 + 30)) / 5);
-  const c = 23518 - (n + 1) * 2;
+  const n = Math.floor((min - (11 * 60 + 35)) / 5);
+  const c = 23485 - (n + 1) * 2;
   return { o: c + 1, c, h: c + 2, l: c - 8 };
 }
 {
@@ -111,7 +115,7 @@ function holdPx(_i, min) {
   assert.strictEqual(hold.trades[0].exitReason, 'TIME',
     `shared DNA TIME-flattens at 30 min, got ${hold.trades[0].exitReason} @ ${hold.trades[0].exitTime}`);
   assert.notStrictEqual(hold.trades[0].exitReason, 'FAIL');
-  const inMin = 11 * 60 + 25;
+  const inMin = 11 * 60 + 30;
   const outMin = hold.trades[0].exitTime.split(':').map(Number);
   const heldBars = ((outMin[0] * 60 + outMin[1]) - inMin) / 5;
   assert.ok(heldBars <= 6, `TIME 6 must flatten by 6 bars, got ${heldBars} bars`);

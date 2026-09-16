@@ -114,8 +114,7 @@ const EXIT_RULES = Object.freeze({
   //     rather than removing the damage. The option exists in the engine
   //     (default 0 = off); leave it off unless a longer study says otherwise.
   nifty: Object.freeze({
-    wallMode: 'intraday', retest: true, confirm: 'retest', confirmAfterBreakout: true,
-    timeStopBars: 6, maxRetestBars: 2,
+    wallMode: 'intraday', retest: true, confirm: 'retest', confirmAfterBreakout: true, timeStopBars: 6, maxRetestBars: 2,
     // 15 Sep 2026 hold-to-close blew August paper: option ₹20,163 profit vs
     // ₹30,444 loss (NET −₹10,281), 20 CLOSE holds = −₹18,137. TIME 6 (30 min)
     // on the same entries flips Aug to +₹7,875 and keeps Jun/Jul/Sep green.

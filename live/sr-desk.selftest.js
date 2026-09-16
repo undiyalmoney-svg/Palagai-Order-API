@@ -415,6 +415,7 @@ Promise.resolve()
     assert.strictEqual(out.engine, ENGINE);
     assert.strictEqual(out.strategy, STRATEGY_ID);
     assert.ok(/wall-break|S\/R/i.test(out.note));
+    assert.ok(/S\/R → breakout → confirm \(retest\) → enter ATM CE\/PE/i.test(out.note));
     assert.ok(/only Nifty 50 and Bank Nifty/i.test(out.note));
     assert.ok(/NSE 5-minute option OHLC/i.test(out.note));
     assert.ok(/weekly premium/i.test(out.note));

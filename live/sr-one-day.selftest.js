@@ -77,9 +77,10 @@ function failPx(min) {
     return { o: px, c: px - 0.3, h: px + 2, l: px - 3 };
   }
   if (min === 11 * 60 + 15) return { o: 23550, c: 23495, h: 23552, l: 23490 };
-  if (min === 11 * 60 + 20) return { o: 23495, c: 23488, h: 23498, l: 23485 };
-  if (min === 11 * 60 + 25) return { o: 23488, c: 23520, h: 23580, l: 23484 };
-  if (min === 11 * 60 + 30) return { o: 23518, c: 23570, h: 23575, l: 23510 };
+  if (min === 11 * 60 + 20) return { o: 23495, c: 23480, h: 23498, l: 23475 };
+  if (min === 11 * 60 + 25) return { o: 23480, c: 23470, h: 23490, l: 23460 };
+  if (min === 11 * 60 + 30) return { o: 23470, c: 23485, h: 23555, l: 23465 };
+  if (min === 11 * 60 + 35) return { o: 23550, c: 23570, h: 23575, l: 23510 };
   const n = Math.floor((min - (11 * 60 + 35)) / 5);
   const c = 23490 - n * 3;
   return { o: c + 2, c, h: c + 4, l: c - 2 };
@@ -102,7 +103,7 @@ const held = runSrBreakout(day, { ...base, ...exitOptsFor('nifty') });
 assert.ok(scratched.trades.length >= 1);
 assert.strictEqual(scratched.trades[0].exitReason, 'FAIL',
   `old DNA must FAIL the 11:30 wall close, got ${scratched.trades[0].exitReason}`);
-assert.ok(scratched.trades[0].exitTime <= '11:35',
+assert.ok(scratched.trades[0].exitTime <= '11:40',
   `FAIL should be minutes after fill, got ${scratched.trades[0].exitTime}`);
 
 assert.ok(held.trades.length >= 1);
@@ -122,10 +123,11 @@ function grindPx(min) {
     return { o: px, c: px - 0.3, h: px + 2, l: px - 3 };
   }
   if (min === 11 * 60 + 15) return { o: 23550, c: 23495, h: 23552, l: 23490 };
-  if (min === 11 * 60 + 20) return { o: 23495, c: 23488, h: 23498, l: 23485 };
-  if (min === 11 * 60 + 25) return { o: 23488, c: 23520, h: 23580, l: 23484 };
-  const n = Math.floor((min - (11 * 60 + 30)) / 5);
-  const c = 23518 - (n + 1) * 2;
+  if (min === 11 * 60 + 20) return { o: 23495, c: 23480, h: 23498, l: 23475 };
+  if (min === 11 * 60 + 25) return { o: 23480, c: 23470, h: 23490, l: 23460 };
+  if (min === 11 * 60 + 30) return { o: 23470, c: 23485, h: 23555, l: 23465 };
+  const n = Math.floor((min - (11 * 60 + 35)) / 5);
+  const c = 23485 - (n + 1) * 2;
   return { o: c + 1, c, h: c + 2, l: c - 8 };
 }
 const grind = bars.concat(sessionBars(iso, grindPx, 12 * 60 + 30));

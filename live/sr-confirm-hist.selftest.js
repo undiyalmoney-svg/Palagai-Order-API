@@ -43,10 +43,10 @@ function signalPx(min) {
     return { o: px, c: px - 0.3, h: px + 2, l: px - 3 };
   }
   if (min === 11 * 60 + 15) return { o: 23550, c: 23495, h: 23552, l: 23490 };
-  if (min === 11 * 60 + 20) return { o: 23495, c: 23488, h: 23498, l: 23485 };
-  if (min === 11 * 60 + 25) return { o: 23488, c: 23520, h: 23580, l: 23484 };
-  if (min === 11 * 60 + 30) return { o: 23518, c: 23490, h: 23522, l: 23480 };
-  if (min === 11 * 60 + 35) return { o: 23490, c: 23470, h: 23495, l: 23465 };
+  if (min === 11 * 60 + 20) return { o: 23495, c: 23480, h: 23498, l: 23475 };
+  if (min === 11 * 60 + 25) return { o: 23480, c: 23470, h: 23490, l: 23460 };
+  if (min === 11 * 60 + 30) return { o: 23470, c: 23485, h: 23555, l: 23465 };
+  if (min === 11 * 60 + 35) return { o: 23485, c: 23470, h: 23495, l: 23460 };
   const px = 23470;
   return { o: px, c: px - 1, h: px + 1, l: px - 2 };
 }

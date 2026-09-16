@@ -89,11 +89,11 @@ function structurePx(min) {
     const lo = 24000 + (min % 10) * 0.2;
     return { o: lo + 10, c: lo + 12, h: 24080, l: 24000 };
   }
-  if (min === 10 * 60 + 45) return { o: 24070, c: 24120, h: 24125, l: 24068 };
-  if (min === 10 * 60 + 50) return { o: 24118, c: 24090, h: 24120, l: 24080 };
-  if (min === 10 * 60 + 55) return { o: 24090, c: 24110, h: 24115, l: 24085 };
-  if (min === 11 * 60) return { o: 24110, c: 24140, h: 24145, l: 24105 };
-  if (min === 11 * 60 + 5) return { o: 24140, c: 24170, h: 24180, l: 24135 };
+  if (min === 10 * 60 + 45) return { o: 24070, c: 24120, h: 24125, l: 24090 };
+  if (min === 10 * 60 + 50) return { o: 24118, c: 24110, h: 24122, l: 24095 };
+  if (min === 10 * 60 + 55) return { o: 24110, c: 24130, h: 24135, l: 24100 };
+  if (min === 11 * 60) return { o: 24125, c: 24115, h: 24130, l: 24080 };
+  if (min === 11 * 60 + 5) return { o: 24115, c: 24170, h: 24180, l: 24110 };
   return { o: 24170, c: 24190, h: 24200, l: 24160 };
 }
 const day = warmup.concat(sessionBars(iso, structurePx));

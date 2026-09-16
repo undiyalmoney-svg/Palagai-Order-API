@@ -14,8 +14,8 @@ assert.strictEqual(EXIT_RULES.nifty.retest, true);
 assert.strictEqual(EXIT_RULES.banknifty.retest, true);
 assert.strictEqual(EXIT_RULES.nifty.confirm, 'retest');
 assert.strictEqual(EXIT_RULES.banknifty.confirm, 'retest');
-assert.strictEqual(EXIT_RULES.nifty.maxRetestBars, 2);
-assert.strictEqual(EXIT_RULES.banknifty.maxRetestBars, 2);
+assert.strictEqual(EXIT_RULES.nifty.confirmAfterBreakout, true);
+assert.strictEqual(EXIT_RULES.banknifty.confirmAfterBreakout, true);
 assert.deepStrictEqual(SPEC.nifty.opts, exitOptsFor('nifty'));
 assert.deepStrictEqual(SPEC.banknifty.opts, exitOptsFor('banknifty'));
 assert.strictEqual(SPEC.nifty.opts.retest, true);
@@ -24,9 +24,10 @@ assert.strictEqual(SPEC.banknifty.opts.retest, true);
 function hmStr(min) {
   return String(Math.floor(min / 60)).padStart(2, '0') + ':' + String(min % 60).padStart(2, '0');
 }
-function sessionBars(iso, priceAt) {
+function sessionBars(iso, priceAt, untilMin) {
   const out = [];
-  for (let min = 9 * 60 + 15; min <= 15 * 60 + 25; min += 5) {
+  const end = untilMin == null ? 15 * 60 + 25 : untilMin;
+  for (let min = 9 * 60 + 15; min <= end; min += 5) {
     const px = priceAt(min);
     out.push({ date: `${iso}T${hmStr(min)}:00+05:30`, open: px.o, high: px.h, low: px.l, close: px.c });
   }
@@ -49,11 +50,11 @@ function withRetestPx(min) {
     const lo = 24000 + (min % 10) * 0.2;
     return { o: lo + 10, c: lo + 12, h: 24080, l: 24000 };
   }
-  if (min === 10 * 60 + 45) return { o: 24070, c: 24120, h: 24125, l: 24068 };
-  if (min === 10 * 60 + 50) return { o: 24118, c: 24090, h: 24120, l: 24080 };
-  if (min === 10 * 60 + 55) return { o: 24090, c: 24110, h: 24115, l: 24085 };
-  if (min === 11 * 60) return { o: 24110, c: 24140, h: 24145, l: 24105 };
-  if (min === 11 * 60 + 5) return { o: 24140, c: 24170, h: 24180, l: 24135 };
+  if (min === 10 * 60 + 45) return { o: 24070, c: 24120, h: 24125, l: 24090 };
+  if (min === 10 * 60 + 50) return { o: 24118, c: 24110, h: 24122, l: 24095 };
+  if (min === 10 * 60 + 55) return { o: 24110, c: 24130, h: 24135, l: 24100 };
+  if (min === 11 * 60) return { o: 24125, c: 24115, h: 24130, l: 24080 };
+  if (min === 11 * 60 + 5) return { o: 24115, c: 24170, h: 24180, l: 24110 };
   return { o: 24170, c: 24190, h: 24200, l: 24160 };
 }
 function noRetestPx(min) {
@@ -64,7 +65,7 @@ function noRetestPx(min) {
   // Breakout 15m close, then price never comes back to 24080 within 2 bars.
   if (min === 10 * 60 + 45) return { o: 24070, c: 24120, h: 24125, l: 24090 };
   if (min === 10 * 60 + 50) return { o: 24120, c: 24140, h: 24150, l: 24110 };
-  if (min === 10 * 60 + 55) return { o: 24140, c: 24160, h: 24170, l: 24130 };
+  if (min === 10 * 60 + 55) return { o: 24140, c: 24155, h: 24160, l: 24130 };
   return { o: 24160, c: 24180, h: 24190, l: 24150 };
 }
 
@@ -87,6 +88,7 @@ assert.ok(t.retestTime);
 assert.strictEqual(t.confirmationTime, t.retestTime);
 assert.strictEqual(t.entryTime, t.confirmationTime);
 assert.notStrictEqual(t.entryTime, t.breakoutTime, 'must not enter on the breakout bar');
+assert.ok(t.entryTime > t.breakoutTime);
 assert.ok(t.breakoutPrice > t.level);
 assert.strictEqual(t.option, 'CE');
 assert.ok(t.structure.breakout);
@@ -94,15 +96,17 @@ assert.ok(t.structure.confirm);
 assert.strictEqual(t.structure.support, t.wallLo);
 assert.strictEqual(t.structure.resistance, t.wallHi);
 
-const rawBreakout = runSrBreakout(retestDay, { ...base, ...exitOptsFor('nifty'), retest: false, maxRetestBars: 0 });
+const rawBreakout = runSrBreakout(retestDay, { ...base, ...exitOptsFor('nifty'), retest: false, confirmAfterBreakout: false, maxRetestBars: 0 });
 assert.ok(rawBreakout.trades.length >= 1);
 assert.strictEqual(rawBreakout.trades[0].entryTime, rawBreakout.trades[0].breakoutTime);
 assert.ok(!rawBreakout.trades[0].confirmationTime);
 
-const skipped = runSrBreakout(noRetestDay, { ...base, ...exitOptsFor('nifty') });
+const skipped = runSrBreakout(noRetestDay, { ...base, ...exitOptsFor('nifty'), squareOffHm: '10:55' });
 assert.strictEqual(skipped.trades.length, 0, 'no confirm (retest) → no entry');
-const wouldEnterRaw = runSrBreakout(noRetestDay, { ...base, ...exitOptsFor('nifty'), retest: false, maxRetestBars: 0 });
-assert.ok(wouldEnterRaw.trades.length >= 1, 'same day enters if confirm is off');
+const wouldEnterRawCut = runSrBreakout(noRetestDay, {
+  ...base, ...exitOptsFor('nifty'), retest: false, maxRetestBars: 0, confirmAfterBreakout: false, squareOffHm: '10:55',
+});
+assert.ok(wouldEnterRawCut.trades.length >= 1, 'same day enters if confirm is off');
 
 const paperBank = runSrBreakout(retestDay, { ...base, ...exitOptsFor('banknifty'), sessionAlign: false });
 const liveBank = runSrBreakout(retestDay, { ...base, ...SPEC.banknifty.opts, sessionAlign: false });
@@ -138,7 +142,7 @@ assert.ok(emptyChart.candles.length > 20, 'book chart still has today 5m with no
 const mapped = mapTrade(t, BOOKS.nifty, 1, 65);
 assert.strictEqual(mapped.breakoutTime, t.breakoutTime);
 assert.strictEqual(mapped.confirmationTime, t.confirmationTime);
-assert.strictEqual(mapped.option, 'CE');
+assert.strictEqual(mapped.optionKind, 'CE');
 
 console.log('sr-confirm-chart.selftest: ok', {
   breakout: t.breakoutTime,

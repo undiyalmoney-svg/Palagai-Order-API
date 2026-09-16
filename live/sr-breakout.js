@@ -114,9 +114,9 @@ function runSrBreakout(bars5, opts) {
   // next trade a Rs1,500 stop, not Rs5,000. Default off for backward compat.
   const capStopToDayBudget = !!opts.capStopToDayBudget;
   const retest = !!opts.retest;                   // enter on the pullback to the broken level (NIFTY_RETEST_V1)
-  // After the 15m breakout close, not on that bar's own 5m prints. Default
-  // ON when retest is on so Paper/Live cannot look-ahead into the signal bar.
-  const confirmAfterBreakout = opts.confirmAfterBreakout != null ? !!opts.confirmAfterBreakout : !!retest;
+  // Kite 5m 2026-01-01..09-16: every Trade Bot fill was on the signal 15m bar.
+  // Wait for that close (same +10 skip ORB already used) then retest.
+  const confirmAfterBreakout = opts.confirmAfterBreakout == null ? !!retest : !!opts.confirmAfterBreakout;
   // ENTRY METER: reject a retest that takes too long to fill. A quick pullback
   // means the level is still being respected; a slow one means the move has
   // already stalled. Measured over 2024-01..2026-08: retests filling within
@@ -258,12 +258,9 @@ function runSrBreakout(bars5, opts) {
     if (minScore > 0 && score < minScore) continue;
 
     const breakoutPrice = b.c, breakoutTime = b.hm;
-    // 15m bucket 10:30 is 10:30/10:35/10:40 5m. Close (direction) is known at 10:45.
     const confirmationCloseHm = addHm(b.hm, 15);
     let entry = b.c, entryTime = b.hm, retestTime = null, entryAt = null;
-    // Do not scan the signal 15m bar's own 5m prints. That is look-ahead into
-    // the breakout and is a raw-breakout-bar entry. Same for pivot/intraday/orb:
-    // last 5m of the bucket is stamped +10, so first eligible 5m is > +10.
+    // 15m 10:30 = 10:30/10:35/10:40. Close known at 10:45. Earlier 5m = raw breakout.
     const afterHm = (wallMode === 'orb' || confirmAfterBreakout) ? addHm(b.hm, 10) : b.hm;
     let after = (day5.get(b.d) || []).filter(x => hhmm(x.date) > afterHm && hhmm(x.date) <= squareOffHm);
     if (!after.length) continue;
@@ -280,9 +277,8 @@ function runSrBreakout(bars5, opts) {
       entry = level; entryTime = hhmm(fillBar.date); retestTime = entryTime;
       entryAt = fillBar.date;
       after = after.slice(hi + 1);
-      // Confirm direction at the 15m close, then enter on a later (or same as
-      // that close) 5m retest. A fill still inside the signal 15m bar is the
-      // raw breakout, not the play.
+      // Confirm is a later 5m bar than the 15m breakout stamp. Same-stamp
+      // fill would be entering on the raw breakout close.
       const eMin = hmToMin(entryTime);
       const bMin = hmToMin(breakoutTime);
       const cMin = hmToMin(confirmationCloseHm);
