@@ -224,6 +224,10 @@ assert.strictEqual(nseMarked.entryOhlc.low, 512.55);
 assert.strictEqual(nseMarked.entryOhlc.close, 524);
 assert.strictEqual(nseMarked.exitPrice, 518.4);
 assert.ok(nseMarked.slTrigger > 0 && nseMarked.slTrigger < 524, `overlay must keep option SL below fill (${nseMarked.slTrigger})`);
+assert.ok(
+  Math.abs((nseMarked.optionEntryPremium - nseMarked.slTrigger) - (2500 / 30)) < 1,
+  `Bank option SL must be full ₹2500/lot pts not 0.5× (${nseMarked.slTrigger})`,
+);
 assert.strictEqual(nseMarked.pnlSource, 'option_x_lot_live');
 assert.strictEqual(nseMarked.optionPnlRs, Math.round((518.4 - 524) * 30));
 assert.strictEqual(nseMarked.netOptionPnlRs, nseMarked.optionPnlRs - 20);
@@ -319,7 +323,7 @@ Promise.resolve()
       open: 923.4,
       high: 930,
       low: 800,
-      close: 850,
+      close: 820,
     };
     return overlayNseOptionOhlc(
       { ...bankTarget },

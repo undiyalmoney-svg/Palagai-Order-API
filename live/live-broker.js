@@ -266,6 +266,7 @@ class LiveBroker {
     let trigger = computeProtectiveSlTrigger({
       fillPremium: fill || px,
       indexRiskPts: Math.max(0, Number(indexRisk) || 0),
+      premiumDelta: 1,
       exchange,
       tradingSymbol,
       ltp: px || null,
@@ -708,6 +709,7 @@ class LiveBroker {
     const base = computeProtectiveSlTrigger({
       fillPremium: pos.entryPremium,
       indexRiskPts: indexRisk,
+      premiumDelta: 1,
       exchange: pos.exchange,
       tradingSymbol: pos.tradingSymbol,
       ltp,

@@ -9,6 +9,11 @@ const defaultMarket = require('./kite-market');
 const { lotsFromAvailableFunds } = require('./daily-desk-defaults');
 const { runSrBreakout } = require('./sr-breakout');
 const { chartPayload } = require('./sr-structure');
+const {
+  overlayPaperWithLiveFills,
+  overlayDeskBooks,
+  liveFillsFromSnap,
+} = require('./sr-paper-live-overlay');
 const { computeProtectiveSlTrigger } = require('./strategy-core.cjs');
 const {
   optionRupees,
@@ -243,6 +248,8 @@ function attachProtectiveSl(mapped, book) {
     ? computeProtectiveSlTrigger({
       fillPremium: fill,
       indexRiskPts: Math.max(0, Number(indexRisk) || 0),
+      // stopPts is already ₹cap / lot — do not 0.5Δ-haircut the Kite SL.
+      premiumDelta: 1,
       exchange: 'NFO',
       tradingSymbol: mapped.optionSymbol,
       ltp: fill,
@@ -599,7 +606,21 @@ async function runSrDesk({ authorization, fromDate, toDate, capitalRs, capitalSo
   });
 
   allTrades.sort((a, b) => String(a.entryTime).localeCompare(String(b.entryTime)));
-  const totals = summarize(allTrades);
+  const liveFills = Array.isArray(deps.liveFills) && deps.liveFills.length
+    ? deps.liveFills
+    : liveFillsFromSnap(deps.liveSnap);
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
+  const overlayToday = fromDate === today && toDate === today && liveFills.length > 0;
+  if (overlayToday) {
+    const overlaid = overlayPaperWithLiveFills(allTrades, liveFills);
+    allTrades.splice(0, allTrades.length, ...overlaid);
+    const nextBooks = overlayDeskBooks(booksOut, allTrades);
+    booksOut.splice(0, booksOut.length, ...nextBooks);
+    for (const b of booksOut) {
+      if (Array.isArray(b.trades)) b.totals = summarize(b.trades);
+    }
+  }
+  const totals = summarize(overlayToday ? allTrades.filter((t) => t.liveMatched === true) : allTrades);
   const taken = booksOut
     .filter((b) => b.id === 'nifty' || b.id === 'bank')
     .filter((b) => !b.sitOut)
@@ -627,7 +648,7 @@ async function runSrDesk({ authorization, fromDate, toDate, capitalRs, capitalSo
     coreBooks: booksOut.filter((b) => b.id === 'nifty' || b.id === 'bank' || b.id === 'crude'),
     deskChart: { books: booksOut.filter((b) => b.chart).map((b) => b.chart) },
     note:
-      'This desk trades only Nifty 50 and Bank Nifty. With-trend S/R wall break + retest, up to two ATM CE or PE per book per day (qty 65 / 30, MIS). Holds ~30 minutes (6×5m TIME) unless the rupee stop hits first (Nifty ₹5,000 / Bank ₹2,500), the trade makes no +12 index pts by bar 4 (give-up), or the INDEX completes the same measured-move the chart draws (STRUCTURE). Bank does not buy CE below the day\'s open or PE above it. Not FAIL on a 1-bar close through the wall, not a +20 index TARGET. Paper ₹ shadows Live: ATM CE/PE premium × lot, minus ₹20/lot. In/Out are NSE 5-minute option OHLC when the range is ≤14 days, otherwise modeled weekly premium. Live rests an option SL. Crude stays off.',
+      'This desk trades only Nifty 50 and Bank Nifty. With-trend S/R wall break + retest, up to two ATM CE or PE per book per day (qty 65 / 30, MIS). Holds ~30 minutes (6×5m TIME) unless the rupee stop hits first (Nifty ₹5,000 / Bank ₹2,500), the trade makes no +12 index pts by bar 4 (give-up), or the INDEX completes the same measured-move the chart draws (STRUCTURE). Bank does not buy CE below the day\'s open or PE above it. Not FAIL on a 1-bar close through the wall, not a +20 index TARGET. Paper ₹ shadows Live: ATM CE/PE premium × lot, minus ₹20/lot. In/Out are NSE 5-minute option OHLC when the range is ≤14 days, otherwise modeled weekly premium. If Live already filled today, Why and ₹ overlay those Kite In/Out (not a later CLOSE bar). Protective option SL uses the same ₹cap / lot pts as Paper (not a 0.5× index haircut). Crude stays off.',
     instruments: booksOut
       .filter((b) => b.id === 'nifty' || b.id === 'bank')
       .map((b) => instrumentRow({ id: b.id, name: b.label }, b.trades || [])),
@@ -658,6 +679,7 @@ module.exports = {
   mapTrade,
   applyOptionOhlc,
   overlayNseOptionOhlc,
+  overlayPaperWithLiveFills,
   markLiveParity,
   attachProtectiveSl,
   atmStrike,

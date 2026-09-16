@@ -1,6 +1,6 @@
 'use strict';
 const assert = require('assert');
-const { decideLiveAction, signalId, hmToMin, SPEC, applyDeskLimits, engineTradeStillOpen, engineBookHasOpenTrade, mustExitHeldForNewLeg, matchHeldEngineTrade, pickOption, selectNearestFut, liveTransactionType, liveTradesFromBroker, visibleLiveEvents, LIVE_STATUS_EVENTS, palagaiCompletedBuys, kiteBuyEntryId, mergeLiveEnteredFromSnap, liveEntryCount, alreadyHandled, shouldLogSkip, markSeen, markLiveFilled } = require('./sr-live');
+const { decideLiveAction, signalId, hmToMin, SPEC, applyDeskLimits, engineTradeStillOpen, engineBookHasOpenTrade, mustExitHeldForNewLeg, matchHeldEngineTrade, pickOption, selectNearestFut, liveTransactionType, liveTradesFromBroker, visibleLiveEvents, LIVE_STATUS_EVENTS, palagaiCompletedBuys, kiteBuyEntryId, mergeLiveEnteredFromSnap, liveEntryCount, alreadyHandled, shouldLogSkip, markSeen, markLiveFilled, stitchFormingIndexBar, floorHm5 } = require('./sr-live');
 const { approveLiveEntry } = require('./engine/risk');
 const { exitOptsFor, LOT_UNITS, OPTION_SL_MAX_RS } = require('./sr-strategy-config');
 
@@ -446,6 +446,20 @@ assert.strictEqual(summarizeOptionTrades([
   events.push({ action: 'WATCH', detail: '12:17 Nifty 50 2 · 11:50 PE CLOSE' });
   assert.strictEqual(shouldLogSkip(events, detail), false, 'do not log the same SKIP every 15s');
   assert.strictEqual(shouldLogSkip(events, '11:50 Nifty 50 TIME — Paper already exited or session over'), true);
+}
+
+assert.strictEqual(floorHm5('11:23'), '11:20');
+{
+  const closed = [{ date: '2026-09-16T11:15:00+0530', open: 23200, high: 23210, low: 23190, close: 23205 }];
+  const stitched = stitchFormingIndexBar(closed, { day: '2026-09-16', hm: '11:23', spot: 23219 });
+  assert.strictEqual(stitched.length, 2);
+  assert.strictEqual(stitched[1].date.slice(11, 16), '11:20');
+  assert.strictEqual(stitched[1].close, 23219);
+  assert.strictEqual(stitched[1].forming, true);
+  const updated = stitchFormingIndexBar(stitched, { day: '2026-09-16', hm: '11:24', spot: 23210 });
+  assert.strictEqual(updated.length, 2);
+  assert.strictEqual(updated[1].close, 23210);
+  assert.ok(updated[1].low <= 23210);
 }
 
 console.log('sr-live.selftest: ok');

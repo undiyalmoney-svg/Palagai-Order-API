@@ -5,6 +5,8 @@ const crudeBot = require('./crude-bot-desk');
 const { preflightLive, firstFail } = require('./live-preflight');
 const { parseTradeBotWindow } = require('./trade-bot-dates');
 const { lotsFromAvailableFunds, crudeLotsFromAvailableFunds } = require('./daily-desk-defaults');
+const persist = require('./desk-live-persist');
+const { liveFillsFromSnap } = require('./sr-paper-live-overlay');
 const { MAX_TRADES_PER_DAY } = require('./sr-strategy-config');
 const { getOptionOhlcAndPrice } = require('./option-ohlc');
 const { findEntryExitWait, getLastFound, parseUniverse } = require('./ee-wait-research');
@@ -387,6 +389,7 @@ async function start(req, res) {
     return;
   }
   try {
+    const snap = persist.load('sr', uid);
     const out = await runSrDesk({
       authorization,
       fromDate: window.fromDate,
@@ -394,6 +397,9 @@ async function start(req, res) {
       capitalRs: body.capitalRs || body.capital,
       capitalSource: body.capitalSource || body.fundSource,
       liveMoney: false,
+    }, {
+      liveSnap: snap,
+      liveFills: liveFillsFromSnap(snap),
     });
     res.json({
       ...out,

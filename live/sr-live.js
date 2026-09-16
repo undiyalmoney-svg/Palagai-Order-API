@@ -64,6 +64,41 @@ function nowHm() {
     timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false,
   }).format(new Date());
 }
+function floorHm5(hm) {
+  const n = hmToMin(hm);
+  if (n == null) return hm;
+  const f = n - (n % 5);
+  const h = String(Math.floor(f / 60)).padStart(2, '0');
+  const m = String(f % 60).padStart(2, '0');
+  return `${h}:${m}`;
+}
+/**
+ * Paper's entryTime is the 5m stamp (11:20). Kite history often omits that bar
+ * until it closes (11:25), so Live joined 11:30. Stitch the forming slot from
+ * index LTP so a running Live worker can BUY on the same bar.
+ */
+function stitchFormingIndexBar(candles, { day, hm, spot } = {}) {
+  const px = Number(spot);
+  const barHm = floorHm5(hm);
+  if (!(px > 0) || !day || !barHm) return candles || [];
+  const stamp = `${day}T${barHm}:00+0530`;
+  const list = Array.isArray(candles) ? candles.slice() : [];
+  const last = list[list.length - 1];
+  const lastHm = last ? String(last.date || '').slice(11, 16) : '';
+  if (lastHm === barHm) {
+    const bar = { ...last, close: px, forming: true };
+    bar.high = Math.max(Number(last.high) || px, px);
+    bar.low = Math.min(Number(last.low) || px, px);
+    list[list.length - 1] = bar;
+    return list;
+  }
+  if (!lastHm || hmToMin(lastHm) < hmToMin(barHm)) {
+    list.push({
+      date: stamp, open: px, high: px, low: px, close: px, volume: 0, forming: true,
+    });
+  }
+  return list;
+}
 function shiftDays(iso, d) {
   const x = new Date(iso + 'T00:00:00Z');
   x.setUTCDate(x.getUTCDate() + d);
@@ -942,6 +977,37 @@ async function onTick(session) {
     const hm = nowHm();
     const cfg = session.config;
     const watchBits = [];
+    const keys = (cfg.instruments || []).filter((k) => SPEC[k]);
+    const hist = {};
+    await Promise.all(keys.map(async (key) => {
+      const spec = SPEC[key];
+      try {
+        let token = spec.token;
+        if (key === 'crude') {
+          const fut = await resolveCrudeFuture(authorization, session, today);
+          token = fut.token;
+        }
+        if (!token) throw new Error(`${spec.name} missing instrument token`);
+        const warmupFrom = shiftDays(today, -12);
+        const [candles, qmap] = await Promise.all([
+          withTimeout(
+            market.fetchHistorical5m(authorization, token, warmupFrom, today),
+            HISTORY_TIMEOUT_MS,
+            `${spec.name} 5m`,
+          ),
+          spec.spotKey
+            ? market.fetchQuotes(authorization, [spec.spotKey]).catch(() => ({}))
+            : Promise.resolve({}),
+        ]);
+        const spot = spec.spotKey
+          ? Number(qmap[spec.spotKey]?.last_price || qmap[spec.spotKey]?.ohlc?.close)
+          : Number(candles[candles.length - 1]?.close);
+        hist[key] = stitchFormingIndexBar(candles, { day: today, hm, spot });
+      } catch (e) {
+        hist[key] = null;
+        pushEvent(session, 'ERROR', `${spec.name}: ${e.message}`);
+      }
+    }));
 
     if (!session.capSeeded && session.broker && typeof session.broker.getOrders === 'function') {
       session.capSeeded = true;
@@ -971,18 +1037,8 @@ async function onTick(session) {
         cfg.lots,
       ));
       try {
-        const warmupFrom = shiftDays(today, -12);
-        let token = spec.token;
-        if (key === 'crude') {
-          const fut = await resolveCrudeFuture(authorization, session, today);
-          token = fut.token;
-        }
-        if (!token) throw new Error('missing instrument token');
-        const candles = await withTimeout(
-          market.fetchHistorical5m(authorization, token, warmupFrom, today),
-          HISTORY_TIMEOUT_MS,
-          `${spec.name} 5m`,
-        );
+        const candles = hist[key];
+        if (!candles) throw new Error('missing instrument token');
         const entryPts = cfg.entryPts != null ? cfg.entryPts : spec.entryPts;
         const perPoint = spec.unitsPerLot * lots;
         const dayLossStop = cfg.dayLossStopRs > 0 ? cfg.dayLossStopRs / perPoint : 0;
@@ -1153,5 +1209,5 @@ module.exports = {
   engineTradeStillOpen, engineBookHasOpenTrade, mustExitHeldForNewLeg, matchHeldEngineTrade, pickOption, pickIndexFuture, selectNearestFut, liveTransactionType, liveTradesFromBroker, SPEC, _sessions: sessions,
   mergeStructureOntoLiveTrades, visibleLiveEvents, LIVE_STATUS_EVENTS,
   palagaiCompletedBuys, kiteBuyEntryId, mergeLiveEnteredFromSnap, liveEntryCount,
-  alreadyHandled, shouldLogSkip, markSeen, markLiveFilled,
+  alreadyHandled, shouldLogSkip, markSeen, markLiveFilled, stitchFormingIndexBar, floorHm5,
 };

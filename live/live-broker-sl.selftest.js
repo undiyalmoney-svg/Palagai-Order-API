@@ -31,6 +31,18 @@ const fillLate = broker.optionSlTrigger({
 });
 assert.ok(fillLate > 0 && fillLate < 120, `late fill must still get option SL, got ${fillLate}`);
 
+broker.setOptionMaxLossRs('bank-nifty', 2500);
+const bankFull = broker.optionSlTrigger({
+  fillPremium: 776.75,
+  ltp: 776.75,
+  indexRisk: 2500 / 30,
+  exchange: 'NFO',
+  tradingSymbol: 'BANKNIFTY26SEP56200CE',
+  instrumentId: 'bank-nifty',
+  quantity: 30,
+  fut: false,
+});
+assert.ok(Math.abs((776.75 - bankFull) - 2500 / 30) < 1, `Live Bank SL must match Paper ₹2500 pts, got ${bankFull}`);
 broker.setOptionMaxLossRs('bank-nifty', 0);
 const bank = broker.optionSlTrigger({
   fillPremium: 0,

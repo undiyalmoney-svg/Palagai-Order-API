@@ -4564,7 +4564,9 @@ function computeProtectiveSlTrigger(params) {
   const fill = Math.max(0, params.fillPremium);
   const risk = Math.max(0, params.indexRiskPts);
   const mcx = isMcxOptionContext(params.exchange, params.tradingSymbol);
-  const delta = mcx ? 1 : 0.5;
+  const delta = params.premiumDelta != null && Number(params.premiumDelta) > 0
+    ? Number(params.premiumDelta)
+    : (mcx ? 1 : 0.5);
   const fromRisk = fill - risk * delta;
   const nfoMinGap = Math.max(3, fill * 0.03);
   const fromMinGap = mcx ? fill - mcxMinSlGapPts(fill) : fill - nfoMinGap;

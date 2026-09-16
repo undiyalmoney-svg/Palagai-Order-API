@@ -283,6 +283,7 @@ async function optionPnlForTrade({ authorization, spec, trade, lots, session, pi
   const slTrigger = computeProtectiveSlTrigger({
     fillPremium: entryPrem,
     indexRiskPts: indexRisk,
+    premiumDelta: 1,
     exchange: spec.exchange || pick.exchange,
     tradingSymbol: pick.tradingSymbol,
     ltp: entryPrem,
