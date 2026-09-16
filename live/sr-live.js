@@ -324,6 +324,13 @@ function mergeStructureOntoLiveTrades(rows, deskChart) {
   });
 }
 
+const LIVE_STATUS_EVENTS = 40;
+
+function visibleLiveEvents(events) {
+  const list = Array.isArray(events) ? events : [];
+  return list.slice(-LIVE_STATUS_EVENTS);
+}
+
 function statusPayload(session) {
   const trades = liveTradesFromBroker(session);
   const positions = trades.map((t) => ({
@@ -360,7 +367,9 @@ function statusPayload(session) {
     kitePnl: session.broker && typeof session.broker.moneySnapshot === 'function'
       ? session.broker.moneySnapshot()
       : { closedRs: 0, openRs: 0, netRs: 0, legs: [] },
-    events: session.events.slice(-80),
+    // Last 40 only. Trade Bot UI used to take events.slice(0, 40) of an 80-row
+    // payload, so the on-screen log froze ~40 minutes behind while ticks ran.
+    events: visibleLiveEvents(session.events),
     liveMoney: session.status === 'running',
   };
 }
@@ -1003,5 +1012,5 @@ function status(userId) {
 module.exports = {
   start, stop, status, decideLiveAction, applyDeskLimits, signalId, hmToMin,
   engineTradeStillOpen, engineBookHasOpenTrade, mustExitHeldForNewLeg, matchHeldEngineTrade, pickOption, pickIndexFuture, selectNearestFut, liveTransactionType, liveTradesFromBroker, SPEC, _sessions: sessions,
-  mergeStructureOntoLiveTrades,
+  mergeStructureOntoLiveTrades, visibleLiveEvents, LIVE_STATUS_EVENTS,
 };

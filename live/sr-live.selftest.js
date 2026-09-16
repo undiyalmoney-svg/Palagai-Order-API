@@ -1,6 +1,6 @@
 'use strict';
 const assert = require('assert');
-const { decideLiveAction, signalId, hmToMin, SPEC, applyDeskLimits, engineTradeStillOpen, engineBookHasOpenTrade, mustExitHeldForNewLeg, matchHeldEngineTrade, pickOption, selectNearestFut, liveTransactionType, liveTradesFromBroker } = require('./sr-live');
+const { decideLiveAction, signalId, hmToMin, SPEC, applyDeskLimits, engineTradeStillOpen, engineBookHasOpenTrade, mustExitHeldForNewLeg, matchHeldEngineTrade, pickOption, selectNearestFut, liveTransactionType, liveTradesFromBroker, visibleLiveEvents, LIVE_STATUS_EVENTS } = require('./sr-live');
 const { exitOptsFor, LOT_UNITS, OPTION_SL_MAX_RS } = require('./sr-strategy-config');
 
 assert.deepStrictEqual(SPEC.nifty.opts, exitOptsFor('nifty'), 'Live Nifty opts must match Paper shared config');
@@ -374,6 +374,16 @@ assert.strictEqual(summarizeOptionTrades([
   assert.strictEqual(loaded.status, 'running');
   assert.strictEqual(loaded.events[0].action, 'SL');
   assert.strictEqual(loaded.broker.closedLegs[0].closedBy, 'sl');
+}
+
+{
+  const many = Array.from({ length: 80 }, (_, i) => ({ at: String(i), action: 'WATCH', detail: `09:${String(i).padStart(2, '0')}` }));
+  const shown = visibleLiveEvents(many);
+  assert.strictEqual(LIVE_STATUS_EVENTS, 40);
+  assert.strictEqual(shown.length, 40);
+  assert.strictEqual(shown[0].at, '40', 'status must drop the oldest 40 of an 80-row buffer');
+  assert.strictEqual(shown[shown.length - 1].detail, '09:79', 'last row is the newest WATCH');
+  assert.deepStrictEqual(visibleLiveEvents(many.slice(0, 10)).map((e) => e.at), many.slice(0, 10).map((e) => e.at));
 }
 
 console.log('sr-live.selftest: ok');
