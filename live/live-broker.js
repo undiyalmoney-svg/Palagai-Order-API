@@ -741,6 +741,8 @@ class LiveBroker {
       armRs: trailSettings.armRs,
       lockRs: trailSettings.lockRs,
       givebackRs: trailSettings.givebackRs,
+      chargeFloorMultiple: trailSettings.chargeFloorMultiple,
+      segment: String(pos.exchange || '').toUpperCase() === 'MCX' ? 'mcx_option' : 'nfo_option',
     });
 
     let desired = base;
