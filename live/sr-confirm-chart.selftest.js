@@ -9,7 +9,7 @@ const { EXIT_RULES, exitOptsFor, STRATEGY_VERSION } = require('./sr-strategy-con
 const { SPEC } = require('./sr-live');
 const { BOOKS, mapTrade } = require('./sr-desk');
 
-assert.strictEqual(STRATEGY_VERSION, 'sr-breakout.2026-09-16.9');
+assert.strictEqual(STRATEGY_VERSION, 'sr-breakout.2026-09-17.1');
 assert.strictEqual(EXIT_RULES.nifty.retest, true);
 assert.strictEqual(EXIT_RULES.banknifty.retest, true);
 assert.strictEqual(EXIT_RULES.nifty.confirm, 'retest');

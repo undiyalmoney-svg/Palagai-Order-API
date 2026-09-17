@@ -120,7 +120,7 @@ const fullChart = bookChartPayload(retestDay, paperNifty.trades, {
 });
 const doneAnn = announceFromChart(fullChart, { at, nowHm: '15:20' });
 assert.ok(/^Out /i.test(doneAnn.text), doneAnn.text);
-assert.ok(/TIME|stop|give-up/i.test(doneAnn.text), doneAnn.text);
+assert.ok(/TIME|stop/i.test(doneAnn.text), doneAnn.text);
 assert.strictEqual(doneAnn.state, 'out');
 
 const bankPaper = runSrBreakout(retestDay, { ...base, ...exitOptsFor('banknifty'), sessionAlign: false });

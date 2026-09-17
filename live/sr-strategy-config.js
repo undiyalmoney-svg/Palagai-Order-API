@@ -94,7 +94,11 @@ const EXIT_RULES = Object.freeze({
   //     +8 chosen over +6 (which scores marginally better, Rs440,601 vs
   //     Rs433,570) because +6 leaves only a 1-point band between arming and
   //     exiting, which real slippage would swallow. +8 keeps 3 points.
-  //   giveUpBar/MinPts no +8 progress within 2 bars → leave; it is not paying.
+  //   giveUpBar/MinPts OFF (15.9). Stall give-up (no +12 by bar 4) was the
+  //     16 Sep Nifty PE −₹351 Live cut. TRAIN+OOS: turning it off raises
+  //     Jun–Sep option ₹ vs 15.8, keeps August CLOSE n=0, and still lets the
+  //     rupee STOP + TIME hold cap run. Re-arm only if a later OOS shows
+  //     stall-bleed TIME cannot cover.
   //   capStopToDayBudget  the per-trade stop never exceeds what is LEFT of the
   //     day's loss budget. The daily brake alone cannot stop a trade that is
   //     already open — it only blocks the NEXT one — so a Rs5,000 cut against a
@@ -119,12 +123,10 @@ const EXIT_RULES = Object.freeze({
     // ₹30,444 loss (NET −₹10,281), 20 CLOSE holds = −₹18,137. TIME 6 (30 min)
     // on the same entries flips Aug to +₹7,875 and keeps Jun/Jul/Sep green.
     // FAIL stays off (1-bar wall close still scratches the move). TARGET 0.
-    // 15.5: stall give-up (no +12 index pts by bar 4) on top of TIME 6. Kite
-    // Jun–Sep 2026 option ₹ with max 2/day: ₹95,225 → ₹98,568, PF 2.99 → 3.21,
-    // loss ₹47,964 → ₹44,537. Does not LOCK/TARGET-scratch the 15 Sep 10:35 PE
-    // (still TIME +₹802 / 30 min). Index lock +20/10 was rejected: that PE
-    // became LOCK +₹269 at 11:00.
-    lockArmPts: 0, lockAtPts: 0, giveUpBar: 4, giveUpMinPts: 12,
+    // 15.5 added stall give-up (no +12 by bar 4). 15.9 turns it OFF: it is a
+    // shared Paper===Live early cut the desk hates, and on Kite 5m 2026-01..
+    // 09-16 it is not required for August (CLOSE n=0 with TIME 6 + rupee stop).
+    lockArmPts: 0, lockAtPts: 0, giveUpBar: 0, giveUpMinPts: 0,
     minScore: 1,
     capStopToDayBudget: true,
     failStop: false,
@@ -201,10 +203,10 @@ const EXIT_RULES = Object.freeze({
     // TIME 6 + ₹2,500 index/option stop. Product stays MIS (not NRML).
     // Not +20 TARGET. Session-hold without a stop was August's Bank CLOSE
     // bucket (CE 20 Aug −₹3,074 / −190 pts).
-    // 15.5 same stall give-up as Nifty (bar 4 / +12). Bank lock 50/25 was
-    // rejected: 15 Sep 13:35 PE TIME +₹1,211 became LOCK +₹323 in 10 min.
+    // 15.9: same give-up OFF as Nifty. Bank lock 50/25 was rejected: 15 Sep
+    // 13:35 PE TIME +₹1,211 became LOCK +₹323 in 10 min.
     lockArmPts: 0, lockAtPts: 0,
-    giveUpBar: 4, giveUpMinPts: 12,
+    giveUpBar: 0, giveUpMinPts: 0,
     targetByScore: { 1: 0, 2: 0, 3: 0 },
     // 15.8: STRUCTURE off + Bank cut ₹3,500 (was ₹2,500). TRAIN 2021-01..
     // 2025-12 freeze among TIME 6/8 anti-CLOSE variants. OOS 2026-01..09-16
@@ -274,5 +276,5 @@ module.exports = {
   EXIT_RULES, CUT_LOSS_RS, LOT_UNITS, DEFAULT_LOTS, OPTION_SL_MAX_RS, exitOptsFor,
   DAY_LOSS_STOP_RS, DAY_PROFIT_TARGET_RS, MAX_TRADES_PER_DAY, paperVehicleFor,
   STRATEGY_ID: 'sr-breakout',
-  STRATEGY_VERSION: 'sr-breakout.2026-09-16.9',
+  STRATEGY_VERSION: 'sr-breakout.2026-09-17.1',
 };
