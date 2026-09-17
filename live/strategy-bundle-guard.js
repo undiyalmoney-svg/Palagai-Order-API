@@ -6,7 +6,7 @@
  * deploy expects and throws (loud failure at boot) on mismatch, rather than
  * letting the desk quietly run last week's parameters.
  */
-const EXPECTED_STRATEGY_BUNDLE_VERSION = 'sr-trap-v2.2026-08-22.2';
+const EXPECTED_STRATEGY_BUNDLE_VERSION = 'sr-trap-v2.2026-09-17.1-charge-floor';
 
 function assertStrategyBundleVersion(strategyCore) {
   const actual = strategyCore && strategyCore.STRATEGY_BUNDLE_VERSION;
