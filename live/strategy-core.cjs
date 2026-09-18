@@ -88,7 +88,7 @@ var NSE_SESSION = {
 };
 var MCX_CRUDE_SESSION = {
   marketOpen: "09:00",
-  marketClose: "23:15",
+  marketClose: "23:30",
   sessionCloseCandle: "23:15",
   lastEntryTime: "22:15",
   firstHourReadyTime: "10:00",
