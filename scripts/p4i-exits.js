@@ -4,7 +4,7 @@ const fs=require('fs'),path=require('path');
 const mean=a=>a.length?a.reduce((x,y)=>x+y,0)/a.length:0;
 const sd=a=>{const m=mean(a);return a.length<2?0:Math.sqrt(a.reduce((x,y)=>x+(y-m)**2,0)/(a.length-1));};
 const med=a=>{if(!a.length)return NaN;const s=[...a].sort((x,y)=>x-y);const n=s.length;return n%2?s[(n-1)/2]:(s[n/2-1]+s[n/2])/2;};
-const {estimateEquityRoundTripCharges:MIS}=require('../live/equity-charges.js');
+const {estimateEquityRoundTripCharges:MIS}=require('../services/equity-charges.js');
 const STATP=100*MIS({entryPrice:1000,exitPrice:1000,quantity:50}).totalRs/50000;
 const SLIP=0.05;
 const DIR=process.argv[2];

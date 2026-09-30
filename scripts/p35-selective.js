@@ -3,7 +3,7 @@
  *  a large-range rejection (bar range >= BR x ATR) — a genuine exhaustion, not
  *  noise. Most days: NO trade. Base: fade, biggest-run, hold, 2xATR stop. */
 const fs=require('fs'),path=require('path');
-const {estimateEquityRoundTripCharges:MIS}=require('../live/equity-charges.js');
+const {estimateEquityRoundTripCharges:MIS}=require('../services/equity-charges.js');
 const DIR=process.env.EQDIR, SLIP=+(process.env.SLIP??0.03), RB=6, RP=2.5, VM=3.0;
 const BR=+(process.env.BR??2.3), FROM=process.env.FROM||'2000', VIEW=process.env.VIEW||'w';
 const mean=a=>a.length?a.reduce((x,y)=>x+y,0)/a.length:0;

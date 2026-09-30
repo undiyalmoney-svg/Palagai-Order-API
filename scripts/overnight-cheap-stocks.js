@@ -18,8 +18,8 @@
  * Usage: node scripts/overnight-cheap-stocks.js <fromDate> <toDate> [capitalRs]
  * Env:   KITE_API_KEY, KITE_ACCESS_TOKEN
  */
-const { fetchHistoricalCandles } = require('../live/kite-market');
-const { estimateDeliveryRoundTripCharges } = require('../live/equity-charges');
+const { fetchHistoricalCandles } = require('../services/kite-market');
+const { estimateDeliveryRoundTripCharges } = require('../services/equity-charges');
 
 const STOCKS = {
   PNB: { token: 2730497, label: 'Punjab National Bank' },

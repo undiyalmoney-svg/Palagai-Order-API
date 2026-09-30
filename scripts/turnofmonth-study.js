@@ -28,7 +28,7 @@
  *
  * Usage: node scripts/turnofmonth-study.js
  */
-const { fetchHistoricalCandles } = require('../live/kite-market');
+const { fetchHistoricalCandles } = require('../services/kite-market');
 
 const NIFTY = 256265;
 const NIFTYBEES = 2707457;

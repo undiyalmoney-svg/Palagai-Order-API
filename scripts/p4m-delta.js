@@ -5,7 +5,7 @@
 const fs=require('fs'),path=require('path');
 const mean=a=>a.length?a.reduce((x,y)=>x+y,0)/a.length:0;
 const sd=a=>{const m=mean(a);return a.length<2?0:Math.sqrt(a.reduce((x,y)=>x+(y-m)**2,0)/(a.length-1));};
-const {estimateEquityRoundTripCharges:MIS}=require('../live/equity-charges.js');
+const {estimateEquityRoundTripCharges:MIS}=require('../services/equity-charges.js');
 const SLIP=0.05, CAP=100000, RISKPCT=1.0;
 const DIR=process.argv[2];
 const S=new Map();

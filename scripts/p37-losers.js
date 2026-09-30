@@ -3,7 +3,7 @@
  *  Compare winners vs losers on features NOT yet tested, and critically test
  *  whether any separator generalizes DEV->VALID->TEST (not just fits the past). */
 const fs=require('fs'),path=require('path');
-const {estimateEquityRoundTripCharges:MIS}=require('../live/equity-charges.js');
+const {estimateEquityRoundTripCharges:MIS}=require('../services/equity-charges.js');
 const DIR='research-data/midintra', SLIP=0.05, RB=6, RP=2.5, VM=3.0, BR=2.3;
 const mean=a=>a.length?a.reduce((x,y)=>x+y,0)/a.length:0;
 const sum=a=>a.reduce((x,y)=>x+y,0);

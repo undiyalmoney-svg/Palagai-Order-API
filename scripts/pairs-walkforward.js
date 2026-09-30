@@ -23,7 +23,7 @@
  *
  * Usage: node scripts/pairs-walkforward.js
  */
-const { fetchHistoricalCandles } = require('../live/kite-market');
+const { fetchHistoricalCandles } = require('../services/kite-market');
 
 const UNIVERSE = {
   HDFCBANK: 341249, ICICIBANK: 1270529, SBIN: 779521, KOTAKBANK: 492033,

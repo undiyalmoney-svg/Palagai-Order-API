@@ -2,7 +2,7 @@
 /** Integration test: drive the SHIPPED module over full history; must reproduce
  *  the research backtest (ALL ~+Rs52,981, t~2.71). Read-only. */
 const fs=require('fs'),path=require('path');
-const {estimateEquityRoundTripCharges:MIS}=require('../../live/equity-charges.js');
+const {estimateEquityRoundTripCharges:MIS}=require('../../services/equity-charges.js');
 const ST=require('../strategy/exhaustion-fade-v1.js');
 const DIR=process.env.EQDIR||'research-data/midintra', SLIP=+(process.env.SLIP??0.05);
 const mean=a=>a.length?a.reduce((x,y)=>x+y,0)/a.length:0;

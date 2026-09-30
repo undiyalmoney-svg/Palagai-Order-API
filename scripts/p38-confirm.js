@@ -6,7 +6,7 @@
  *  Costs one bar of the move but confirms the reversal (the user's dummy idea).
  *  Compare vs no-confirm. 2xATR stop, hold-to-close, honest 1x, slip 0.05%. */
 const fs=require('fs'),path=require('path');
-const {estimateEquityRoundTripCharges:MIS}=require('../live/equity-charges.js');
+const {estimateEquityRoundTripCharges:MIS}=require('../services/equity-charges.js');
 const DIR=process.env.EQDIR, SLIP=+(process.env.SLIP??0.05), RB=6, RP=2.5, VM=3.0, BR=2.3;
 const CONF=+(process.env.CONF??0.0);   // required entry-confirm % (0 = any move our way)
 const mean=a=>a.length?a.reduce((x,y)=>x+y,0)/a.length:0;

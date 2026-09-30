@@ -1,5 +1,5 @@
 const fs=require('fs'),path=require('path');
-const {estimateEquityRoundTripCharges:MIS}=require('../live/equity-charges.js');
+const {estimateEquityRoundTripCharges:MIS}=require('../services/equity-charges.js');
 const DIR='research-data/midintra',SLIP=0.05,RB=6,RP=2.5,VM=3.0,BR=2.3;
 const CAP=30000, LEV=+(process.env.LEV||5), TARGET=300;
 const mean=a=>a.length?a.reduce((x,y)=>x+y,0)/a.length:0;

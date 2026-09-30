@@ -17,7 +17,7 @@
  *     open profit before the trail catches it.
  *   - Cash-only sizing (delivery/CNC, not MIS) — no leverage assumed.
  *   - Delivery charges (brokerage-free but STT/stamp/DP differ from intraday
- *     — see live/equity-charges.js).
+ *     — see services/equity-charges.js).
  *   - Max holding cap (default 15 trading days) as a backtest backstop, not
  *     a real broker limit — without it a dead position could sit open for
  *     the whole 5-year window and never resolve.
@@ -25,8 +25,8 @@
  * Usage: node scripts/stock-swing-backtest.js <fromDate> <toDate> [capitalRs]
  * Env:   KITE_API_KEY, KITE_ACCESS_TOKEN, VOTE_THRESHOLD (default 5)
  */
-const { fetchHistoricalCandles } = require('../live/kite-market');
-const { estimateDeliveryRoundTripCharges } = require('../live/equity-charges');
+const { fetchHistoricalCandles } = require('../services/kite-market');
+const { estimateDeliveryRoundTripCharges } = require('../services/equity-charges');
 
 /** Full Bank Nifty constituent set (12) — widened from the original 4 to test
  * whether the lack of edge is about these specific stocks or the method. */

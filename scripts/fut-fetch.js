@@ -1,5 +1,5 @@
 /** Research-local historical fetcher that requests oi=1.
- *  Deliberately separate from live/kite-market.js: production code is NOT modified. */
+ *  Deliberately separate from services/kite-market.js: production code is NOT modified. */
 const axios=require('axios');
 async function fetchOI(auth,token,from,to,interval='5minute'){
   const r=await axios.get(`https://api.kite.trade/instruments/historical/${token}/${interval}`,

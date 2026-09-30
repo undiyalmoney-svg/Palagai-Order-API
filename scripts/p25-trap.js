@@ -11,7 +11,7 @@
  *  CONTROL: trade WITH the breakout (continuation) on the same triggers.
  *  Honest 1x sizing, slip param. DEV 2018-19 | VALID 2020-22 | TEST 2023-26. */
 const fs=require('fs'),path=require('path');
-const {estimateEquityRoundTripCharges:MIS}=require('../live/equity-charges.js');
+const {estimateEquityRoundTripCharges:MIS}=require('../services/equity-charges.js');
 const DIR=process.env.EQDIR, SLIP=+(process.env.SLIP??0.03);
 const VOLMULT=+(process.env.VOLMULT??2.0), WICK=+(process.env.WICK??0.4), STOP_ATR=+(process.env.STOP_ATR??2.0);
 const mean=a=>a.length?a.reduce((x,y)=>x+y,0)/a.length:0;

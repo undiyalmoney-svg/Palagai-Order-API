@@ -30,7 +30,7 @@
  *
  * Usage: node scripts/lowvol-study.js
  */
-const { fetchHistoricalCandles } = require('../live/kite-market');
+const { fetchHistoricalCandles } = require('../services/kite-market');
 
 const SECTOR = {
   HDFCBANK:'Financials',ICICIBANK:'Financials',SBIN:'Financials',KOTAKBANK:'Financials',

@@ -4,7 +4,7 @@
  * passwordPlain = visible/editable in Admin only (not returned on site /me)
  */
 const bcrypt = require('bcryptjs');
-const { getDb } = require('../live/live.mongo');
+const { getDb } = require('../lib/mongo');
 const {
   OWNER_SEED,
   FRIEND_MODULES,
@@ -123,8 +123,21 @@ async function ensureTestModuleForAll() {
   if (!db) return;
   const rows = await db.collection(COL).find({}).toArray();
   for (const doc of rows) {
-    const modules = normalizeModules(doc.modules || [], doc.role || 'friend');
-    if ((doc.modules || []).includes('test') && modules.length === (doc.modules || []).length) {
+    let granted = Array.isArray(doc.modules) ? doc.modules : [];
+    // The retired Trade Bot shared the `auto` module; hand those users the
+    // Momentum Portfolio Manager that replaced it (one-time, flagged on the doc).
+    if (!doc.momentumMigrated) {
+      if (granted.includes('auto') && !granted.includes('momentum')) {
+        granted = [...granted, 'momentum'];
+      }
+      await db.collection(COL).updateOne({ _id: doc._id }, { $set: { momentumMigrated: true } });
+    }
+    const modules = normalizeModules(granted, doc.role || 'friend');
+    if (
+      (doc.modules || []).includes('test') &&
+      modules.length === (doc.modules || []).length &&
+      modules.every((m) => (doc.modules || []).includes(m))
+    ) {
       continue;
     }
     await db.collection(COL).updateOne(

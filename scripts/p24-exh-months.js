@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 const fs=require('fs'),path=require('path');
-const {estimateEquityRoundTripCharges:MIS}=require('../live/equity-charges.js');
+const {estimateEquityRoundTripCharges:MIS}=require('../services/equity-charges.js');
 const DIR=process.env.EQDIR, SLIP=+(process.env.SLIP??0.02);
 const RUNBARS=6, RUNPCT=+(process.env.RUNPCT??2.5), VOLMULT=+(process.env.VOLMULT??3.0);
 const FROM=process.env.FROM||'2026-02-01';

@@ -5,7 +5,7 @@
  *  Strategy frozen: climax bar>=2.3xATR fade, biggest-run pick, hold-to-close,
  *  2xATR stop, honest 1x sizing, slip 0.05%/side (conservative). */
 const fs=require('fs'),path=require('path');
-const {estimateEquityRoundTripCharges:MIS}=require('../live/equity-charges.js');
+const {estimateEquityRoundTripCharges:MIS}=require('../services/equity-charges.js');
 const DIR='research-data/midintra', SLIP=0.05, RB=6, RP=2.5, VM=3.0, BR=2.3;
 const N=+(process.env.N||57), M=+(process.env.M||2000);
 const mean=a=>a.length?a.reduce((x,y)=>x+y,0)/a.length:0;

@@ -2,7 +2,7 @@
  * Manual daily P/L records — Mongo collection `daily_pnl`.
  * Additive. Does not touch Kite order APIs.
  */
-const { getDb } = require('../live/live.mongo');
+const { getDb } = require('../lib/mongo');
 
 /** @type {Map<string, { date: string, amountRs: number, note: string, updatedAt: string }>} */
 const memory = new Map();

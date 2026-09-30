@@ -33,7 +33,7 @@
  * Usage: node scripts/pairs-statarb-backtest.js
  * Env:   KITE_API_KEY, KITE_ACCESS_TOKEN
  */
-const { fetchHistoricalCandles } = require('../live/kite-market');
+const { fetchHistoricalCandles } = require('../services/kite-market');
 
 const UNIVERSE = {
   // Banks / financials — economically linked, the classic cointegration pool.

@@ -6,7 +6,7 @@ const EF='09:45',ET='14:45',MINF=3;
 const mean=a=>a.length?a.reduce((x,y)=>x+y,0)/a.length:0;
 const sd=a=>{const m=mean(a);return a.length<2?0:Math.sqrt(a.reduce((x,y)=>x+(y-m)**2,0)/(a.length-1));};
 const med=a=>{if(!a.length)return NaN;const s=[...a].sort((x,y)=>x-y);const n=s.length;return n%2?s[(n-1)/2]:(s[n/2-1]+s[n/2])/2;};
-const {estimateEquityRoundTripCharges:MIS,estimateDeliveryRoundTripCharges:CNC}=require('../live/equity-charges.js');
+const {estimateEquityRoundTripCharges:MIS,estimateDeliveryRoundTripCharges:CNC}=require('../services/equity-charges.js');
 const P=1000,Q=50,TV=P*Q;
 const H_MIS=100*MIS({entryPrice:P,exitPrice:P,quantity:Q}).totalRs/TV;   // 0.106
 const H_CNC=100*CNC({entryPrice:P,exitPrice:P,quantity:Q}).totalRs/TV;   // 0.258

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /** Backtest runner for orb-retest-v1. Read-only. Uses the SHIPPED module. */
 const fs=require('fs'),path=require('path');
-const {estimateEquityRoundTripCharges:MIS}=require('../../live/equity-charges.js');
+const {estimateEquityRoundTripCharges:MIS}=require('../../services/equity-charges.js');
 const ST=require('./orb-retest-v1.js');
 const DIR=process.env.EQDIR, SLIP=+(process.env.SLIP??0.01), LEV=+(process.env.LEV??5);
 const sum=a=>a.reduce((x,y)=>x+y,0), mean=a=>a.length?sum(a)/a.length:0;

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /** Export signal-by-signal record + equity curve for the dashboard UI. Read-only. */
 const fs=require('fs'),path=require('path');
-const {estimateEquityRoundTripCharges:MIS}=require('../../live/equity-charges.js');
+const {estimateEquityRoundTripCharges:MIS}=require('../../services/equity-charges.js');
 const ST=require('../strategy/exhaustion-fade-v1.js');
 const DIR='research-data/midintra', SLIP=0.05, CAP=50000;
 const S=new Map();

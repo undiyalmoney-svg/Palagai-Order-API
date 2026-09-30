@@ -8,7 +8,7 @@
  *  Compare: immediate entry vs confirmed entry vs confirmed+control.
  *  Hold to close, honest 1x sizing. */
 const fs=require('fs'),path=require('path');
-const {estimateEquityRoundTripCharges:MIS}=require('../live/equity-charges.js');
+const {estimateEquityRoundTripCharges:MIS}=require('../services/equity-charges.js');
 const DIR=process.env.EQDIR, SLIP=+(process.env.SLIP??0.03);
 const RB=6, RP=+(process.env.RP??2.5), VM=+(process.env.VM??3.0);
 const mean=a=>a.length?a.reduce((x,y)=>x+y,0)/a.length:0;

@@ -4,7 +4,7 @@
  *  random) selection among that day's breakouts - the version that was validated.
  *  120-min opening range, enter next bar open after the breakout close, exit 15:15. */
 const fs=require('fs'),path=require('path');
-const {estimateEquityRoundTripCharges:MIS}=require('../live/equity-charges.js');
+const {estimateEquityRoundTripCharges:MIS}=require('../services/equity-charges.js');
 const DIR=process.env.EQDIR, ORB=24, PER=250000, MONTH=process.argv[2];
 const SLIP=+(process.env.SLIP??0.01);
 const STOPW=process.env.STOPW?+process.env.STOPW:null;

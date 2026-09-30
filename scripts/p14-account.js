@@ -5,7 +5,7 @@
  *  1 position/day, MIS charges, slippage 0.01%/side.
  *  Stops if equity falls below the minimum needed for one lot. */
 const fs=require('fs'),path=require('path');
-const {estimateEquityRoundTripCharges:MIS}=require('../live/equity-charges.js');
+const {estimateEquityRoundTripCharges:MIS}=require('../services/equity-charges.js');
 const DIR=process.env.EQDIR, ORB=24, SLIP=+(process.env.SLIP??0.01);
 const LEV=+(process.env.LEV??5), STOPW=+(process.env.STOPW??1.5);
 const FROM=process.env.FROM||'2026-07-01', TO=process.env.TO||'2026-08-28';

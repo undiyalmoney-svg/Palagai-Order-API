@@ -5,7 +5,7 @@
  *    score  [DATADIR]       -> replay ledger vs actual outcomes, show running P&L
  *  Ledger: research/paper/ledger.ndjson (append-only). No broker imports. */
 const fs=require('fs'),path=require('path');
-const {estimateEquityRoundTripCharges:MIS}=require('../../live/equity-charges.js');
+const {estimateEquityRoundTripCharges:MIS}=require('../../services/equity-charges.js');
 const ST=require('../strategy/exhaustion-fade-v1.js');
 const LEDGER=path.join(__dirname,'ledger.ndjson');
 const SLIP=0.05, CAP=50000;

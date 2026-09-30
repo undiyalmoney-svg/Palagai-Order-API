@@ -3,7 +3,7 @@
  *  signal-time features (all causal), measure win rate + net per bucket,
  *  find the filter that removes the trend-resumption disasters. */
 const fs=require('fs'),path=require('path');
-const {estimateEquityRoundTripCharges:MIS}=require('../live/equity-charges.js');
+const {estimateEquityRoundTripCharges:MIS}=require('../services/equity-charges.js');
 const DIR=process.env.EQDIR, SLIP=0.03, RB=6, RP=2.5, VM=3.0;
 const mean=a=>a.length?a.reduce((x,y)=>x+y,0)/a.length:0;
 const sum=a=>a.reduce((x,y)=>x+y,0);

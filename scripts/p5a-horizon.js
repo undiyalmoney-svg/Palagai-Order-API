@@ -28,7 +28,7 @@
  *  TEST WINDOW (>=2023-01-01) EXCLUDED AT LOAD. DEV<=2019-12-31, VALID 2020-2022.
  *  Read-only. No broker imports. */
 const fs=require('fs'),path=require('path');
-const {estimateEquityRoundTripCharges:MIS,estimateDeliveryRoundTripCharges:CNC}=require('../live/equity-charges.js');
+const {estimateEquityRoundTripCharges:MIS,estimateDeliveryRoundTripCharges:CNC}=require('../services/equity-charges.js');
 const SLIP=0.05;
 const DIR=process.argv[2];
 const sum=a=>a.reduce((x,y)=>x+y,0);

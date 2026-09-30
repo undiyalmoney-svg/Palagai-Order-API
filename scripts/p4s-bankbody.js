@@ -7,7 +7,7 @@
 const fs=require('fs'),path=require('path');
 const mean=a=>a.length?a.reduce((x,y)=>x+y,0)/a.length:0;
 const med=a=>{if(!a.length)return NaN;const s=[...a].sort((x,y)=>x-y);const n=s.length;return n%2?s[(n-1)/2]:(s[n/2-1]+s[n/2])/2;};
-const {estimateEquityRoundTripCharges:MIS}=require('../live/equity-charges.js');
+const {estimateEquityRoundTripCharges:MIS}=require('../services/equity-charges.js');
 const SLIP=+(process.env.SLIP||0.02), PER=10000;
 const BANKS=['HDFCBANK','ICICIBANK','AXISBANK','SBIN','INDUSINDBK'];   // top 5 by liquidity
 const DIR=process.argv[2];

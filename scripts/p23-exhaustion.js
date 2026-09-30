@@ -16,7 +16,7 @@
  *  Rs50,000, honest sizing (1x current equity), slip 0.02%/side.
  *  DEV 2018-19 | VALID 2020-22 | TEST 2023-26. */
 const fs=require('fs'),path=require('path');
-const {estimateEquityRoundTripCharges:MIS}=require('../live/equity-charges.js');
+const {estimateEquityRoundTripCharges:MIS}=require('../services/equity-charges.js');
 const DIR=process.env.EQDIR, SLIP=+(process.env.SLIP??0.02);
 const RUNBARS=+(process.env.RUNBARS??6), RUNPCT=+(process.env.RUNPCT??1.0);
 const VOLMULT=+(process.env.VOLMULT??2.0), STOPPCT=+(process.env.STOPPCT??1.0);

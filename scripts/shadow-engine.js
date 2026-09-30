@@ -10,7 +10,7 @@
  * Never reprocesses or rewrites a completed event record.
  */
 const fs=require('fs'),path=require('path'),crypto=require('crypto');
-const { fetchHistoricalCandles } = require('../live/kite-market');
+const { fetchHistoricalCandles } = require('../services/kite-market');
 const SPEC='dffe2ac3cddacb1c', FRONTIER='2026-08-27';
 const EF='09:45',ET='14:45',LOOKBACK=20,MULT=2.0,HOLD=9,MINF=3;
 const BOUNDS=JSON.parse(fs.readFileSync('/tmp/frozen_bounds.json','utf8')).bounds;

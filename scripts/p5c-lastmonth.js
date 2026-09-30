@@ -4,7 +4,7 @@
  *  already-failed candidate: this can confirm the failure, not reverse it.
  *  Read-only. Every trade printed. */
 const fs=require('fs'),path=require('path');
-const {estimateEquityRoundTripCharges:MIS}=require('../live/equity-charges.js');
+const {estimateEquityRoundTripCharges:MIS}=require('../services/equity-charges.js');
 const SLIP=0.05, PER=10000, MAXPOS=5;
 const NOSTOP=process.env.NOSTOP==='1';
 const DIR=process.env.EQDIR, MONTH=process.argv[2];

@@ -33,8 +33,8 @@
  * Env:   KITE_API_KEY, KITE_ACCESS_TOKEN
  *        VOTE_THRESHOLD (default 4)  MODE=soldiers-only (disables knight/queen/magician)
  */
-const { fetchHistorical5m } = require('../live/kite-market');
-const { estimateEquityRoundTripCharges } = require('../live/equity-charges');
+const { fetchHistorical5m } = require('../services/kite-market');
+const { estimateEquityRoundTripCharges } = require('../services/equity-charges');
 
 const STOCKS = {
   HDFCBANK: { token: 341249, label: 'HDFC Bank' },

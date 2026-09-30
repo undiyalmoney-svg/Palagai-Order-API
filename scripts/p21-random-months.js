@@ -4,7 +4,7 @@
  *  Picks 12 random months, reports each. This is the reality check the
  *  fixed-notional backtest hid. */
 const fs=require('fs'),path=require('path');
-const {estimateEquityRoundTripCharges:MIS}=require('../live/equity-charges.js');
+const {estimateEquityRoundTripCharges:MIS}=require('../services/equity-charges.js');
 const DIR=process.env.EQDIR, ORB=24, SLIP=+(process.env.SLIP??0.02), LEV=+(process.env.LEV??1);
 const sum=a=>a.reduce((x,y)=>x+y,0), mean=a=>a.length?sum(a)/a.length:0;
 const S=new Map();

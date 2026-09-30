@@ -3,7 +3,7 @@
  *  Then: the "tune repeatedly" test — pick the winner on one period, check the other. */
 const fs=require('fs'),path=require('path');
 const mean=a=>a.length?a.reduce((x,y)=>x+y,0)/a.length:0;
-const {estimateEquityRoundTripCharges:MIS}=require('../live/equity-charges.js');
+const {estimateEquityRoundTripCharges:MIS}=require('../services/equity-charges.js');
 const SLIP=0.02,PER=10000;
 const BANKS=['HDFCBANK','ICICIBANK','AXISBANK','SBIN','INDUSINDBK'];
 const S=new Map();

@@ -3,7 +3,7 @@
  * (see auth/credentials.js VAULT_PASSWORD).
  */
 const crypto = require('crypto');
-const { getDb } = require('../live/live.mongo');
+const { getDb } = require('../lib/mongo');
 const { VAULT_PASSWORD } = require('./credentials');
 
 const COL = 'vault_secrets';

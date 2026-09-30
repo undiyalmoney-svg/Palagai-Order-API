@@ -2,7 +2,7 @@
 /** PHASE 29 — EXHAUSTION FADE, FINAL: select the most-overextended (biggest run)
  *  exhaustion signal each day, fade it, hold to close. Full stress test. */
 const fs=require('fs'),path=require('path');
-const {estimateEquityRoundTripCharges:MIS}=require('../live/equity-charges.js');
+const {estimateEquityRoundTripCharges:MIS}=require('../services/equity-charges.js');
 const DIR=process.env.EQDIR, SLIP=+(process.env.SLIP??0.03), RB=6, RP=+(process.env.RP??2.5), VM=+(process.env.VM??3.0);
 const MODE=process.env.MODE||'fade', VIEW=process.env.VIEW||'windows', FROM=process.env.FROM||'2000';
 const mean=a=>a.length?a.reduce((x,y)=>x+y,0)/a.length:0;

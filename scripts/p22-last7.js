@@ -2,7 +2,7 @@
 /** ORB-retest hold-full, HONEST sizing (notional = LEV x current equity),
  *  last 7 months, mid-cap stocks. Shows every trade + monthly + running equity. */
 const fs=require('fs'),path=require('path');
-const {estimateEquityRoundTripCharges:MIS}=require('../live/equity-charges.js');
+const {estimateEquityRoundTripCharges:MIS}=require('../services/equity-charges.js');
 const DIR=process.env.EQDIR, ORB=24, SLIP=+(process.env.SLIP??0.02), LEV=+(process.env.LEV??1);
 const START=+(process.env.EQ??50000);
 const S=new Map();

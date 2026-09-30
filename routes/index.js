@@ -1,7 +1,6 @@
 const express = require('express');
 const { asyncHandler } = require('../utils/asyncHandler');
 const ctrl = require('../controllers/kiteOrders.controller');
-const liveRoutes = require('../live/live.routes');
 const pnlRoutes = require('../pnl/pnl.routes');
 const authRoutes = require('../auth/auth.routes');
 
@@ -27,7 +26,6 @@ router.use('/api/kite', kiteRouter);
 router.get('/health', ctrl.health);
 
 router.use('/auth', authRoutes);
-router.use('/live', liveRoutes);
 router.use('/pnl', pnlRoutes);
 
 module.exports = router;

@@ -19,8 +19,8 @@
  * Usage: node scripts/stock-crossover-backtest.js <fromDate> <toDate> [capitalRs]
  * Env:   KITE_API_KEY, KITE_ACCESS_TOKEN, STRATEGY=sma|macd (default sma)
  */
-const { fetchHistoricalCandles } = require('../live/kite-market');
-const { estimateDeliveryRoundTripCharges } = require('../live/equity-charges');
+const { fetchHistoricalCandles } = require('../services/kite-market');
+const { estimateDeliveryRoundTripCharges } = require('../services/equity-charges');
 
 const STOCKS = {
   HDFCBANK: { token: 341249, label: 'HDFC Bank' },

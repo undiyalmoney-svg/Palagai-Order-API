@@ -5,7 +5,7 @@
  *  Tests: session-clustered t, outlier dependence, monotonicity, multiple-testing. */
 const {execSync}=require('child_process');
 const fs=require('fs'),path=require('path');
-const {estimateDeliveryRoundTripCharges:CNC}=require('../live/equity-charges.js');
+const {estimateDeliveryRoundTripCharges:CNC}=require('../services/equity-charges.js');
 const src=fs.readFileSync(path.join(__dirname,'p5a-horizon.js'),'utf8');
 // reuse 5.A's engine verbatim
 const mod={exports:{}};

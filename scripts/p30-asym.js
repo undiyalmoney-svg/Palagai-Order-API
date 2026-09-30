@@ -2,7 +2,7 @@
 /** PHASE 30 — WHY big losses, small wins? Measure the fade's payoff asymmetry,
  *  find what the big losers have in common, and test whether a stop fixes it. */
 const fs=require('fs'),path=require('path');
-const {estimateEquityRoundTripCharges:MIS}=require('../live/equity-charges.js');
+const {estimateEquityRoundTripCharges:MIS}=require('../services/equity-charges.js');
 const DIR=process.env.EQDIR, SLIP=0.03, RB=6, RP=2.5, VM=3.0;
 const mean=a=>a.length?a.reduce((x,y)=>x+y,0)/a.length:0;
 const sd=a=>{const m=mean(a);return a.length<2?0:Math.sqrt(a.reduce((x,y)=>x+(y-m)**2,0)/(a.length-1));};

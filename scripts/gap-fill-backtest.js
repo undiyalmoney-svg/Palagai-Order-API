@@ -25,8 +25,8 @@
  *
  * Usage: node scripts/gap-fill-backtest.js
  */
-const { fetchHistoricalCandles } = require('../live/kite-market');
-const { estimateEquityRoundTripCharges } = require('../live/equity-charges');
+const { fetchHistoricalCandles } = require('../services/kite-market');
+const { estimateEquityRoundTripCharges } = require('../services/equity-charges');
 
 const UNIVERSE = {
   HDFCBANK: 341249, ICICIBANK: 1270529, SBIN: 779521, KOTAKBANK: 492033,
