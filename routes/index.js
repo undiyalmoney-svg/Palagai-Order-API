@@ -3,6 +3,7 @@ const { asyncHandler } = require('../utils/asyncHandler');
 const ctrl = require('../controllers/kiteOrders.controller');
 const pnlRoutes = require('../pnl/pnl.routes');
 const authRoutes = require('../auth/auth.routes');
+const { getMomentumRouter } = require('../momentum/instance');
 
 const router = express.Router();
 
@@ -27,5 +28,6 @@ router.get('/health', ctrl.health);
 
 router.use('/auth', authRoutes);
 router.use('/pnl', pnlRoutes);
+router.use('/momentum', (req, res, next) => getMomentumRouter()(req, res, next));
 
 module.exports = router;
