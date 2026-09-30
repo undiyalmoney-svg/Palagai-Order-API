@@ -21,3 +21,6 @@ data/desk-live/
 
 # S/R real-option observation log (paper data collection)
 sr-observations/
+
+# Momentum Portfolio Manager local SQLite store
+data/momentum/
