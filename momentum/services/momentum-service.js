@@ -506,6 +506,7 @@ class MomentumService {
       regime: { regime: r.regime.regime, score: r.regime.score, reasons: r.regime.reasons, policy: r.regime.policy },
       universeSize: r.universeSize,
       sectors: [...new Set(r.ranking.map((x) => x.sector))].sort(),
+      emaPeriods: cfg.params.emaPeriods,
       rows,
     };
   }

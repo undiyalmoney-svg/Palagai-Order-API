@@ -22,6 +22,23 @@ const {
 const { legCost } = require('../execution/costs');
 const { explainBuy, explainSell, explainHold, explainWait, summarizeRun } = require('./explain');
 
+/** Named flags plus the period numbers the screener dots look up (20/50/100/200 by default). */
+function emaFlags(periods, trend) {
+  const [pFast, pMid, pSlow, pLong] = periods;
+  const flags = {
+    fast: trend.aboveFast,
+    mid: trend.aboveMid,
+    slow: trend.aboveSlow,
+    long: trend.aboveLong,
+    stack: trend.stack,
+  };
+  flags[pFast] = trend.aboveFast;
+  flags[pMid] = trend.aboveMid;
+  flags[pSlow] = trend.aboveSlow;
+  flags[pLong] = trend.aboveLong;
+  return flags;
+}
+
 /**
  * PortfolioDecisionEngine - the single source of every trading decision.
  *
@@ -655,7 +672,7 @@ class PortfolioDecisionEngine {
       rsi: round(e.f.tech.rsi, 1),
       adx: round(e.f.tech.adx, 1),
       atrPct: round(e.f.vol.atrPct, 4),
-      aboveEma: { fast: e.f.trend.aboveFast, mid: e.f.trend.aboveMid, slow: e.f.trend.aboveSlow, long: e.f.trend.aboveLong, stack: e.f.trend.stack },
+      aboveEma: emaFlags(params.emaPeriods, e.f.trend),
       breakout: e.f.tech.breakout,
       pctFromHigh52: round(e.f.tech.pctFromHigh52, 4),
       held: remaining.has(e.symbol) || sellQty.has(e.symbol) || positions.some((p) => p.symbol === e.symbol),

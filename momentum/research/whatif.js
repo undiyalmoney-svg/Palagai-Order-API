@@ -63,7 +63,7 @@ function whatIf({ panel, params, date, capital, portfolio = null, costs, slippag
       }
       const at = (n) => {
         const i = Math.min(idx + 1 + n, lastIdx);
-        return { date: panel.dates[i], returnPct: round(bars.close[i] / entry - 1, 4) };
+        return { date: panel.dates[i], returnPct: round((bars.close[i] / entry - 1) * 100, 2) };
       };
       const endPrice = stopHit ? stopHit.price : bars.close[lastIdx];
       return {
@@ -74,7 +74,8 @@ function whatIf({ panel, params, date, capital, portfolio = null, costs, slippag
         stopHit,
         endPrice: round(endPrice, 2),
         pnl: round((endPrice - entry) * d.quantity, 2),
-        returnPct: round(endPrice / entry - 1, 4),
+        // Percent, same scale as returnOnInvestedPct (12.3 means +12.3%).
+        returnPct: round((endPrice / entry - 1) * 100, 2),
       };
     });
     const invested = rows.reduce((a, r) => a + r.entry * r.quantity, 0);

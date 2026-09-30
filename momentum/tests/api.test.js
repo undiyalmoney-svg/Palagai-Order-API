@@ -126,6 +126,17 @@ test('backtest, what-if and validation endpoints', async () => {
   const w = await s.call('POST', '/whatif', { date: '2021-03-31', capital: 100000 });
   assert.equal(w.status, 200);
   assert.equal(w.body.verifiedNoLookahead, true);
+  for (const b of w.body.hindsight?.buys || []) {
+    const pct = ((b.endPrice / b.entry) - 1) * 100;
+    assert.ok(Math.abs(b.returnPct - pct) < 0.05, `returnPct ${b.returnPct} should be percent, expected ~${pct}`);
+  }
+  const screen = await s.call('GET', '/screener');
+  assert.equal(screen.status, 200);
+  assert.deepEqual(screen.body.emaPeriods, [20, 50, 100, 200]);
+  const row = screen.body.rows[0];
+  assert.equal(typeof row.aboveEma.fast, 'boolean');
+  assert.equal(row.aboveEma['20'], row.aboveEma.fast);
+  assert.equal(row.aboveEma['200'], row.aboveEma.long);
   assert.equal((await s.call('POST', '/whatif', { capital: 100000 })).status, 400);
   assert.equal((await s.call('POST', '/backtests', { capital: 1 })).status, 400);
   await s.close();
