@@ -26,6 +26,28 @@ Authorization: token {api_key}:{access_token}
 X-Kite-Version: 3
 ```
 
+## Momentum Portfolio Manager (`/momentum`)
+
+All trading logic for the Palagai Momentum Portfolio Manager lives here; the Angular app only renders decisions and sends explicit user actions. Code is in `momentum/`.
+
+```
+market data -> indicators -> regime -> scan -> rank -> entry/exit timing -> portfolio analysis
+  -> capital allocation -> risk check -> BUY/HOLD/SELL/EXIT -> order validation
+  -> paper or broker execution -> confirmation -> portfolio update -> history -> performance
+```
+
+- `engine/portfolio-decision-engine.js` is the single decision engine. Signals, paper trading, live trading, backtests, the optimiser and "what would have happened on date X" all call `decide()`. Only the data layer and execution adapter change. A `MarketView` is bound to one bar so the engine cannot see the future.
+- Holding period is a strategy parameter (review cadence). A position is never sold because of its age; exits come from the stop, trailing stop, thesis failure (trend / momentum / RS / volume / regime / sector / rank) or a clearly better replacement net of costs.
+- Persistence: SQLite (`better-sqlite3`), 23 tables including stocks, prices, quotes, indicators, strategies, strategy runs, backtests, backtest trades, portfolios, positions, signals, orders, trades, capital events, risk settings and market regimes. Every decision run is stored with its full explanation. Mongo is still used for users and the vault.
+- Execution: Signal mode (default), Paper trading, and Live/automated execution which needs a Kite session, the phrase `ENABLE LIVE TRADING` and (for automation) `ENABLE AUTOMATED EXECUTION`. Orders are idempotent (`pf<portfolio>:<decisionKey>` is unique), pass a validation pipeline, and the portfolio only changes from fill quantities reported by the broker. Ambiguous submissions are resolved by tag lookup, never by re-sending.
+- Jobs: daily (data, indicators, regime, decisions, order reconcile), weekly (full review), monthly (performance/risk/strategy validation). `job_runs` deduplicates by period.
+- AI: the narrator explains stored, deterministic decisions only and cannot create trades.
+- Data: `MOMENTUM_PROVIDER=synthetic` (default) uses a clearly labelled deterministic simulator so the app runs without credentials; `kite` uses Kite historical candles/quotes via the session of `MOMENTUM_DATA_USER`.
+
+Environment (all optional): `MOMENTUM_PROVIDER`, `MOMENTUM_DATA_USER`, `MOMENTUM_DB_PATH` (default `data/momentum/momentum.sqlite`), `MOMENTUM_SECRET` (encrypts stored Kite sessions; falls back to `LIVE_AUTH_SECRET`), `MOMENTUM_SCHEDULER=0` to disable the in-process scheduler.
+
+Tests: `npm test` (engine, orders, jobs, research and API suites).
+
 ## Local install
 
 ```bash

@@ -80,7 +80,8 @@ class OrderManager {
     if (!v.ok) {
       this.store.updateOrder(order.id, { status: 'REJECTED', error: v.error });
       this.store.addOrderEvent(order.id, 'REJECTED', 0, v.error);
-      this.store.updateSignal(signal.id, { status: 'REJECTED', orderId: order.id });
+      const expired = this.store.getSignal(signal.id)?.status === 'EXPIRED';
+      this.store.updateSignal(signal.id, { status: expired ? 'EXPIRED' : 'REJECTED', orderId: order.id });
       return { order: this.store.getOrder(order.id), rejected: true, validation: v.steps, message: v.error };
     }
     this.store.updateOrder(order.id, { qty: v.qty, limitPrice: v.limitPrice, variety: v.variety });
