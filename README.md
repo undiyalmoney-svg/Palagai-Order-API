@@ -44,7 +44,7 @@ market data -> indicators -> regime -> scan -> rank -> entry/exit timing -> port
 - AI: the narrator explains stored, deterministic decisions only and cannot create trades.
 - Data: `MOMENTUM_PROVIDER=synthetic` (default) uses a clearly labelled deterministic simulator so the app runs without credentials; `kite` uses Kite historical candles/quotes via the session of `MOMENTUM_DATA_USER`.
 
-Environment (all optional): `MOMENTUM_PROVIDER`, `MOMENTUM_DATA_USER`, `MOMENTUM_DB_PATH` (default `data/momentum/momentum.sqlite`), `MOMENTUM_SECRET` (encrypts stored Kite sessions; falls back to `LIVE_AUTH_SECRET`), `MOMENTUM_SCHEDULER=0` to disable the in-process scheduler.
+Environment (all optional): `MOMENTUM_PROVIDER`, `MOMENTUM_DATA_USER`, `MOMENTUM_DB_PATH` (default `data/momentum/momentum.sqlite`), `MOMENTUM_SECRET` (encrypts stored Kite sessions; falls back to the JWT secret), `MOMENTUM_SCHEDULER=0` to disable the in-process scheduler.
 
 Tests: `npm test` (engine, orders, jobs, research and API suites).
 
