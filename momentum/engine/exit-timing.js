@@ -152,6 +152,7 @@ function analyzeExit({ position, f, score, rank, rankCutoff, regime, params, sec
 
   const climax = f.tech.extensionAtr >= params.climaxExtensionAtr && f.tech.rsi >= params.climaxRsi;
   const failedLabels = thesis.filter((t) => !t.ok).map((t) => t.label.toLowerCase());
+  const failedText = `failed: ${failedLabels.join(', ')}`;
   const detailLines = thesis.filter((t) => !t.ok).map((t) => `${t.label}: ${t.detail}`);
 
   const severe = trendBreakSevere || scoreSevere || invalid.length >= 3;
@@ -160,15 +161,15 @@ function analyzeExit({ position, f, score, rank, rankCutoff, regime, params, sec
   if (severe || moderate) {
     if (!isReviewDay) {
       reasons.push(...detailLines);
-      warnings.push(`Exit signals flagged (${failedLabels.join(', ')}); deferred to ${nextReviewLabel || 'the next review'} unless the stop is hit`);
-      return done('HOLD', null, 0, `WAIT - thesis weakening (${failedLabels.join(', ')}); decision at ${nextReviewLabel || 'next review'}`, { timing: 'WAIT' });
+      warnings.push(`Exit signals flagged (${failedText}); deferred to ${nextReviewLabel || 'the next review'} unless the stop is hit`);
+      return done('HOLD', null, 0, `WAIT - thesis weakening (${failedText}); decision at ${nextReviewLabel || 'next review'}`, { timing: 'WAIT' });
     }
     reasons.push(...detailLines);
     const trigger = trendBreakSevere || trendBreakSoft ? 'TREND_REVERSAL' : scoreSevere || scoreWeak ? 'MOMENTUM_DETERIORATION' : rsBad ? 'RS_DETERIORATION' : sectorBad ? 'SECTOR_DETERIORATION' : 'THESIS_INVALID';
     if (severe || position.partials?.reduced) {
-      return done('SELL', trigger, 1, `SELL - investment thesis no longer valid (${failedLabels.join(', ')})`);
+      return done('SELL', trigger, 1, `SELL - investment thesis no longer valid (${failedText})`);
     }
-    return done('REDUCE', trigger, params.reduceFraction, `REDUCE - thesis weakening (${failedLabels.join(', ')}); trimming ${Math.round(params.reduceFraction * 100)}% and re-checking at the next review`);
+    return done('REDUCE', trigger, params.reduceFraction, `REDUCE - thesis weakening (${failedText}); trimming ${Math.round(params.reduceFraction * 100)}% and re-checking at the next review`);
   }
 
   if (climax && !position.partials?.tookProfit) {

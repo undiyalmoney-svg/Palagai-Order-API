@@ -150,7 +150,7 @@ function analyzeEntry({ f, score, elig, regime, params, sector, horizonPresets }
   const volOk = setup?.type === 'BREAKOUT' ? f.tech.breakoutRelVol >= params.volBreakoutMult : f.flow.rel >= 0.8;
   add('volume', 'Volume confirmation', volOk, false, setup?.type === 'BREAKOUT' ? `Breakout volume ${round(f.tech.breakoutRelVol, 2)}x (need ${params.volBreakoutMult}x)` : `Relative volume ${round(f.flow.rel, 2)}x`);
   const extOk = f.tech.extensionAtr <= params.maxExtensionAtr;
-  add('extension', 'Not over-extended', extOk, false, `${round(f.tech.extensionAtr, 2)} ATR above ${params.emaPeriods[0]}-EMA (max ${params.maxExtensionAtr})`);
+  add('extension', 'Not over-extended', extOk, false, `${round(f.tech.extensionAtr, 2)} ATR vs ${params.emaPeriods[0]}-EMA (max +${params.maxExtensionAtr})`);
   add('rsi', 'RSI not overheated', f.tech.rsi <= params.rsiMax, false, `RSI ${round(f.tech.rsi, 1)} (max ${params.rsiMax})`);
   add('rewardRisk', 'Reward/risk acceptable', risk.rewardRisk >= params.minRewardRisk, false, `R:R ${risk.rewardRisk} to ${risk.targetType} (need >= ${params.minRewardRisk})`);
   const sectorOk = !sector || !Number.isFinite(sector.ret3m) || (sector.ret3m > params.sectorWeakPct && sector.pctAboveMid >= 0.35);

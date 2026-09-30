@@ -308,6 +308,22 @@ function resolveParams(overrides = {}) {
   return p;
 }
 
+/**
+ * Apply overrides to an already-resolved params object. When the horizon
+ * changes, the horizon-derived defaults (stops, trail, momentum weights) are
+ * re-derived for the new horizon unless explicitly overridden.
+ */
+function withOverrides(base, overrides = {}) {
+  const merged = { ...base };
+  const ov = {};
+  for (const [k, v] of Object.entries(overrides)) if (v !== undefined && v !== null) ov[k] = v;
+  const newHorizon = ov.horizon ? String(ov.horizon).toUpperCase() : base.horizon;
+  if (newHorizon !== base.horizon) {
+    for (const k of ['stopAtrMult', 'trailAtrMult', 'momentumWeights']) if (ov[k] === undefined) delete merged[k];
+  }
+  return resolveParams({ ...merged, ...ov });
+}
+
 function applyRiskSettings(params, risk) {
   if (!risk) return params;
   const out = { ...params };
@@ -356,6 +372,7 @@ module.exports = {
   STRATEGY_PRESETS,
   resolveParams,
   applyRiskSettings,
+  withOverrides,
   paramsHash,
   indicatorKey,
   stableStringify,
