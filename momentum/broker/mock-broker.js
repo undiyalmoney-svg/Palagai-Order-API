@@ -13,6 +13,8 @@ class MockBroker {
     this.placed = [];
     this.remote = new Map();
     this.seq = 0;
+    this.fundsData = { equityCash: 250000, equityNet: 250000, capitalRs: 250000 };
+    this.holdingsData = [];
   }
 
   enqueue(...responses) {
@@ -51,6 +53,14 @@ class MockBroker {
     const r = this.remote.get(order.brokerOrderId);
     if (r) r.status = 'CANCELLED';
     return { status: 'CANCELLED', brokerOrderId: order.brokerOrderId };
+  }
+
+  async funds() {
+    return { ...this.fundsData };
+  }
+
+  async holdings() {
+    return this.holdingsData.map((h) => ({ ...h }));
   }
 }
 

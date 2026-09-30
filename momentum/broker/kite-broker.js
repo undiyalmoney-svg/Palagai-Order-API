@@ -110,6 +110,19 @@ class KiteBroker {
     const { fetchUserMargins } = require('../../services/kite-market');
     return fetchUserMargins(await this.auth());
   }
+
+  async holdings() {
+    const authorization = await this.auth();
+    const res = await this.kite.getHoldings(authorization);
+    if (res.status >= 400 || res.data?.status === 'error') throw new Error(res.data?.message || `holdings HTTP ${res.status}`);
+    return (res.data?.data || []).map((h) => ({
+      symbol: String(h.tradingsymbol || '').toUpperCase(),
+      exchange: String(h.exchange || 'NSE').toUpperCase(),
+      qty: Math.floor(Number(h.quantity) || 0),
+      avgPrice: Number(h.average_price) || 0,
+      lastPrice: Number(h.last_price) || 0,
+    }));
+  }
 }
 
 module.exports = { KiteBroker, tagFor, mapKiteStatus };

@@ -16,6 +16,8 @@ const { featureSnapshot } = require('../engine/features');
 const narrator = require('../ai/narrator');
 const { istDate, marketStatus, lastCompletedTradingDate } = require('../utils/dates');
 const { round } = require('../utils/math');
+const { listUniverse } = require('../data/universe');
+const { newPosition } = require('../execution/ledger');
 
 const ENABLE_LIVE_PHRASE = 'ENABLE LIVE TRADING';
 const ENABLE_AUTO_PHRASE = 'ENABLE AUTOMATED EXECUTION';
@@ -253,11 +255,18 @@ class MomentumService {
     const cfg = this.config(userId);
     this.store.saveSettings(userId, { ...cfg.settings, live: { ...cfg.settings.live, enabled: true, enabledAt: this.clock().toISOString() } });
     let p = this.store.getPortfolio(userId, 'LIVE');
+    const cash = funds.equityCash || 0;
     if (!p) {
-      p = this.store.createPortfolio({ userId, mode: 'LIVE', name: 'Live portfolio', capital: funds.capitalRs || 0, strategyId: cfg.strategy.id, autoExecute: false });
-      this.store.addCapitalEvent({ userId, portfolioId: p.id, kind: 'INITIAL', amount: funds.capitalRs || 0, note: 'Kite equity funds at enable time' });
+      p = this.store.createPortfolio({ userId, mode: 'LIVE', name: 'Live portfolio', capital: cash, strategyId: cfg.strategy.id, autoExecute: false });
+      this.store.addCapitalEvent({ userId, portfolioId: p.id, kind: 'INITIAL', amount: cash, note: 'Available Kite equity cash at enable time' });
     }
-    return { enabled: true, portfolio: p, funds };
+    let holdings = null;
+    try {
+      holdings = await this.importLiveHoldings(userId);
+    } catch (err) {
+      holdings = { error: err.message, imported: [], updated: [], removed: [], skipped: [] };
+    }
+    return { enabled: true, portfolio: this.store.getPortfolio(userId, 'LIVE'), funds, holdings };
   }
 
   disableLive(userId) {
@@ -274,6 +283,104 @@ class MomentumService {
     const funds = await this.brokerFor(p, userId).funds();
     this.store.updatePortfolio(p.id, { cash: funds.equityCash });
     return { cash: funds.equityCash, funds };
+  }
+
+  /**
+   * Seed / refresh the live book from CNC holdings the broker reports.
+   * Cash is set to available equity funds so holdings are not double-counted.
+   * Names outside the momentum universe are skipped, not invented.
+   */
+  async importLiveHoldings(userId) {
+    const p = this.portfolioOrThrow(userId, 'LIVE');
+    const broker = this.brokerFor(p, userId);
+    if (typeof broker.holdings !== 'function') {
+      throw new ServiceError('NOT_SUPPORTED', 'This broker does not report holdings', 400);
+    }
+    let raw;
+    try {
+      raw = await broker.holdings();
+    } catch (err) {
+      throw new ServiceError('BROKER_ERROR', `Could not read broker holdings: ${err.message}`, 502);
+    }
+    const universe = new Set(listUniverse().map((u) => u.symbol));
+    const wanted = new Map();
+    const skipped = [];
+    for (const h of raw || []) {
+      const symbol = String(h.symbol || h.tradingsymbol || '').toUpperCase();
+      const qty = Math.floor(Number(h.qty ?? h.quantity) || 0);
+      const avgPrice = Number(h.avgPrice ?? h.average_price) || 0;
+      const exchange = String(h.exchange || 'NSE').toUpperCase();
+      if (!symbol || qty <= 0) continue;
+      if (exchange && exchange !== 'NSE' && exchange !== 'BSE') {
+        skipped.push({ symbol, reason: `exchange ${exchange}` });
+        continue;
+      }
+      if (!universe.has(symbol)) {
+        skipped.push({ symbol, reason: 'outside momentum universe' });
+        continue;
+      }
+      const px = avgPrice || this.marketData.priceFor(symbol)?.price || 0;
+      if (!px) {
+        skipped.push({ symbol, reason: 'no price' });
+        continue;
+      }
+      wanted.set(symbol, { symbol, qty, avgPrice: px });
+    }
+    const today = this.today();
+    const existing = this.store.listPositions(p.id);
+    const imported = [];
+    const updated = [];
+    const removed = [];
+    this.store.tx(() => {
+      for (const pos of existing) {
+        if (!wanted.has(pos.symbol)) {
+          this.store.deletePosition(p.id, pos.symbol);
+          removed.push(pos.symbol);
+        }
+      }
+      for (const row of wanted.values()) {
+        const prev = this.store.getPosition(p.id, row.symbol);
+        const next = newPosition({
+          symbol: row.symbol,
+          qty: row.qty,
+          price: row.avgPrice,
+          cost: prev?.buyCosts || 0,
+          date: prev?.entryDate || today,
+          initialStop: prev?.initialStop ?? null,
+          stopPrice: prev?.stopPrice ?? null,
+          signalId: prev?.entrySignalId ?? null,
+        });
+        if (prev) {
+          next.peakClose = Math.max(prev.peakClose || 0, row.avgPrice);
+          updated.push(row.symbol);
+        } else {
+          imported.push(row.symbol);
+        }
+        this.store.savePosition(p.id, next);
+      }
+    });
+    let funds = null;
+    try {
+      funds = await broker.funds();
+      this.store.updatePortfolio(p.id, { cash: funds.equityCash });
+    } catch {
+      funds = null;
+    }
+    this.store.addCapitalEvent({
+      userId,
+      portfolioId: p.id,
+      kind: 'IMPORT',
+      amount: 0,
+      note: `Broker holdings sync: ${imported.length} new, ${updated.length} updated, ${removed.length} removed`,
+    });
+    return {
+      imported,
+      updated,
+      removed,
+      skipped,
+      cash: funds?.equityCash ?? this.store.getPortfolioById(p.id).cash,
+      holdings: [...wanted.values()],
+    };
   }
 
   // ---------------------------------------------------------------- decisions

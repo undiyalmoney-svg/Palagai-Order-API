@@ -179,6 +179,7 @@ function createMomentumRouter(app, { auth = siteAuth } = {}) {
   router.post('/live/enable', wrap(async (req) => m.enableLive(req.user.id, req.body?.phrase)));
   router.post('/live/disable', wrap((req) => m.disableLive(req.user.id)));
   router.post('/live/sync-funds', wrap((req) => m.syncLiveCash(req.user.id)));
+  router.post('/live/import-holdings', wrap(async (req) => m.importLiveHoldings(req.user.id)));
 
   return router;
 }

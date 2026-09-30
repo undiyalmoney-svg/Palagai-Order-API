@@ -85,6 +85,12 @@ class KiteService {
       headers: this.headers(authorization),
     });
   }
+
+  async getHoldings(authorization) {
+    return this.client.get('/portfolio/holdings', {
+      headers: this.headers(authorization),
+    });
+  }
 }
 
 module.exports = { kiteService: new KiteService() };

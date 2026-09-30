@@ -6,9 +6,10 @@ const http = require('node:http');
 const express = require('express');
 const { makeApp } = require('./helpers');
 const { createMomentumRouter } = require('../api/routes');
+const { MockBroker } = require('../broker/mock-broker');
 
-async function serve({ modules = ['momentum'], userId = 'u1' } = {}) {
-  const app = await makeApp();
+async function serve({ modules = ['momentum'], userId = 'u1', appOptions = {} } = {}) {
+  const app = await makeApp(appOptions);
   const auth = {
     requireSiteUser: (req, res, next) => {
       if (req.headers['x-test-anon']) return res.status(401).json({ status: 'error', message: 'auth' });
@@ -112,6 +113,29 @@ test('live mode requires explicit confirmation and a connected broker', async ()
   assert.equal(noBroker.status, 400);
   assert.equal(noBroker.body.code, 'NO_BROKER');
   assert.equal((await s.call('GET', '/portfolio?mode=LIVE')).status, 404);
+  await s.close();
+});
+
+test('enabling live trading imports broker holdings in the universe and sets cash from funds', async () => {
+  const broker = new MockBroker({ live: true });
+  broker.fundsData = { equityCash: 80000, equityNet: 180000, capitalRs: 80000 };
+  broker.holdingsData = [
+    { symbol: 'TCS', qty: 10, avgPrice: 3500, exchange: 'NSE' },
+    { symbol: 'NOTAINDEX', qty: 40, avgPrice: 100, exchange: 'NSE' },
+  ];
+  const s = await serve({ appOptions: { brokerOverride: () => broker } });
+  s.app.momentum.sessions.save('u1', 'kitekey', 'token');
+  const en = await s.call('POST', '/live/enable', { phrase: 'ENABLE LIVE TRADING' });
+  assert.equal(en.status, 200);
+  assert.equal(en.body.enabled, true);
+  assert.deepEqual(en.body.holdings.imported, ['TCS']);
+  assert.equal(en.body.holdings.skipped.some((x) => x.symbol === 'NOTAINDEX'), true);
+  const view = await s.call('GET', '/portfolio?mode=LIVE');
+  assert.equal(view.status, 200);
+  assert.equal(view.body.valuation.cash, 80000);
+  assert.equal(view.body.positions.length, 1);
+  assert.equal(view.body.positions[0].symbol, 'TCS');
+  assert.equal(view.body.positions[0].qty, 10);
   await s.close();
 });
 

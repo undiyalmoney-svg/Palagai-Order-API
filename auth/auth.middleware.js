@@ -1,6 +1,17 @@
 const jwt = require('jsonwebtoken');
 const { JWT_SECRET, JWT_DAYS, ADMIN } = require('./credentials');
 const users = require('./users.store');
+const { getDb } = require('../lib/mongo');
+
+function userFromJwt(payload) {
+  if (!payload?.sub || payload.role === 'admin') return null;
+  return {
+    id: String(payload.sub),
+    username: payload.username,
+    role: payload.role || 'friend',
+    modules: Array.isArray(payload.modules) ? payload.modules : [],
+  };
+}
 
 function signUserToken(userDoc) {
   const payload = {
@@ -44,6 +55,14 @@ async function requireSiteUser(req, res, next) {
     }
     const doc = await users.findById(payload.sub);
     if (!doc) {
+      // JWT already carries id/role/modules. When Mongo is not attached the
+      // momentum app still has to run (synthetic data, paper trading).
+      const fallback = !getDb() ? userFromJwt(payload) : null;
+      if (fallback) {
+        req.user = fallback;
+        next();
+        return;
+      }
       res.status(401).json({ status: 'error', message: 'User not found' });
       return;
     }
