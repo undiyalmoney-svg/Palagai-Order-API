@@ -58,14 +58,14 @@ function ask(question, ctx) {
 
   if (!q) return respond('Ask about a stock, a signal, or the portfolio - for example "Why did you buy TCS?".');
 
-  if (symbol && /(why|reason|explain|what).*(buy|bought|purchase|entry|enter)/.test(lower)) {
+  if (/(why|reason|explain|what).*(buy|bought|purchase|entry|enter)/.test(lower)) {
     const sig = ctx.store.listSignals({ userId: ctx.userId, symbol, limit: 50 }).find((s) => s.action === 'BUY');
-    if (!sig) return respond(`No BUY decision for ${symbol} is stored in your history, so I cannot explain one.`);
+    if (!sig) return respond(symbol ? `No BUY decision for ${symbol} is stored in your history, so I cannot explain one.` : 'No BUY decision is stored in your history yet, so there is nothing to explain.');
     return respond(signalStory(sig).join('\n'), [`signal #${sig.id}`, `decision date ${sig.asOf}`]);
   }
-  if (symbol && /(why|reason|explain).*(sell|sold|exit|reduce|trim)/.test(lower)) {
+  if (/(why|reason|explain).*(sell|sold|exit|reduce|trim)/.test(lower)) {
     const sig = ctx.store.listSignals({ userId: ctx.userId, symbol, limit: 50 }).find((s) => ['SELL', 'EXIT', 'REDUCE'].includes(s.action));
-    if (!sig) return respond(`No SELL/EXIT/REDUCE decision for ${symbol} is stored.`);
+    if (!sig) return respond(symbol ? `No SELL/EXIT/REDUCE decision for ${symbol} is stored.` : 'No SELL/EXIT/REDUCE decision is stored yet.');
     return respond(signalStory(sig).join('\n'), [`signal #${sig.id}`]);
   }
   if (symbol && /(hold|keep|wait|should i|status|what about)/.test(lower)) {
