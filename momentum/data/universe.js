@@ -6,6 +6,10 @@
  * `CORE_UNIVERSE` is the original 50 used by fast synthetic tests. Live and
  * paper scans use the full large+mid list. `basePrice` is only for the
  * simulated provider; Kite resolves real tokens by trading symbol.
+ *
+ * Small-caps (Nifty Smallcap 250) were papered in
+ * `research/compare-smallcap.js` and left off: a ₹10k book only holds 2–3
+ * names, and realistic small-cap spreads/vol steal those slots.
  */
 
 const { LARGE_CAP, MID_CAP } = require('./universe-large-mid');

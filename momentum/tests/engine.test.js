@@ -258,6 +258,35 @@ test('scan universe is every NSE large-cap and mid-cap', () => {
   assert.ok(!UNIVERSE.some((u) => /^(BNK|INF|FIN|ATO|PHM)\d+$/.test(u.symbol)));
 });
 
+test('small-cap list is real NSE names and stays off the live scan', () => {
+  const { UNIVERSE } = require('../data/universe');
+  const { SMALL_CAP, smallcapOnly } = require('../research/compare-smallcap');
+  const live = new Set(UNIVERSE.map((u) => u.symbol));
+  const extra = smallcapOnly();
+  assert.ok(SMALL_CAP.length >= 140, `small-cap list ${SMALL_CAP.length}`);
+  assert.ok(extra.length >= 140, `usable extra small-caps ${extra.length}`);
+  assert.equal(new Set(SMALL_CAP.map((u) => u.symbol)).size, SMALL_CAP.length);
+  assert.ok(SMALL_CAP.every((u) => u.cap === 'SMALL'));
+  assert.ok(!SMALL_CAP.some((u) => /^(BNK|INF|FIN|ATO|PHM)\d+$/.test(u.symbol)));
+  assert.ok(!UNIVERSE.some((u) => u.cap === 'SMALL'));
+  assert.ok(extra.every((u) => !live.has(u.symbol)));
+});
+
+test('₹10k weekly paper: adding small-caps is measured, not assumed', () => {
+  const { compareSmallcapProfit } = require('../research/compare-smallcap');
+  const result = compareSmallcapProfit({
+    capital: 10_000,
+    windows: [{ id: 'bull-slice', from: '2020-08-03', to: '2021-03-31', label: 'Bull slice' }],
+    sample: { largeMid: 36, small: 36 },
+  });
+  assert.equal(result.windows.length, 1);
+  const row = result.windows[0];
+  assert.ok(Number.isFinite(row.largeMid.profit));
+  assert.ok(Number.isFinite(row.plusRealistic.profit));
+  assert.ok(row.largeMid.universeSize >= 30);
+  assert.ok(row.plusRealistic.universeSize > row.largeMid.universeSize);
+});
+
 test('scaleParamsForCapital opens a 10k ticket that the old 10k floor blocked', () => {
   const raw = paramsFromPreset('momentum-weekly', { minPositionValue: 10_000, minTicketValue: 2_000 });
   const scaled = scaleParamsForCapital(raw, 10_000);

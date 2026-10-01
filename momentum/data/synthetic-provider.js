@@ -99,7 +99,12 @@ function nextState(state, u) {
 }
 
 class SyntheticProvider {
-  constructor({ seed = 'palagai-sim-v1', now = () => new Date(), universe = UNIVERSE } = {}) {
+  constructor({
+    seed = 'palagai-sim-v1',
+    now = () => new Date(),
+    universe = UNIVERSE,
+    smallcapPhysics = true,
+  } = {}) {
     this.id = 'synthetic';
     this.label = 'Simulated data (mock provider)';
     this.isSimulated = true;
@@ -107,6 +112,8 @@ class SyntheticProvider {
     this.nowFn = now;
     this.cache = null;
     this.universe = universe;
+    this.bySymbol = new Map(universe.map((u) => [u.symbol, u]));
+    this.smallcapPhysics = smallcapPhysics;
   }
 
   async status() {
@@ -210,17 +217,22 @@ class SyntheticProvider {
   seriesOf(symbol) {
     const g = this.ensureGenerated();
     if (g.series.has(symbol)) return g.series.get(symbol);
-    const u = UNIVERSE_BY_SYMBOL.get(symbol);
+    const u = this.bySymbol.get(symbol) || UNIVERSE_BY_SYMBOL.get(symbol);
     if (!u) return null;
     const sec = g.sectorRet[u.sector] || g.sectorRet.CONSUMER;
-    return this.generateStock(u, g.dates, g.marketRet, g.states, sec);
+    const s = this.generateStock(u, g.dates, g.marketRet, g.states, sec);
+    g.series.set(symbol, s);
+    return s;
   }
 
   generateStock(u, dates, marketRet, states, secRet) {
     const rng = makeRng(`${this.seed}:stock:${u.symbol}`);
-    const beta = (SECTOR_BETA[u.sector] || 1) * (0.85 + 0.3 * rng.rand());
-    const idioSigma = 0.007 + 0.006 * rng.rand();
-    const tradedValue = 4e8 * Math.exp(1.2 * rng.normal()) + 6e7;
+    const small = this.smallcapPhysics && u.cap === 'SMALL';
+    const beta = (SECTOR_BETA[u.sector] || 1) * (0.85 + 0.3 * rng.rand()) * (small ? 1.15 : 1);
+    const idioSigma = (0.007 + 0.006 * rng.rand()) * (small ? 2.4 : 1);
+    const tradedValue = ((4e8 * Math.exp(1.2 * rng.normal()) + 6e7) * (small ? 0.08 : 1));
+    const clip = small ? 0.28 : 0.18;
+    const gapNoise = small ? 0.012 : 0.003;
     const rows = [];
     let alpha = 0;
     let price = u.basePrice;
@@ -236,12 +248,14 @@ class SyntheticProvider {
       const zvol = rng.normal();
       if (date < listed) continue;
       let r = alpha + beta * marketRet[i] + 0.9 * secRet[i] + idioSigma * zi;
-      r = Math.max(-0.18, Math.min(0.18, r));
+      if (small && states[i] === 'CRASH') r -= 0.012;
+      if (small && states[i] === 'BEAR') r -= 0.002;
+      r = Math.max(-clip, Math.min(clip, r));
       const first = rows.length === 0;
       price = first ? u.basePrice : prevClose * (1 + r);
-      const open = first ? price : prevClose * (1 + 0.3 * r + 0.003 * zgap);
-      const hi = Math.max(open, price) * (1 + Math.abs(0.007 * zrange1) + Math.abs(r) * 0.15);
-      const lo = Math.min(open, price) * (1 - Math.abs(0.007 * zrange2) - Math.abs(r) * 0.15);
+      const open = first ? price : prevClose * (1 + 0.3 * r + gapNoise * zgap);
+      const hi = Math.max(open, price) * (1 + Math.abs(0.007 * zrange1) + Math.abs(r) * (small ? 0.28 : 0.15));
+      const lo = Math.min(open, price) * (1 - Math.abs(0.007 * zrange2) - Math.abs(r) * (small ? 0.28 : 0.15));
       const volume = Math.max(
         1000,
         Math.round((tradedValue / price) * Math.exp(0.3 * zvol) * (1 + 16 * Math.abs(r))),
