@@ -299,7 +299,9 @@ class PortfolioDecisionEngine {
 
     // ---- 4. candidate entry analysis ------------------------------------------
     const heldNow = () => new Set([...live().map((p) => p.symbol), ...pendingBuySymbols]);
-    const weeklyReview = reviewDay && params.horizon !== 'DAILY';
+    // Weekly / monthly books rank-and-buy whenever the user scans. Gating
+    // that on Friday-only review left mid-week Live scans with zero BUY rows.
+    const weeklyReview = params.horizon !== 'DAILY';
     const entryFor = (e) =>
       analyzeEntry({
         f: e.f,

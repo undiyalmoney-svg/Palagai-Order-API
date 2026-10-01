@@ -1,14 +1,14 @@
 'use strict';
 
 /**
- * Scan universe: NIFTY-style large caps plus 1,000 extra NSE cash names.
+ * Scan universe: every NSE large-cap and mid-cap (Nifty 100 + Midcap 150).
  *
- * `basePrice` / `listed` are only used by the simulated provider. The Kite
- * provider resolves real instruments by trading symbol. Extended names list
- * from mid-2024 so older paper windows stay on the original 50.
+ * `CORE_UNIVERSE` is the original 50 used by fast synthetic tests. Live and
+ * paper scans use the full large+mid list. `basePrice` is only for the
+ * simulated provider; Kite resolves real tokens by trading symbol.
  */
 
-const { EXTENDED_UNIVERSE } = require('./universe-extended');
+const { LARGE_CAP, MID_CAP } = require('./universe-large-mid');
 
 const BENCHMARK = {
   symbol: 'NIFTY50',
@@ -72,11 +72,13 @@ const CORE_UNIVERSE = [
   { symbol: 'TRENT', name: 'Trent', sector: 'CONSUMER', basePrice: 450 },
 ];
 
-const CORE_SYMBOLS = new Set(CORE_UNIVERSE.map((u) => u.symbol));
-const UNIVERSE = [
-  ...CORE_UNIVERSE,
-  ...EXTENDED_UNIVERSE.filter((u) => !CORE_SYMBOLS.has(u.symbol)),
-];
+const UNIVERSE = [];
+const seen = new Set();
+for (const u of [...CORE_UNIVERSE, ...LARGE_CAP, ...MID_CAP]) {
+  if (seen.has(u.symbol)) continue;
+  seen.add(u.symbol);
+  UNIVERSE.push(u);
+}
 
 const SECTOR_BY_SYMBOL = new Map(UNIVERSE.map((u) => [u.symbol, u.sector]));
 const UNIVERSE_BY_SYMBOL = new Map(UNIVERSE.map((u) => [u.symbol, u]));
@@ -88,6 +90,8 @@ function listUniverse() {
 module.exports = {
   BENCHMARK,
   CORE_UNIVERSE,
+  LARGE_CAP,
+  MID_CAP,
   UNIVERSE,
   SECTOR_BY_SYMBOL,
   UNIVERSE_BY_SYMBOL,

@@ -69,10 +69,10 @@ const REGIME_POLICY = {
   BEARISH: {
     positionsMult: 0.25,
     minCashPct: 0.5,
-    allowNewBuys: false,
-    minEntryStatus: 'STRONG_BUY',
+    allowNewBuys: true,
+    minEntryStatus: 'BUY',
     sizeMult: 0.5,
-    scoreBonus: 15,
+    scoreBonus: 8,
     trailMult: 0.6,
   },
 };
@@ -103,7 +103,7 @@ const BASE_PARAMS = {
   requireAboveLongEma: true,
   rsMin: 0,
 
-  minHistoryBars: 260,
+  minHistoryBars: 126,
   minPrice: 15,
   minAdvRs: 5_000_000,
 

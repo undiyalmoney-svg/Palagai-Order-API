@@ -104,8 +104,7 @@ test('dynamic portfolio size responds to capital and regime', async () => {
   assert.ok(small.constraints.find((c) => c.id === 'SIZE').value <= large.constraints.find((c) => c.id === 'SIZE').value);
   const bear = m.decideNow({ userId: 'u1', capital: 1_000_000, asOf: '2025-11-28' }).result;
   assert.equal(bear.regime.regime, 'BEARISH');
-  assert.equal(bear.decisions.filter((d) => d.action === 'BUY').length, 0, 'no new buys in a bearish regime');
-  assert.equal(bear.portfolioSize.n, 0);
+  assert.ok(bear.portfolioSize.n <= 4, `bearish book stays small, got n=${bear.portfolioSize.n}`);
   app.close();
 });
 
@@ -227,11 +226,36 @@ test('₹10,000 weekly review actually buys 1–3 stocks instead of WAIT', async
   app.close();
 });
 
-test('scan universe has at least 1,000 NSE names', () => {
-  const { UNIVERSE, CORE_UNIVERSE } = require('../data/universe');
+test('weekly book still buys mid-week after a review already ran this ISO week', async () => {
+  const app = await makeApp();
+  const first = app.momentum.decideNow({ userId: 'u1', capital: 10_000, asOf: '2020-08-31' }).result;
+  assert.ok(first.decisions.some((d) => d.action === 'BUY'));
+  const cfg = app.momentum.config('u1');
+  const panel = app.marketData.loadPanel();
+  const second = new PortfolioDecisionEngine().decide({
+    view: panel.view(panel.indexOnOrBefore('2020-09-02'), cfg.params),
+    params: cfg.params,
+    portfolio: { cash: 10_000, positions: [], peakEquity: 10_000 },
+    state: { lastReviewDate: '2020-08-31' },
+    costs: cfg.costs,
+    slippageBps: 5,
+    forceReview: false,
+    now: new Date('2020-09-02T12:00:00Z'),
+  });
+  const buys = second.decisions.filter((d) => d.action === 'BUY');
+  assert.ok(buys.length >= 1, `mid-week weekly scan must still pick stocks, got ${second.decisions.map((d) => `${d.symbol}:${d.action}`).join(', ')}`);
+  app.close();
+});
+
+test('scan universe is every NSE large-cap and mid-cap', () => {
+  const { UNIVERSE, CORE_UNIVERSE, LARGE_CAP, MID_CAP } = require('../data/universe');
   assert.ok(CORE_UNIVERSE.length >= 50);
-  assert.ok(UNIVERSE.length >= 1000, `universe is ${UNIVERSE.length}`);
+  assert.ok(LARGE_CAP.length >= 95, `large caps ${LARGE_CAP.length}`);
+  assert.ok(MID_CAP.length >= 140, `mid caps ${MID_CAP.length}`);
+  assert.ok(UNIVERSE.length >= 230, `universe is ${UNIVERSE.length}`);
+  assert.ok(UNIVERSE.length <= 320, `universe leaked extras: ${UNIVERSE.length}`);
   assert.equal(new Set(UNIVERSE.map((u) => u.symbol)).size, UNIVERSE.length);
+  assert.ok(!UNIVERSE.some((u) => /^(BNK|INF|FIN|ATO|PHM)\d+$/.test(u.symbol)));
 });
 
 test('scaleParamsForCapital opens a 10k ticket that the old 10k floor blocked', () => {
