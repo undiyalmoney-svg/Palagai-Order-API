@@ -155,6 +155,37 @@ test('backtest, what-if and validation endpoints', async () => {
   await s.close();
 });
 
+test('desk paper replay and live scan return entries, exits and a scan clock', async () => {
+  const s = await serve();
+  const overview = await s.call('GET', '/desk');
+  assert.equal(overview.status, 200);
+  assert.equal(overview.body.schedule.scanTime, '16:00 IST');
+  assert.equal(overview.body.schedule.fillTime, '09:15 IST');
+  assert.ok(overview.body.schedule.buy.when);
+  assert.ok(overview.body.schedule.sell.instruction);
+
+  const paper = await s.call('POST', '/desk/paper', { capital: 200000, from: '2021-01-04', to: '2022-06-30' });
+  assert.equal(paper.status, 200);
+  assert.ok(paper.body.closed.length > 0);
+  const trip = paper.body.closed[0];
+  assert.ok(trip.symbol && trip.entryDate && trip.exitDate);
+  assert.equal(trip.entryTime, '09:15 IST');
+  assert.equal(trip.exitTime, '09:15 IST');
+  assert.ok(Number.isFinite(trip.holdingDays));
+  assert.ok(Number.isFinite(paper.body.totalProfit));
+
+  const scan = await s.call('POST', '/desk/scan', { capital: 150000, reset: true, mode: 'LIVE' });
+  assert.equal(scan.status, 200);
+  assert.equal(scan.body.usedPaperFallback, true);
+  assert.ok(Array.isArray(scan.body.buy));
+  assert.ok(Array.isArray(scan.body.hold));
+  assert.ok(Array.isArray(scan.body.sell));
+  for (const row of [...scan.body.buy, ...scan.body.sell]) {
+    if (row.canExecute) assert.ok(row.signalId > 0 && row.qty >= 0);
+  }
+  await s.close();
+});
+
 test('AI narrator answers from stored decisions and cannot invent trades', async () => {
   const s = await serve();
   await s.call('POST', '/portfolio/paper', { capital: 300000 });
