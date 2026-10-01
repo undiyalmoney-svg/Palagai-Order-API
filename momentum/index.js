@@ -8,13 +8,14 @@ const { ResearchService } = require('./services/research-service');
 const { JobRunner } = require('./jobs/jobs');
 const { SyntheticProvider } = require('./data/synthetic-provider');
 const { KiteProvider } = require('./providers/kite-provider');
+const { CORE_UNIVERSE } = require('./data/universe');
 
 /**
  * Composition root. Everything takes its clock, provider and broker from here,
  * so tests build the same object graph with an in-memory database, a fixed
  * clock and a scripted broker.
  */
-function createMomentumApp({ dbPath = DEFAULT_PATH, clock = () => new Date(), provider = null, brokerOverride = null, log = () => {} } = {}) {
+function createMomentumApp({ dbPath = DEFAULT_PATH, clock = () => new Date(), provider = null, brokerOverride = null, log = () => {}, coreOnly = false } = {}) {
   const db = openDatabase(dbPath);
   const store = new Store(db, { clock });
   store.failStaleRuns();
@@ -25,7 +26,7 @@ function createMomentumApp({ dbPath = DEFAULT_PATH, clock = () => new Date(), pr
       const userId = process.env.MOMENTUM_DATA_USER;
       return new KiteProvider({ getAuthorization: async () => (userId ? momentum.sessions.authorization(userId) : null), now: clock });
     }
-    return new SyntheticProvider({ now: clock });
+    return new SyntheticProvider({ now: clock, universe: coreOnly ? CORE_UNIVERSE : undefined });
   };
   const marketData = new MarketDataService({ store, providerFor, clock });
   momentum = new MomentumService({ store, marketData, clock, providerFor, brokerOverride });

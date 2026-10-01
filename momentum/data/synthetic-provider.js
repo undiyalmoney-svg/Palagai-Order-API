@@ -16,7 +16,7 @@
  *    stored rows stay valid as the calendar advances.
  */
 
-const { BENCHMARK, UNIVERSE } = require('./universe');
+const { BENCHMARK, UNIVERSE, UNIVERSE_BY_SYMBOL, CORE_UNIVERSE } = require('./universe');
 const { makeRng } = require('../utils/rng');
 const { addDays, isTradingDay, lastCompletedTradingDate, marketStatus, toIstParts } = require('../utils/dates');
 const { roundPrice, round } = require('../utils/math');
@@ -68,6 +68,15 @@ const SECTOR_BETA = {
   CEMENT: 0.95,
   CONSUMER: 1.0,
   TELECOM: 0.8,
+  CHEMICALS: 1.05,
+  REALTY: 1.2,
+  HEALTHCARE: 0.8,
+  MEDIA: 0.95,
+  TEXTILE: 1.05,
+  CAPITAL_GOODS: 1.1,
+  UTILITIES: 0.7,
+  DEFENCE: 0.95,
+  LOGISTICS: 1.05,
 };
 
 const SECTORS = Object.keys(SECTOR_BETA);
@@ -90,13 +99,14 @@ function nextState(state, u) {
 }
 
 class SyntheticProvider {
-  constructor({ seed = 'palagai-sim-v1', now = () => new Date() } = {}) {
+  constructor({ seed = 'palagai-sim-v1', now = () => new Date(), universe = UNIVERSE } = {}) {
     this.id = 'synthetic';
     this.label = 'Simulated data (mock provider)';
     this.isSimulated = true;
     this.seed = seed;
     this.nowFn = now;
     this.cache = null;
+    this.universe = universe;
   }
 
   async status() {
@@ -110,7 +120,7 @@ class SyntheticProvider {
   }
 
   async listInstruments() {
-    return UNIVERSE.map((u) => ({ symbol: u.symbol, name: u.name, sector: u.sector }));
+    return this.universe.map((u) => ({ symbol: u.symbol, name: u.name, sector: u.sector }));
   }
 
   benchmarkSymbol() {
@@ -167,7 +177,7 @@ class SyntheticProvider {
     }
 
     const series = new Map();
-    for (const u of UNIVERSE) {
+    for (const u of CORE_UNIVERSE) {
       series.set(u.symbol, this.generateStock(u, dates, marketRet, states, sectorRet[u.sector]));
     }
 
@@ -194,7 +204,16 @@ class SyntheticProvider {
       prev = level;
     }
     series.set(BENCHMARK.symbol, idxSeries);
-    return { end, dates, series, states };
+    return { end, dates, series, states, marketRet, sectorRet };
+  }
+
+  seriesOf(symbol) {
+    const g = this.ensureGenerated();
+    if (g.series.has(symbol)) return g.series.get(symbol);
+    const u = UNIVERSE_BY_SYMBOL.get(symbol);
+    if (!u) return null;
+    const sec = g.sectorRet[u.sector] || g.sectorRet.CONSUMER;
+    return this.generateStock(u, g.dates, g.marketRet, g.states, sec);
   }
 
   generateStock(u, dates, marketRet, states, secRet) {
@@ -241,20 +260,18 @@ class SyntheticProvider {
   }
 
   async fetchDaily(symbol, from, to) {
-    const { series } = this.ensureGenerated();
-    const s = series.get(symbol);
+    const s = this.seriesOf(symbol);
     if (!s) throw new Error(`Unknown symbol ${symbol}`);
     return s.rows.filter((r) => r.date >= from && r.date <= to);
   }
 
   async fetchQuotes(symbols, now = this.nowFn()) {
-    const { series } = this.ensureGenerated();
     const status = marketStatus(now);
     const p = toIstParts(now);
     const minuteKey = Math.floor(now.getTime() / 60_000);
     const out = {};
     for (const symbol of symbols) {
-      const s = series.get(symbol);
+      const s = this.seriesOf(symbol);
       if (!s || !s.rows.length) continue;
       const lastBar = s.rows[s.rows.length - 1];
       let last = lastBar.close;

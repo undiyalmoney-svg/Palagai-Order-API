@@ -1,7 +1,7 @@
 'use strict';
 
 const { round, roundPrice, clamp } = require('../utils/math');
-const { HORIZON_PRESETS } = require('../config/defaults');
+const { HORIZON_PRESETS, scaleParamsForCapital } = require('../config/defaults');
 const { featureSnapshot } = require('./features');
 const { scoreFeatures, eligibility } = require('./scoring');
 const { computeRegime } = require('./regime');
@@ -48,7 +48,7 @@ class PortfolioDecisionEngine {
   decide(input) {
     const {
       view,
-      params,
+      params: paramsIn,
       portfolio,
       state = {},
       capitalEvent = null,
@@ -64,7 +64,7 @@ class PortfolioDecisionEngine {
     const waitRows = lean ? 0 : waitRowsIn;
     const asOf = view.asOf;
     const timestamp = now instanceof Date ? now.toISOString() : String(now);
-    const strategy = params.id || 'custom';
+    const strategy = paramsIn.id || 'custom';
 
     const priceOf = (s) => {
       const p = view.price(s);
@@ -83,6 +83,7 @@ class PortfolioDecisionEngine {
     const withdrawal = capitalEvent && capitalEvent.amount < 0 ? -capitalEvent.amount : 0;
     const deposit = capitalEvent && capitalEvent.amount > 0 ? capitalEvent.amount : 0;
     const planEquity = Math.max(0, equity - withdrawal);
+    const params = scaleParamsForCapital(paramsIn, planEquity);
 
     const regime = computeRegime(view, params, state.prevRegime || null);
     const regimeChanged = !!state.prevRegime && state.prevRegime !== regime.regime;
@@ -298,8 +299,18 @@ class PortfolioDecisionEngine {
 
     // ---- 4. candidate entry analysis ------------------------------------------
     const heldNow = () => new Set([...live().map((p) => p.symbol), ...pendingBuySymbols]);
+    const weeklyReview = reviewDay && params.horizon !== 'DAILY';
     const entryFor = (e) =>
-      analyzeEntry({ f: e.f, score: e.score, elig: e.elig, regime: regimeView, params, sector: e.sector, horizonPresets: HORIZON_PRESETS });
+      analyzeEntry({
+        f: e.f,
+        score: e.score,
+        elig: e.elig,
+        regime: regimeView,
+        params,
+        sector: e.sector,
+        horizonPresets: HORIZON_PRESETS,
+        weeklyReview,
+      });
 
     const candidates = [];
     for (const e of ranked) {

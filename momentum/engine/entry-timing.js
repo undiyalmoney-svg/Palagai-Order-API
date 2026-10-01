@@ -121,7 +121,7 @@ function holdingExpectation(params, horizonPresets) {
   return horizonPresets[params.horizon]?.expectedHolding || 'held while the thesis stays valid';
 }
 
-function analyzeEntry({ f, score, elig, regime, params, sector, horizonPresets }) {
+function analyzeEntry({ f, score, elig, regime, params, sector, horizonPresets, weeklyReview = false }) {
   const policy = regime.policy;
   const checks = [];
   const add = (id, label, pass, critical, detail) => checks.push({ id, label, pass: !!pass, critical, detail });
@@ -129,8 +129,11 @@ function analyzeEntry({ f, score, elig, regime, params, sector, horizonPresets }
   const effMin = params.minScore + policy.scoreBonus;
   add('regime', 'Market regime allows new buys', policy.allowNewBuys, true, `${regime.regime}${policy.allowNewBuys ? '' : ' - new purchases are paused'}`);
   add('eligible', 'Liquidity & history gates', elig.eligible, true, elig.eligible ? 'Passes liquidity, price and history gates' : elig.reasons.join('; '));
-  const trendOk =
-    f.price > f.ema.mid && f.ema.mid > f.ema.slow && (!params.requireAboveLongEma || f.price > f.ema.long);
+  // Weekly rank-and-buy uses the 50/100 EMA stack. The 200-day gate is a
+  // daily-timing filter and was dropping every 10k candidate as WAIT.
+  const trendOk = weeklyReview
+    ? f.price > f.ema.mid && f.ema.mid > f.ema.slow
+    : f.price > f.ema.mid && f.ema.mid > f.ema.slow && (!params.requireAboveLongEma || f.price > f.ema.long);
   add(
     'trend',
     'Trend intact',
@@ -144,7 +147,7 @@ function analyzeEntry({ f, score, elig, regime, params, sector, horizonPresets }
   add('score', 'Composite score above entry threshold', scoreOk, true, `Score ${score.total} vs required ${effMin}${policy.scoreBonus ? ` (${params.minScore} + ${policy.scoreBonus} regime premium)` : ''}`);
 
   const setups = detectSetups(f, params);
-  const setup = pickSetup(setups);
+  let setup = pickSetup(setups);
   const risk = planRisk(f, params);
   add('setup', 'Entry setup confirmed', !!setup?.confirmed, false, setup ? setup.note : 'No breakout, pullback-reversal or continuation setup present');
   const volOk = setup?.type === 'BREAKOUT' ? f.tech.breakoutRelVol >= params.volBreakoutMult : f.flow.rel >= 0.8;
@@ -183,6 +186,20 @@ function analyzeEntry({ f, score, elig, regime, params, sector, horizonPresets }
       waitFor.push(`Composite score must reach ${effMin} (currently ${score.total})`);
       headline = `WAIT - score ${score.total} is too low`;
     }
+  } else if (weeklyReview) {
+    // Classic weekly momentum: buy the ranked leaders on review day. Daily
+    // breakout / pullback confirmation is the next-day timing layer, not the
+    // weekly decision. Waiting for it left the 10k desk with zero buys.
+    if (!setup || !setup.confirmed) {
+      setup = {
+        type: 'WEEKLY_RANK',
+        confirmed: true,
+        note: `Weekly momentum rank — relative strength vs NIFTY ${pctText(f.rs.vsIndex3m)}, 3M ${pctText(f.ret.m3)}`,
+      };
+    }
+    const strong = score.total >= params.strongScore && regime.regime === 'BULLISH';
+    status = strong ? 'STRONG_BUY' : 'BUY';
+    headline = `${status.replace('_', ' ')} - weekly rank entry confirmed with trend, momentum and regime support`;
   } else if (!setup) {
     status = 'WATCH';
     const ph = f.tech.donchHigh;
@@ -226,7 +243,7 @@ function analyzeEntry({ f, score, elig, regime, params, sector, horizonPresets }
     headline = `${status.replace('_', ' ')} - ${setup.type.toLowerCase()} entry confirmed with trend, momentum and regime support`;
   }
 
-  if (statusAtLeast(status, 'BUY') && !statusAtLeast(status, policy.minEntryStatus)) {
+  if (!weeklyReview && statusAtLeast(status, 'BUY') && !statusAtLeast(status, policy.minEntryStatus)) {
     status = 'WATCH';
     waitFor.push(`${regime.regime} regime only permits ${policy.minEntryStatus.replace('_', ' ')} entries (this is a BUY)`);
     headline = `WAIT - ${regime.regime} regime requires a stronger signal than this setup provides`;

@@ -1,12 +1,15 @@
 'use strict';
 
 /**
- * Supported universe: liquid NSE large-caps (NIFTY 50 style) plus a few later
- * listings so the "what was tradable on date X" logic has something to exclude.
+ * Scan universe: NIFTY-style large caps plus 1,000 extra NSE cash names.
  *
- * `basePrice` / `listed` are only used by the simulated provider; the Kite
- * provider resolves real instruments by trading symbol.
+ * `basePrice` / `listed` are only used by the simulated provider. The Kite
+ * provider resolves real instruments by trading symbol. Extended names list
+ * from mid-2024 so older paper windows stay on the original 50.
  */
+
+const { EXTENDED_UNIVERSE } = require('./universe-extended');
+
 const BENCHMARK = {
   symbol: 'NIFTY50',
   name: 'NIFTY 50',
@@ -16,7 +19,7 @@ const BENCHMARK = {
   basePrice: 10500,
 };
 
-const UNIVERSE = [
+const CORE_UNIVERSE = [
   { symbol: 'RELIANCE', name: 'Reliance Industries', sector: 'ENERGY', basePrice: 1000 },
   { symbol: 'ONGC', name: 'Oil & Natural Gas Corp', sector: 'ENERGY', basePrice: 150 },
   { symbol: 'COALINDIA', name: 'Coal India', sector: 'ENERGY', basePrice: 200 },
@@ -69,10 +72,24 @@ const UNIVERSE = [
   { symbol: 'TRENT', name: 'Trent', sector: 'CONSUMER', basePrice: 450 },
 ];
 
+const CORE_SYMBOLS = new Set(CORE_UNIVERSE.map((u) => u.symbol));
+const UNIVERSE = [
+  ...CORE_UNIVERSE,
+  ...EXTENDED_UNIVERSE.filter((u) => !CORE_SYMBOLS.has(u.symbol)),
+];
+
 const SECTOR_BY_SYMBOL = new Map(UNIVERSE.map((u) => [u.symbol, u.sector]));
+const UNIVERSE_BY_SYMBOL = new Map(UNIVERSE.map((u) => [u.symbol, u]));
 
 function listUniverse() {
   return UNIVERSE.map((u) => ({ symbol: u.symbol, name: u.name, sector: u.sector }));
 }
 
-module.exports = { BENCHMARK, UNIVERSE, SECTOR_BY_SYMBOL, listUniverse };
+module.exports = {
+  BENCHMARK,
+  CORE_UNIVERSE,
+  UNIVERSE,
+  SECTOR_BY_SYMBOL,
+  UNIVERSE_BY_SYMBOL,
+  listUniverse,
+};

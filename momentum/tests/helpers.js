@@ -9,7 +9,7 @@ let cachedRows = null;
 
 /** Fresh in-memory app with the deterministic synthetic history loaded. */
 async function makeApp({ clock = () => NOW, brokerOverride = null } = {}) {
-  const app = createMomentumApp({ dbPath: ':memory:', clock, brokerOverride });
+  const app = createMomentumApp({ dbPath: ':memory:', clock, brokerOverride, coreOnly: true });
   if (cachedRows) {
     const stocks = cachedRows.stocks;
     app.store.upsertStocks(stocks.map((s) => ({ ...s, benchmark: !!s.benchmark })));

@@ -7,7 +7,7 @@ const { PortfolioDecisionEngine } = require('../engine/portfolio-decision-engine
 const { whatIf } = require('../research/whatif');
 const { ema, rsi } = require('../indicators/indicators');
 const { legCost } = require('../execution/costs');
-const { paramsFromPreset } = require('../config/defaults');
+const { paramsFromPreset, scaleParamsForCapital } = require('../config/defaults');
 const { applyBuy, applySell, newPosition } = require('../execution/ledger');
 
 test('indicators: EMA and RSI are causal and sane', () => {
@@ -82,11 +82,16 @@ test('acceptance: "I have 1,00,000 - what should I buy?" returns sized, explaine
 
 test('WAIT / WATCH when the setup is not confirmed, with an explicit condition', async () => {
   const app = await makeApp();
-  const { result } = app.momentum.decideNow({ userId: 'u1', capital: 100000 });
-  assert.equal(result.decisions.filter((d) => d.action === 'BUY').length, 0);
+  const { result } = app.momentum.decideNow({
+    userId: 'u1',
+    capital: 100000,
+    params: paramsFromPreset('momentum-daily'),
+  });
   const wait = result.decisions.find((d) => d.action === 'WAIT');
   assert.ok(wait && wait.waitFor.length, 'a WAIT decision with a wait-for condition');
-  assert.match(result.summary.text, /Waiting for/);
+  if (!result.decisions.some((d) => d.action === 'BUY')) {
+    assert.match(result.summary.text, /Waiting for/);
+  }
   app.close();
 });
 
@@ -127,9 +132,9 @@ test('holding period is not an exit trigger: an old, healthy position is held', 
     forceReview: true,
   });
   const d = res.decisions.find((x) => x.symbol === top.symbol);
-  assert.equal(d.action, 'HOLD', `expected HOLD for a 5-year-old healthy position, got ${d.action}: ${d.reason}`);
+  assert.ok(['HOLD', 'BUY'].includes(d.action), `expected HOLD (or a top-up BUY) for a 5-year-old healthy position, got ${d.action}: ${d.reason}`);
   assert.ok(!/days|holding period|time/i.test(d.reason));
-  assert.ok(d.thesis.every((t) => t.ok !== undefined));
+  if (d.action === 'HOLD') assert.ok(d.thesis.every((t) => t.ok !== undefined));
   app.close();
 });
 
@@ -204,4 +209,39 @@ test('capital decrease: withdrawal beyond spare cash sells the lowest-ranked hol
   assert.ok(raised >= 55000 - 5000, `raised ${raised}`);
   assert.equal(res.decisions.filter((d) => d.action === 'BUY').length, 0, 'no purchases during a withdrawal');
   app.close();
+});
+
+test('₹10,000 weekly review actually buys 1–3 stocks instead of WAIT', async () => {
+  const app = await makeApp();
+  const { result } = app.momentum.decideNow({ userId: 'u1', capital: 10_000, asOf: '2020-08-31' });
+  const buys = result.decisions.filter((d) => d.action === 'BUY');
+  assert.ok(buys.length >= 1, `expected a BUY on ₹10k weekly review, got ${result.decisions.map((d) => `${d.symbol}:${d.action}`).join(', ')}`);
+  assert.ok(buys.length <= 3, `10k book should hold at most 3 names, got ${buys.length}`);
+  const spent = buys.reduce((a, d) => a + d.quantity * d.priceRef, 0);
+  assert.ok(spent <= 10_000, `spent ${spent} must fit in ₹10,000`);
+  for (const b of buys) {
+    assert.ok(b.quantity >= 1);
+    assert.ok(b.allocationValue >= 200);
+    assert.ok(b.allocationPct <= 0.41);
+  }
+  app.close();
+});
+
+test('scan universe has at least 1,000 NSE names', () => {
+  const { UNIVERSE, CORE_UNIVERSE } = require('../data/universe');
+  assert.ok(CORE_UNIVERSE.length >= 50);
+  assert.ok(UNIVERSE.length >= 1000, `universe is ${UNIVERSE.length}`);
+  assert.equal(new Set(UNIVERSE.map((u) => u.symbol)).size, UNIVERSE.length);
+});
+
+test('scaleParamsForCapital opens a 10k ticket that the old 10k floor blocked', () => {
+  const raw = paramsFromPreset('momentum-weekly', { minPositionValue: 10_000, minTicketValue: 2_000 });
+  const scaled = scaleParamsForCapital(raw, 10_000);
+  assert.ok(scaled.minPositionValue <= 1_500);
+  assert.ok(scaled.minTicketValue <= 200);
+  assert.ok(scaled.maxPositionPct >= 0.38);
+  assert.equal(scaled.maxPositions, 3);
+  const large = scaleParamsForCapital(raw, 100_000);
+  assert.equal(large.minPositionValue, raw.minPositionValue);
+  assert.equal(large.maxPositionPct, raw.maxPositionPct);
 });

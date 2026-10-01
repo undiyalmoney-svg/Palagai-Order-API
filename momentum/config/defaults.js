@@ -95,17 +95,17 @@ const BASE_PARAMS = {
   },
   momentumWeights: null,
 
-  minScore: 60,
-  strongScore: 72,
-  watchScore: 50,
-  holdScore: 45,
-  sellScore: 35,
+  minScore: 58,
+  strongScore: 70,
+  watchScore: 48,
+  holdScore: 42,
+  sellScore: 32,
   requireAboveLongEma: true,
   rsMin: 0,
 
   minHistoryBars: 260,
-  minPrice: 20,
-  minAdvRs: 20_000_000,
+  minPrice: 15,
+  minAdvRs: 5_000_000,
 
   volBreakoutMult: 1.3,
   maxExtensionAtr: 3.0,
@@ -132,7 +132,7 @@ const BASE_PARAMS = {
   sectorWeakPct: -0.03,
 
   maxPositions: 10,
-  minPositionValue: 10_000,
+  minPositionValue: 2_000,
   maxPositionPct: 0.2,
   maxSectorPct: 0.35,
   riskPerTradePct: 0.01,
@@ -150,7 +150,7 @@ const BASE_PARAMS = {
   replaceCostMultiple: 2,
   concentrationTolerance: 0.25,
   addMinRoomPct: 0.02,
-  minTicketValue: 2_000,
+  minTicketValue: 200,
 
   scanEveryDay: false,
   regime: {
@@ -281,18 +281,19 @@ function resolveParams(overrides = {}) {
     p.momentumWeights = { ...preset.momentumWeights };
   }
 
-  p.minScore = num(p.minScore, 60, 30, 95);
-  p.strongScore = num(p.strongScore, 72, p.minScore, 99);
-  p.watchScore = num(p.watchScore, 50, 10, p.minScore);
-  p.holdScore = num(p.holdScore, 45, 5, p.minScore);
-  p.sellScore = num(p.sellScore, 35, 0, p.holdScore);
+  p.minScore = num(p.minScore, 58, 30, 95);
+  p.strongScore = num(p.strongScore, 70, p.minScore, 99);
+  p.watchScore = num(p.watchScore, 48, 10, p.minScore);
+  p.holdScore = num(p.holdScore, 42, 5, p.minScore);
+  p.sellScore = num(p.sellScore, 32, 0, p.holdScore);
   p.maxPositions = Math.round(num(p.maxPositions, 10, 1, 40));
-  p.minPositionValue = num(p.minPositionValue, 10_000, 500, 10_000_000);
+  p.minPositionValue = num(p.minPositionValue, 2_000, 200, 10_000_000);
   p.maxPositionPct = num(p.maxPositionPct, 0.2, 0.03, 1);
   p.maxSectorPct = num(p.maxSectorPct, 0.35, 0.05, 1);
   p.riskPerTradePct = num(p.riskPerTradePct, 0.01, 0.001, 0.05);
   p.maxOpenRiskPct = num(p.maxOpenRiskPct, 0.08, 0.01, 0.4);
   p.minCashPct = num(p.minCashPct, 0.05, 0, 0.9);
+  p.minTicketValue = num(p.minTicketValue, 200, 50, 1_000_000);
   p.stopAtrMult = num(p.stopAtrMult, preset.stopAtrMult, 0.5, 8);
   p.trailAtrMult = num(p.trailAtrMult, preset.trailAtrMult, 0.5, 10);
   p.volBreakoutMult = num(p.volBreakoutMult, 1.3, 0.5, 5);
@@ -362,6 +363,36 @@ function paramsFromPreset(id, extra = {}) {
   return resolveParams({ ...preset.overrides, id: preset.id, name: preset.name, ...extra });
 }
 
+/**
+ * Weekly momentum on a small book (₹10k start) cannot use the large-cap
+ * ticket floors: ₹10,000 min position + 5% cash reserve leaves nothing to
+ * deploy. Scale the live limits from equity so 2–3 names of ₹2–4k each
+ * can actually be bought, while a ₹1L+ book keeps the original caps.
+ */
+function scaleParamsForCapital(params, equity) {
+  const p = { ...params };
+  const cap = Number(equity);
+  if (!Number.isFinite(cap) || cap <= 0) return p;
+  if (cap <= 25_000) {
+    p.minPositionValue = Math.min(p.minPositionValue, Math.max(500, Math.round(cap * 0.12)));
+    p.minTicketValue = Math.min(p.minTicketValue || 200, 200);
+    p.maxPositionPct = Math.max(p.maxPositionPct, 0.4);
+    p.maxSectorPct = Math.max(p.maxSectorPct, 0.55);
+    p.maxPositions = Math.min(p.maxPositions, 3);
+    p.minCashPct = Math.min(p.minCashPct, 0.02);
+    p.minAdvRs = Math.min(p.minAdvRs, 2_000_000);
+    p.minPrice = Math.min(p.minPrice || 15, 10);
+    p.maxOpenRiskPct = Math.max(p.maxOpenRiskPct, 0.12);
+  } else if (cap <= 75_000) {
+    p.minPositionValue = Math.min(p.minPositionValue, 3_000);
+    p.minTicketValue = Math.min(p.minTicketValue || 200, 500);
+    p.maxPositionPct = Math.max(p.maxPositionPct, 0.28);
+    p.maxPositions = Math.min(p.maxPositions, 5);
+    p.minAdvRs = Math.min(p.minAdvRs, 5_000_000);
+  }
+  return p;
+}
+
 module.exports = {
   HORIZONS,
   HORIZON_PRESETS,
@@ -378,5 +409,6 @@ module.exports = {
   stableStringify,
   presetById,
   paramsFromPreset,
+  scaleParamsForCapital,
   deepMerge,
 };
