@@ -197,9 +197,17 @@ function analyzeEntry({ f, score, elig, regime, params, sector, horizonPresets, 
         note: `Weekly momentum rank — relative strength vs NIFTY ${pctText(f.rs.vsIndex3m)}, 3M ${pctText(f.ret.m3)}`,
       };
     }
-    const strong = score.total >= params.strongScore && regime.regime === 'BULLISH';
-    status = strong ? 'STRONG_BUY' : 'BUY';
-    headline = `${status.replace('_', ' ')} - weekly rank entry confirmed with trend, momentum and regime support`;
+    if (f.tech.extensionAtr > params.climaxExtensionAtr || f.tech.rsi > params.climaxRsi) {
+      status = 'WATCH';
+      waitFor.push(
+        `Weekly rank is extended (${round(f.tech.extensionAtr, 1)} ATR, RSI ${round(f.tech.rsi, 0)}); wait for a pullback toward the ${params.emaPeriods[0]}-EMA`,
+      );
+      headline = 'WAIT FOR BETTER ENTRY - weekly leader is too extended to buy this week';
+    } else {
+      const strong = score.total >= params.strongScore && regime.regime === 'BULLISH';
+      status = strong ? 'STRONG_BUY' : 'BUY';
+      headline = `${status.replace('_', ' ')} - weekly rank entry confirmed with trend, momentum and regime support`;
+    }
   } else if (!setup) {
     status = 'WATCH';
     const ph = f.tech.donchHigh;

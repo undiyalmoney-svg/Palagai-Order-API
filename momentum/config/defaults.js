@@ -383,6 +383,7 @@ function scaleParamsForCapital(params, equity) {
     p.minAdvRs = Math.min(p.minAdvRs, 2_000_000);
     p.minPrice = Math.min(p.minPrice || 15, 10);
     p.maxOpenRiskPct = Math.max(p.maxOpenRiskPct, 0.12);
+    p.replaceMinScoreGain = Math.max(p.replaceMinScoreGain || 12, 18);
   } else if (cap <= 75_000) {
     p.minPositionValue = Math.min(p.minPositionValue, 3_000);
     p.minTicketValue = Math.min(p.minTicketValue || 200, 500);
