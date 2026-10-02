@@ -24,3 +24,6 @@ sr-observations/
 
 # Momentum Portfolio Manager local SQLite store
 data/momentum/
+
+# Charts Protect day lock / open fills (runtime)
+data/charts-protect/

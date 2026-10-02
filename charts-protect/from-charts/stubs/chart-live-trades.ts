@@ -1,0 +1,4 @@
+export const CHART_EXIT_TAG = 'PALAGAI_CHART_EXIT';
+export const CHART_ENTRY_TAG = 'PALAGAI_CHART';
+export const CHART_SL_TAG = 'PALAGAI_CHART_SL';
+export const CHART_TP_TAG = 'PALAGAI_CHART_TP';

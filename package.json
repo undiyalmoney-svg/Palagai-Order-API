@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "test": "node --test --test-timeout=120000 \"momentum/tests/*.test.js\""
+    "test": "node --test --test-timeout=120000 \"momentum/tests/*.test.js\" \"charts-protect/*.test.js\"",
+    "protect:bundle": "node charts-protect/from-charts/build.js"
   },
   "engines": {
     "node": ">=18"
@@ -26,6 +27,7 @@
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
-    "@types/jsonwebtoken": "^9.0.10"
+    "@types/jsonwebtoken": "^9.0.10",
+    "esbuild": "^0.28.2"
   }
 }
