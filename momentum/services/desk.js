@@ -284,6 +284,14 @@ function paperReplay(research, userId, { from, to, capital }) {
   };
 }
 
+function withTimeout(promise, ms, label) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 async function deskOverview(momentum, userId, now = new Date()) {
   const cfg = momentum.config(userId);
   const asOf = lastCompletedTradingDate(now);
@@ -296,7 +304,7 @@ async function deskOverview(momentum, userId, now = new Date()) {
   let holdingsSync = null;
   if (momentum.sessions.authorization(userId)) {
     try {
-      const preview = await momentum.previewCncHoldings(userId);
+      const preview = await withTimeout(momentum.previewCncHoldings(userId), 4000, 'Kite CNC');
       holdingsSync = {
         ok: true,
         error: null,
@@ -375,7 +383,7 @@ async function syncHoldingsForLiveScan(momentum, userId, live) {
     }
   }
   try {
-    const preview = await momentum.previewCncHoldings(userId);
+    const preview = await withTimeout(momentum.previewCncHoldings(userId), 12000, 'Kite CNC');
     return {
       ok: true,
       error: null,
