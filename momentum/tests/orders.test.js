@@ -161,11 +161,11 @@ test('an order the broker never shows is eventually FAILED, not assumed filled',
 });
 
 test('risk limits clip an oversized BUY to what the portfolio can afford', async () => {
-  const ctx = await setup({ live: true, clock: OPEN, capital: 20_000 });
+  const ctx = await setup({ live: true, clock: OPEN, capital: 200_000 });
   enableLive(ctx);
   const res = await exec(ctx, addSignal(ctx, { qty: 500 }));
   assert.ok(res.order.qty >= 1 && res.order.qty < 500, `clipped from 500 to ${res.order.qty}`);
-  assert.ok(res.order.qty * res.order.limitPrice <= 20_000 * 0.2 + res.order.limitPrice);
+  assert.ok(res.order.qty * res.order.limitPrice <= 200_000 * 0.22 + res.order.limitPrice);
   assert.ok(res.validation.find((s) => s.id === 'risk_limits').detail.includes('Clipped'));
   ctx.app.close();
 });

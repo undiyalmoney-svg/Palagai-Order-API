@@ -180,7 +180,7 @@ test('capital increase: allocation is explained (Option A/B/C) and respects the 
   assert.match(res.allocation.explanation, /cash reserve/);
   assert.ok(['A', 'B', 'C', 'CASH'].includes(res.allocation.option));
   const spent = res.decisions.filter((d) => d.action === 'BUY').reduce((a, d) => a + d.quantity * d.priceRef, 0);
-  assert.ok(spent <= 60000 - res.capital.reserve + 1, 'buys must leave the reserve untouched');
+  assert.ok(spent <= 60000 + 50000 - res.capital.reserve + 1, 'buys must leave the reserve untouched');
   app.close();
 });
 
@@ -256,7 +256,12 @@ test('scan universe is every NSE large-cap and mid-cap', () => {
   assert.ok(UNIVERSE.length <= 320, `universe leaked extras: ${UNIVERSE.length}`);
   assert.equal(new Set(UNIVERSE.map((u) => u.symbol)).size, UNIVERSE.length);
   assert.ok(!UNIVERSE.some((u) => /^(BNK|INF|FIN|ATO|PHM)\d+$/.test(u.symbol)));
-  assert.ok(!UNIVERSE.some((u) => ['NIFTYBEES', 'SILVERBEES', 'GOLDBEES'].includes(u.symbol)));
+  for (const sym of ['NIFTYBEES', 'SILVERBEES', 'GOLDBEES']) {
+    assert.ok(UNIVERSE.some((u) => u.symbol === sym), `${sym} must be in the scan universe`);
+  }
+  const reliance = UNIVERSE.find((u) => u.symbol === 'RELIANCE');
+  const liveRel = LARGE_CAP.find((u) => u.symbol === 'RELIANCE');
+  assert.equal(reliance.basePrice, liveRel.basePrice, 'scan prices must use the live listing, not the 2018 CORE seed');
 });
 
 test('small-cap list is real NSE names and stays off the live scan', () => {

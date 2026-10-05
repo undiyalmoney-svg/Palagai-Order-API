@@ -10,9 +10,20 @@
  * Small-caps (Nifty Smallcap 250) were papered in
  * `research/compare-smallcap.js` and left off: a ₹10k book only holds 2–3
  * names, and realistic small-cap spreads/vol steal those slots.
+ *
+ * Gold / Silver / Nifty BeES sit in the same scan so Dual Momentum can buy
+ * them when they lead (they are no longer display-only Kite leftovers).
  */
 
 const { LARGE_CAP, MID_CAP } = require('./universe-large-mid');
+
+const LIVE_LISTING = new Map([...LARGE_CAP, ...MID_CAP].map((u) => [u.symbol, u]));
+
+function listedPrice(u) {
+  const live = LIVE_LISTING.get(u.symbol);
+  if (!live) return u;
+  return { ...u, basePrice: live.basePrice, name: live.name || u.name, sector: live.sector || u.sector };
+}
 
 const BENCHMARK = {
   symbol: 'NIFTY50',
@@ -23,7 +34,7 @@ const BENCHMARK = {
   basePrice: 10500,
 };
 
-const CORE_UNIVERSE = [
+const CORE_UNIVERSE_RAW = [
   { symbol: 'RELIANCE', name: 'Reliance Industries', sector: 'ENERGY', basePrice: 1000 },
   { symbol: 'ONGC', name: 'Oil & Natural Gas Corp', sector: 'ENERGY', basePrice: 150 },
   { symbol: 'COALINDIA', name: 'Coal India', sector: 'ENERGY', basePrice: 200 },
@@ -76,9 +87,20 @@ const CORE_UNIVERSE = [
   { symbol: 'TRENT', name: 'Trent', sector: 'CONSUMER', basePrice: 450 },
 ];
 
+/** Prefer Nifty 100 / Midcap 150 listing prices over the original CORE seed (those were 2018-era). */
+const CORE_UNIVERSE = CORE_UNIVERSE_RAW.map(listedPrice);
+
+/** Scan + buy these when they rank. Live still shows qty if already held at Kite. */
+const BOOK_ETFS = [
+  { symbol: 'NIFTYBEES', name: 'Nippon India Nifty BeES', sector: 'INDEX', basePrice: 282 },
+  { symbol: 'SILVERBEES', name: 'Nippon India Silver BeES', sector: 'COMMODITY', basePrice: 118 },
+  { symbol: 'GOLDBEES', name: 'Nippon India Gold BeES', sector: 'COMMODITY', basePrice: 86 },
+];
+const BOOK_ETF_BY_SYMBOL = new Map(BOOK_ETFS.map((u) => [u.symbol, u]));
+
 const UNIVERSE = [];
 const seen = new Set();
-for (const u of [...CORE_UNIVERSE, ...LARGE_CAP, ...MID_CAP]) {
+for (const u of [...LARGE_CAP, ...MID_CAP, ...CORE_UNIVERSE, ...BOOK_ETFS]) {
   if (seen.has(u.symbol)) continue;
   seen.add(u.symbol);
   UNIVERSE.push(u);
@@ -90,14 +112,6 @@ const UNIVERSE_BY_SYMBOL = new Map(UNIVERSE.map((u) => [u.symbol, u]));
 function listUniverse() {
   return UNIVERSE.map((u) => ({ symbol: u.symbol, name: u.name, sector: u.sector }));
 }
-
-/** Held at Kite for many books. Never a weekly momentum *buy*, but Live must show qty and a sell price. */
-const BOOK_ETFS = [
-  { symbol: 'NIFTYBEES', name: 'Nifty BeES' },
-  { symbol: 'SILVERBEES', name: 'Silver BeES' },
-  { symbol: 'GOLDBEES', name: 'Gold BeES' },
-];
-const BOOK_ETF_BY_SYMBOL = new Map(BOOK_ETFS.map((u) => [u.symbol, u]));
 
 function isBookEtf(symbol) {
   return BOOK_ETF_BY_SYMBOL.has(String(symbol || '').toUpperCase());

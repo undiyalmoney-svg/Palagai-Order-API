@@ -245,6 +245,25 @@ const STRATEGY_PRESETS = [
       maxPositionPct: 0.24,
     },
   },
+  {
+    id: 'momentum-leaders-bees',
+    name: 'Dual Momentum - Leaders + BeES',
+    description:
+      'Same weekly book, plus Gold / Silver / Nifty BeES. Ranks 1–6 month leaders (not only 12-1) so commodity runs can sit in the 2–4 name sleeve. Cash when Nifty’s trend is broken. Stronger months than classic 12-1; not a promise of 15% every month.',
+    overrides: {
+      horizon: 'WEEKLY',
+      minScore: 46,
+      strongScore: 62,
+      maxPositions: 4,
+      maxPositionPct: 0.32,
+      maxSectorPct: 0.55,
+      riskPerTradePct: 0.02,
+      minHistoryBars: 126,
+      momentumWeights: { ret21: 0.2, ret63: 0.4, ret126: 0.25, ret231: 0.15 },
+      stopAtrMult: 4.0,
+      trailAtrMult: 5.0,
+    },
+  },
 ];
 
 function isPlainObject(v) {

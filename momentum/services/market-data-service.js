@@ -107,14 +107,34 @@ class MarketDataService {
     return this.store.priceStats().last;
   }
 
-  /** Latest tradable price: live quote if fresh, else last stored close. */
+  /**
+   * Latest tradable price. Real Kite LTP wins; simulated intraday ticks do not
+   * replace the last daily close (those ticks were showing as "the" stock price).
+   */
   priceFor(symbol) {
     const q = this.store.getQuote(symbol);
-    if (q && Number.isFinite(q.last)) return { price: q.last, source: 'quote', ts: q.ts, simulated: q.simulated };
     const panel = this.loadPanel();
     const d = panel.data.get(symbol);
-    if (!d) return null;
-    for (let i = panel.lastIndex; i >= 0; i -= 1) if (Number.isFinite(d.close[i])) return { price: d.close[i], source: 'close', ts: panel.dates[i], simulated: false };
+    let close = null;
+    let closeTs = null;
+    if (d) {
+      for (let i = panel.lastIndex; i >= 0; i -= 1) {
+        if (Number.isFinite(d.close[i])) {
+          close = d.close[i];
+          closeTs = panel.dates[i];
+          break;
+        }
+      }
+    }
+    if (q && Number.isFinite(q.last) && !q.simulated) {
+      return { price: q.last, source: 'quote', ts: q.ts, simulated: false };
+    }
+    if (close != null) {
+      return { price: close, source: 'close', ts: closeTs, simulated: !!(q && q.simulated) };
+    }
+    if (q && Number.isFinite(q.last)) {
+      return { price: q.last, source: 'quote', ts: q.ts, simulated: !!q.simulated };
+    }
     return null;
   }
 }

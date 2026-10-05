@@ -15,6 +15,9 @@ const { ServiceError } = require('./momentum-service');
 const { suggestedLimitPrice } = require('../execution/limit-price');
 const { inr } = require('../utils/math');
 const { isBookEtf, BOOK_ETF_BY_SYMBOL } = require('../data/universe');
+const { runBacktest } = require('../backtest/backtester');
+const { computeMetrics } = require('../backtest/metrics');
+const { paramsFromPreset, presetById, resolveParams } = require('../config/defaults');
 
 const SCAN_CLOCK = '16:00 IST';
 const FILL_CLOCK = '09:15 IST';
@@ -245,29 +248,134 @@ function groupActions(decisions, signalByKey, extra = {}) {
   };
 }
 
-function defaultPaperRange(panel, from, to) {
-  const last = panel.dates[panel.lastIndex] || to;
-  const hist = Math.min(panel.lastIndex, 260);
-  const first = panel.dates[hist] || from;
-  let end = last;
-  if (to) {
-    const idx = panel.indexOnOrBefore(to);
-    if (idx >= 0) end = panel.dates[idx];
+function clampToPanel(panel, from, to) {
+  const last = panel.dates[panel.lastIndex];
+  const first = panel.dates[0];
+  const endIdx = panel.indexOnOrBefore(to || last);
+  const end = endIdx >= 0 ? panel.dates[endIdx] : last;
+  let startIdx = panel.indexOnOrBefore(from || first);
+  if (startIdx < 0) startIdx = 0;
+  let start = panel.dates[startIdx];
+  if (!start || start >= end) {
+    const i = Math.max(0, (endIdx >= 0 ? endIdx : panel.lastIndex) - 1);
+    start = panel.dates[i] || first;
   }
-  let start;
-  if (from) {
-    const idx = panel.indexOnOrBefore(from);
-    start = idx >= 0 ? panel.dates[idx] : first;
-  } else {
-    const idx = panel.indexOnOrBefore(addDays(end, -370));
-    start = idx >= 0 ? panel.dates[Math.max(idx, hist)] : first;
+  return { from: start, to: end };
+}
+
+function isoWeekTradingRange(panel, week) {
+  const days = panel.dates.filter((d) => isoWeekKey(d) === week);
+  if (!days.length) return null;
+  return { from: days[0], to: days[days.length - 1], week };
+}
+
+/**
+ * Paper date filters. Explicit from/to and short windows (last week) are
+ * honoured — we no longer stretch anything under 90 days out to six months.
+ * Short windows still *simulate* with a 12-month warmup so the book is invested.
+ */
+function resolvePaperPeriod(panel, { from, to, period } = {}) {
+  const last = panel.dates[panel.lastIndex];
+  const p = String(period || '').toLowerCase().replace(/-/g, '_');
+  if (p === 'last_week' || p === 'week') {
+    const week = previousIsoWeek(last);
+    const weekRange = isoWeekTradingRange(panel, week);
+    const range = weekRange || clampToPanel(panel, addDays(last, -7), last);
+    return { ...range, period: 'last_week', auto: false, warmupDays: 370, label: `Last week (${weekRange?.week || week})` };
   }
-  if (start && end && daysBetween(start, end) < 90) {
-    const idx = panel.indexOnOrBefore(addDays(end, -180));
-    if (idx >= 0) start = panel.dates[Math.max(idx, hist)];
+  if (p === 'last_year' || p === 'year') {
+    const y = Number(String(last).slice(0, 4)) - 1;
+    const range = clampToPanel(panel, `${y}-01-01`, `${y}-12-31`);
+    return { ...range, period: 'last_year', auto: false, warmupDays: 0, label: `Calendar ${y}` };
   }
-  if (!start || start >= end) start = first;
-  return { from: start, to: end, auto: !from || !to };
+  if (p === 'last_12m' || p === '12m' || p === 'last_12_months') {
+    const range = clampToPanel(panel, addDays(last, -370), last);
+    return { ...range, period: 'last_12m', auto: false, warmupDays: 0, label: 'Last 12 months' };
+  }
+  if (p === 'custom' || from || to) {
+    const range = clampToPanel(panel, from, to || last);
+    const short = daysBetween(range.from, range.to) < 45;
+    return {
+      ...range,
+      period: 'custom',
+      auto: false,
+      warmupDays: short ? 370 : 0,
+      label: `${range.from} → ${range.to}`,
+    };
+  }
+  const range = clampToPanel(panel, addDays(last, -370), last);
+  return { ...range, period: 'last_12m', auto: true, warmupDays: 0, label: 'Last 12 months' };
+}
+
+function defaultPaperRange(panel, from, to, period) {
+  const resolved = resolvePaperPeriod(panel, { from, to, period });
+  return { from: resolved.from, to: resolved.to, auto: resolved.auto, period: resolved.period, label: resolved.label };
+}
+
+function paperPeriodCatalog(panel) {
+  const last = panel.dates[panel.lastIndex];
+  const week = resolvePaperPeriod(panel, { period: 'last_week' });
+  const year = resolvePaperPeriod(panel, { period: 'last_year' });
+  const m12 = resolvePaperPeriod(panel, { period: 'last_12m' });
+  return {
+    last_week: { from: week.from, to: week.to, label: week.label },
+    last_year: { from: year.from, to: year.to, label: year.label },
+    last_12m: { from: m12.from, to: m12.to, label: m12.label },
+    custom: { from: m12.from, to: last, label: 'Custom dates' },
+  };
+}
+
+function windowBacktest(bt, from, to, capital) {
+  const equity = (bt.equity || []).filter((e) => e.date >= from && e.date <= to);
+  const fills = (bt.fills || []).filter((f) => f.date >= from && f.date <= to);
+  const srcEq = equity.length ? equity : bt.equity || [];
+  const metrics = srcEq.length
+    ? computeMetrics({
+        equity: srcEq,
+        roundTrips: (bt.roundTrips || []).filter((t) => !t.exitDate || (t.exitDate >= from && t.exitDate <= to)),
+        fills,
+        costs: (fills || []).reduce((a, f) => a + (Number(f.cost) || 0), 0),
+        slippage: 0,
+        benchmark: (() => {
+          const b = bt.benchmark || [];
+          const full = bt.equity || [];
+          if (!b.length || !full.length) return null;
+          const sliced = [];
+          for (let i = 0; i < full.length; i += 1) {
+            if (full[i].date >= from && full[i].date <= to && Number.isFinite(b[i])) sliced.push(b[i]);
+          }
+          return sliced.length > 1 ? sliced : null;
+        })(),
+        startCapital: srcEq[0]?.equity ?? capital,
+      })
+    : bt.metrics;
+  return {
+    metrics,
+    fills,
+    equity: srcEq,
+    openPositions: bt.openPositions || [],
+    from: srcEq[0]?.date || from,
+    to: srcEq[srcEq.length - 1]?.date || to,
+  };
+}
+
+function paramsForPaper(momentum, userId, strategyId) {
+  const cfg = momentum.config(userId);
+  if (!strategyId) return cfg;
+  const saved = momentum.store.getStrategy(userId, strategyId);
+  if (saved) {
+    return {
+      ...cfg,
+      strategy: { id: saved.id, name: saved.name, description: saved.description || null },
+      params: resolveParams({ ...saved.params, id: saved.id, name: saved.name }),
+    };
+  }
+  const preset = presetById(strategyId);
+  if (preset) {
+    const params = paramsFromPreset(strategyId);
+    return { ...cfg, strategy: { id: preset.id, name: preset.name, description: preset.description }, params };
+  }
+  return cfg;
 }
 
 function signedInr(n) {
@@ -300,13 +408,15 @@ function paperSummary({ capital, closed, open, metrics, from, to }) {
       ? 'A book this small pays the same DP/STT as a larger one. Dual Momentum’s edge is clearer from about ₹25,000. This week’s tickets still work.'
       : null,
   ].filter(Boolean);
+  const started = Number.isFinite(Number(m.startCapital)) ? Number(m.startCapital) : capital;
+  const ended = Number.isFinite(Number(m.endCapital)) ? Number(m.endCapital) : null;
   return {
     headline,
     bullets,
     honestNote:
-      'This is a 4–16 week hold, not a one-week scalp. One week of P&L is noise. Use this 12-month paper as the proof; this week’s cards are the live work.',
-    started: capital,
-    ended: Number.isFinite(Number(m.endCapital)) ? Number(m.endCapital) : null,
+      'This is a 4–16 week hold, not a one-week scalp. One week of P&L is noise unless you also read last 12 months and last year. Strong months happen when leaders (including Gold/Silver/Nifty BeES) run; they are not a 15% every-month guarantee.',
+    started,
+    ended,
     returnPct: Number.isFinite(retPct) ? retPct : null,
     winRatePct: Number.isFinite(winRate) ? winRate : null,
     maxDrawdownPct: Number.isFinite(dd) ? dd : null,
@@ -365,43 +475,56 @@ function thisWeekFromEngine(momentum, userId, capital, extra = {}) {
   };
 }
 
-function paperReplay(research, momentum, userId, { from, to, capital } = {}) {
+function paperReplay(research, momentum, userId, { from, to, capital, period, strategyId } = {}) {
   const cap = Number(capital);
   if (!Number.isFinite(cap) || cap < 10_000) throw new ServiceError('BAD_REQUEST', 'Enter capital of at least ₹10,000');
   const panel = research.marketData.loadPanel();
-  const range = defaultPaperRange(panel, from, to);
-  const bt = research.runBacktest(userId, {
+  const range = resolvePaperPeriod(panel, { from, to, period });
+  const warmIdx = range.warmupDays
+    ? panel.indexOnOrBefore(addDays(range.from, -range.warmupDays))
+    : panel.indexOnOrBefore(range.from);
+  const simFrom = panel.dates[Math.max(0, warmIdx)] || range.from;
+  const cfg = paramsForPaper(momentum, userId, strategyId);
+  const raw = runBacktest({
+    panel,
+    params: cfg.params,
     capital: cap,
-    from: range.from,
+    from: simFrom,
     to: range.to,
-    name: `Paper desk ${range.from} to ${range.to}`,
+    costs: cfg.costs,
+    slippageBps: cfg.slippageBps,
+    maxPriceDeviationPct: cfg.params.maxPriceDeviationPct ?? 0.04,
   });
-  const closed = pairClosedTrades(bt.trades);
-  const open = (bt.extra?.openPositions || []).map((p) => ({
+  const windowed = windowBacktest(raw, range.from, range.to, cap);
+  const closed = pairClosedTrades(raw.fills).filter(
+    (t) => t.exitDate && t.exitDate >= range.from && t.exitDate <= range.to,
+  );
+  const open = (windowed.openPositions || []).map((p) => ({
     symbol: p.symbol,
     qty: p.qty,
     entryDate: p.entryDate,
     entryTime: FILL_CLOCK,
     entryPrice: p.avgPrice,
     lastPrice: p.lastPrice,
-    holdingDays: p.entryDate && bt.extra?.actualTo ? daysBetween(p.entryDate, bt.extra.actualTo) : null,
+    holdingDays: p.entryDate && windowed.to ? daysBetween(p.entryDate, windowed.to) : null,
     pnl: p.unrealizedPnl,
     status: 'HOLDING',
   }));
   const closedPnl = closed.reduce((a, t) => a + (Number(t.pnl) || 0), 0);
   const openPnl = open.reduce((a, t) => a + (Number(t.pnl) || 0), 0);
-  const fromDate = bt.extra?.actualFrom || bt.from;
-  const toDate = bt.extra?.actualTo || bt.to;
-  const totalProfit = Math.round((closedPnl + openPnl) * 100) / 100;
-  const cfg = momentum.config(userId);
+  const fromDate = windowed.from;
+  const toDate = windowed.to;
+  const totalProfit = Math.round((Number(windowed.metrics?.endCapital) - Number(windowed.metrics?.startCapital || cap)) * 100) / 100;
   const lastOf = (symbol) => momentum.marketData.priceFor(symbol)?.price ?? null;
   const rowExtra = { maxDeviationPct: cfg.params.maxPriceDeviationPct ?? 0.04, fillTime: FILL_CLOCK, lastOf };
   const thisWeek = thisWeekFromEngine(momentum, userId, cap, rowExtra);
+  const book = momentum.store.getPortfolio(userId, 'PAPER') || momentum.store.getPortfolio(userId, 'LIVE');
+  const lastWeek = lastWeekPicks(momentum.store, book, toDate);
   const summary = paperSummary({
     capital: cap,
     closed,
     open,
-    metrics: { ...bt.metrics, totalPnl: totalProfit, endCapital: bt.metrics?.endCapital },
+    metrics: { ...windowed.metrics, totalPnl: totalProfit },
     from: fromDate,
     to: toDate,
   });
@@ -409,18 +532,23 @@ function paperReplay(research, momentum, userId, { from, to, capital } = {}) {
     kind: 'PAPER',
     from: fromDate,
     to: toDate,
+    period: range.period,
+    periodLabel: range.label,
     autoRange: range.auto,
     capital: cap,
-    strategy: bt.strategyId,
-    strategyName: cfg.strategy?.name || 'Dual Momentum - Weekly',
+    startCapital: summary.started,
+    endCapital: summary.ended,
+    strategy: cfg.strategy.id,
+    strategyName: cfg.strategy.name || 'Dual Momentum - Weekly',
     fillTime: FILL_CLOCK,
     scanTime: SCAN_CLOCK,
     totalProfit,
     closedProfit: Math.round(closedPnl * 100) / 100,
     openProfit: Math.round(openPnl * 100) / 100,
-    metrics: bt.metrics,
+    metrics: windowed.metrics,
     summary,
     thisWeek,
+    lastWeek,
     nextAction: nextActionLine(buildSchedule(cfg.params.horizon), thisWeek),
     closed,
     open,
@@ -535,16 +663,16 @@ async function deskOverview(momentum, userId, now = new Date()) {
       horizon: cfg.params.horizon,
       description:
         cfg.strategy.description ||
-        'Dual Momentum 12-1: buy the strongest NSE large/mid names, sit in cash when Nifty’s trend is broken.',
+        'Dual Momentum 12-1 plus Gold/Silver/Nifty BeES: buy the strongest NSE large/mid names (and BeES when they lead), sit in cash when Nifty’s trend is broken.',
     },
     schedule: buildSchedule(cfg.params.horizon, now),
     paperDefaults: (() => {
       try {
         const panel = momentum.marketData.loadPanel();
         const range = defaultPaperRange(panel);
-        return { capital: 25_000, ...range };
+        return { capital: 25_000, ...range, periods: paperPeriodCatalog(panel) };
       } catch {
-        return { capital: 25_000, from: null, to: null, auto: true };
+        return { capital: 25_000, from: null, to: null, auto: true, period: 'last_12m', periods: null };
       }
     })(),
     lastWeek: lastWeekPicks(momentum.store, book, asOf),
@@ -843,6 +971,8 @@ module.exports = {
   applyCncOverlay,
   suggestedLimitPrice,
   defaultPaperRange,
+  resolvePaperPeriod,
+  paperPeriodCatalog,
   paperSummary,
   liveGuide,
 };

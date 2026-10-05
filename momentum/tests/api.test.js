@@ -173,6 +173,9 @@ test('desk paper replay and live scan return entries, exits and a scan clock', a
   assert.equal(trip.exitTime, '09:15 IST');
   assert.ok(Number.isFinite(trip.holdingDays));
   assert.ok(Number.isFinite(paper.body.totalProfit));
+  assert.ok(Number.isFinite(paper.body.startCapital));
+  assert.ok(Number.isFinite(paper.body.endCapital));
+  assert.equal(paper.body.period, 'custom');
 
   const scan = await s.call('POST', '/desk/scan', { capital: 150000, reset: true, mode: 'LIVE' });
   assert.equal(scan.status, 200);
@@ -263,6 +266,9 @@ test('desk overview is a Dual Momentum product: paper defaults, live guide, Get 
   assert.ok(r.body.paperDefaults.from);
   assert.ok(r.body.paperDefaults.to);
   assert.equal(r.body.paperDefaults.auto, true);
+  assert.ok(r.body.paperDefaults.periods.last_week.from);
+  assert.ok(r.body.paperDefaults.periods.last_year.from);
+  assert.ok(r.body.paperDefaults.periods.last_12m.from);
   assert.ok(Array.isArray(r.body.guide));
   assert.equal(r.body.guide[0].href, '/dashboard/get-token');
   assert.equal(r.body.tokenReady, false);
@@ -289,6 +295,17 @@ test('paper replay without dates uses ~12 months, this week picks, and is not an
   assert.ok(auto.body.autoRange);
   assert.ok(auto.body.thisWeek);
   assert.ok(auto.body.nextAction);
+  assert.ok(auto.body.lastWeek);
+  assert.equal(auto.body.period, 'last_12m');
+  assert.ok(Number.isFinite(auto.body.startCapital));
+  assert.ok(auto.body.endCapital != null);
+
+  const week = await s.call('POST', '/desk/paper', { capital: 25000, period: 'last_week' });
+  assert.equal(week.status, 200);
+  assert.equal(week.body.period, 'last_week');
+  const { daysBetween } = require('../utils/dates');
+  assert.ok(daysBetween(week.body.from, week.body.to) <= 10, `last week window ${week.body.from} → ${week.body.to}`);
+  assert.ok(week.body.lastWeek);
   await s.close();
 });
 

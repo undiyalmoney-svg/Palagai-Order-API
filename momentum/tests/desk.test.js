@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { buildSchedule, pairClosedTrades, previousIsoWeek, lastTradingDayOfIsoWeek } = require('../services/desk');
+const { buildSchedule, pairClosedTrades, previousIsoWeek, lastTradingDayOfIsoWeek, resolvePaperPeriod } = require('../services/desk');
 
 test('weekly buy scan is the last trading day of the ISO week after 16:00 IST', () => {
   const wedMorning = new Date('2026-09-30T04:00:00Z'); // Wed 09:30 IST, before 16:00
@@ -45,4 +45,38 @@ test('pairClosedTrades joins each buy to its later sell', () => {
 
 test('previousIsoWeek is the week before the given date', () => {
   assert.equal(previousIsoWeek('2026-09-30'), '2026-W39');
+});
+
+function fakePanel(from, to) {
+  const { addDays, isTradingDay } = require('../utils/dates');
+  const dates = [];
+  for (let d = from; d <= to; d = addDays(d, 1)) if (isTradingDay(d)) dates.push(d);
+  return {
+    dates,
+    lastIndex: dates.length - 1,
+    indexOnOrBefore(date) {
+      let ans = -1;
+      for (let i = 0; i < dates.length; i += 1) if (dates[i] <= date) ans = i;
+      return ans;
+    },
+  };
+}
+
+test('paper period filters honour last week, last year and custom dates', () => {
+  const panel = fakePanel('2024-01-01', '2026-10-02');
+  const week = resolvePaperPeriod(panel, { period: 'last_week' });
+  assert.equal(week.period, 'last_week');
+  assert.ok(week.to <= panel.dates[panel.lastIndex]);
+  const { daysBetween, isoWeekKey } = require('../utils/dates');
+  assert.ok(daysBetween(week.from, week.to) <= 6, `last week must not be stretched (${week.from} → ${week.to})`);
+  assert.equal(isoWeekKey(week.from), isoWeekKey(week.to));
+
+  const year = resolvePaperPeriod(panel, { period: 'last_year' });
+  assert.equal(year.period, 'last_year');
+  assert.ok(year.from.startsWith('2025-01'));
+  assert.ok(year.to.startsWith('2025-12'));
+
+  const custom = resolvePaperPeriod(panel, { from: '2026-09-01', to: '2026-09-10', period: 'custom' });
+  assert.equal(custom.period, 'custom');
+  assert.ok(daysBetween(custom.from, custom.to) <= 10, `custom dates must stick (${custom.from} → ${custom.to})`);
 });

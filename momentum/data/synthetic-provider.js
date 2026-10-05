@@ -77,6 +77,8 @@ const SECTOR_BETA = {
   UTILITIES: 0.7,
   DEFENCE: 0.95,
   LOGISTICS: 1.05,
+  COMMODITY: 0.25,
+  INDEX: 0.95,
 };
 
 const SECTORS = Object.keys(SECTOR_BETA);
@@ -228,8 +230,9 @@ class SyntheticProvider {
   generateStock(u, dates, marketRet, states, secRet) {
     const rng = makeRng(`${this.seed}:stock:${u.symbol}`);
     const small = this.smallcapPhysics && u.cap === 'SMALL';
+    const commodity = u.sector === 'COMMODITY';
     const beta = (SECTOR_BETA[u.sector] || 1) * (0.85 + 0.3 * rng.rand()) * (small ? 1.15 : 1);
-    const idioSigma = (0.007 + 0.006 * rng.rand()) * (small ? 2.4 : 1);
+    const idioSigma = (0.007 + 0.006 * rng.rand()) * (small ? 2.4 : commodity ? 1.6 : 1);
     const tradedValue = ((4e8 * Math.exp(1.2 * rng.normal()) + 6e7) * (small ? 0.08 : 1));
     const clip = small ? 0.28 : 0.18;
     const gapNoise = small ? 0.012 : 0.003;
@@ -240,7 +243,7 @@ class SyntheticProvider {
     const listed = u.listed || HISTORY_START;
     for (let i = 0; i < dates.length; i += 1) {
       const date = dates[i];
-      alpha = alpha * (1 - 1 / 95) + 0.00006 * rng.normal();
+      alpha = alpha * (1 - 1 / (commodity ? 140 : 95)) + (commodity ? 0.00012 : 0.00006) * rng.normal();
       const zi = rng.normal();
       const zgap = rng.normal();
       const zrange1 = rng.normal();

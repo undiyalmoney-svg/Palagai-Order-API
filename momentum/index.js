@@ -8,7 +8,7 @@ const { ResearchService } = require('./services/research-service');
 const { JobRunner } = require('./jobs/jobs');
 const { SyntheticProvider } = require('./data/synthetic-provider');
 const { KiteProvider } = require('./providers/kite-provider');
-const { CORE_UNIVERSE } = require('./data/universe');
+const { CORE_UNIVERSE, BOOK_ETFS } = require('./data/universe');
 
 /**
  * Composition root. Everything takes its clock, provider and broker from here,
@@ -26,7 +26,10 @@ function createMomentumApp({ dbPath = DEFAULT_PATH, clock = () => new Date(), pr
       const userId = process.env.MOMENTUM_DATA_USER;
       return new KiteProvider({ getAuthorization: async () => (userId ? momentum.sessions.authorization(userId) : null), now: clock });
     }
-    return new SyntheticProvider({ now: clock, universe: coreOnly ? CORE_UNIVERSE : undefined });
+    return new SyntheticProvider({
+      now: clock,
+      universe: coreOnly ? [...CORE_UNIVERSE, ...BOOK_ETFS] : undefined,
+    });
   };
   const marketData = new MarketDataService({ store, providerFor, clock });
   momentum = new MomentumService({ store, marketData, clock, providerFor, brokerOverride });
