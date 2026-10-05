@@ -106,9 +106,14 @@ class JobRunner {
     try {
       if (portfolio.mode === 'LIVE' && this.momentum.sessions.authorization(userId)) {
         try {
-          await this.momentum.syncLiveCash(userId);
+          await this.momentum.importLiveHoldings(userId);
         } catch (err) {
-          this.log(`[momentum] live cash sync failed: ${err.message}`);
+          this.log(`[momentum] live holdings sync failed: ${err.message}`);
+          try {
+            await this.momentum.syncLiveCash(userId);
+          } catch (cashErr) {
+            this.log(`[momentum] live cash sync failed: ${cashErr.message}`);
+          }
         }
       }
       const fresh = this.store.getPortfolioById(portfolio.id);

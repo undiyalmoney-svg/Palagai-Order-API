@@ -312,16 +312,16 @@ class MomentumService {
       const exchange = String(h.exchange || 'NSE').toUpperCase();
       if (!symbol || qty <= 0) continue;
       if (exchange && exchange !== 'NSE' && exchange !== 'BSE') {
-        skipped.push({ symbol, reason: `exchange ${exchange}` });
+        skipped.push({ symbol, qty, avgPrice, lastPrice: Number(h.lastPrice) || avgPrice || 0, reason: `exchange ${exchange}` });
         continue;
       }
       if (!universe.has(symbol)) {
-        skipped.push({ symbol, reason: 'outside momentum universe' });
+        skipped.push({ symbol, qty, avgPrice, lastPrice: Number(h.lastPrice) || avgPrice || 0, reason: 'outside momentum universe' });
         continue;
       }
       const px = avgPrice || this.marketData.priceFor(symbol)?.price || 0;
       if (!px) {
-        skipped.push({ symbol, reason: 'no price' });
+        skipped.push({ symbol, qty, avgPrice, lastPrice: Number(h.lastPrice) || 0, reason: 'no price' });
         continue;
       }
       wanted.set(symbol, { symbol, qty, avgPrice: px });

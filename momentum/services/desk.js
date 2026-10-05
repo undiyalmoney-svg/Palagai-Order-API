@@ -12,6 +12,8 @@ const {
   weekday,
 } = require('../utils/dates');
 const { ServiceError } = require('./momentum-service');
+const { suggestedLimitPrice } = require('../execution/limit-price');
+const { inr } = require('../utils/math');
 
 const SCAN_CLOCK = '16:00 IST';
 const FILL_CLOCK = '09:15 IST';
@@ -153,6 +155,7 @@ function lastWeekPicks(store, portfolio, asOf) {
         name: d.name || d.symbol,
         qty: d.quantity,
         priceRef: d.priceRef,
+        suggestedLimit: suggestedLimitPrice({ side: 'BUY', price: d.priceRef, priceRef: d.priceRef }),
         date: run.asOf,
         action: d.action,
         reason: d.reason,
@@ -162,15 +165,46 @@ function lastWeekPicks(store, portfolio, asOf) {
   return { week, picks };
 }
 
-function rowFromDecision(d, signalId) {
+function fillHint(side, limit, fillTime) {
+  if (limit == null) return null;
+  const px = inr(limit, 2);
+  if (side === 'BUY') {
+    return `Rest a LIMIT buy at ${px} for the next ${fillTime} open (AMO after ${SCAN_CLOCK}). Do not pay more than 4% above last close.`;
+  }
+  if (side === 'SELL') {
+    return `Rest a LIMIT sell at ${px} for the next ${fillTime} open.`;
+  }
+  return null;
+}
+
+function rowFromDecision(d, signalId, extra = {}) {
   const executable = ['BUY', 'SELL', 'EXIT', 'REDUCE', 'ADD'].includes(d.action);
+  const buy = ['BUY', 'STRONG_BUY', 'ADD'].includes(d.action);
+  const sell = ['SELL', 'EXIT', 'REDUCE'].includes(d.action);
+  const pos = extra.position || null;
+  const lastPrice = extra.lastPrice ?? d.priceRef;
+  const qty = d.action === 'HOLD' ? (pos?.qty ?? d.quantity) : d.quantity;
+  const suggestedLimit = buy || sell
+    ? suggestedLimitPrice({
+        side: buy ? 'BUY' : 'SELL',
+        price: buy ? (d.priceRef || lastPrice) : (lastPrice || d.priceRef),
+        priceRef: d.priceRef,
+        maxDeviationPct: extra.maxDeviationPct,
+      })
+    : null;
   return {
     symbol: d.symbol,
     name: d.name || d.symbol,
     sector: d.sector || '',
     action: d.action,
-    qty: d.quantity,
+    qty,
     priceRef: d.priceRef,
+    lastPrice: lastPrice ?? null,
+    avgPrice: pos?.avgPrice ?? null,
+    stopPrice: d.risk?.stopPrice ?? null,
+    suggestedLimit,
+    fillHint: fillHint(buy ? 'BUY' : sell ? 'SELL' : null, suggestedLimit, extra.fillTime || FILL_CLOCK),
+    whyThisPrice: d.explanation?.whyThisPrice || null,
     allocationValue: d.allocationValue,
     reason: d.reason,
     score: d.score,
@@ -179,10 +213,19 @@ function rowFromDecision(d, signalId) {
   };
 }
 
-function groupActions(decisions, signalByKey) {
+function groupActions(decisions, signalByKey, extra = {}) {
+  const posBySymbol = extra.posBySymbol || new Map();
+  const lastOf = extra.lastOf || (() => null);
   const rows = (decisions || [])
     .filter((d) => ['BUY', 'STRONG_BUY', 'ADD', 'HOLD', 'SELL', 'EXIT', 'REDUCE'].includes(d.action))
-    .map((d) => rowFromDecision(d, signalByKey.get(d.decisionKey)));
+    .map((d) =>
+      rowFromDecision(d, signalByKey.get(d.decisionKey), {
+        position: posBySymbol.get(d.symbol) || null,
+        lastPrice: lastOf(d.symbol) ?? d.priceRef,
+        maxDeviationPct: extra.maxDeviationPct,
+        fillTime: extra.fillTime,
+      }),
+    );
   return {
     buy: rows.filter((r) => ['BUY', 'STRONG_BUY', 'ADD'].includes(r.action)),
     hold: rows.filter((r) => r.action === 'HOLD'),
@@ -241,12 +284,70 @@ function deskOverview(momentum, userId, now = new Date()) {
   };
 }
 
-function scanDesk(momentum, userId, { capital, reset = false, mode = 'LIVE' } = {}) {
+async function syncHoldingsForLiveScan(momentum, userId, live) {
+  if (!live) {
+    return {
+      ok: false,
+      error: 'Live book is not enabled, so this scan cannot read your CNC holdings. Connect Token and enable live trading.',
+      imported: [],
+      updated: [],
+      removed: [],
+      skipped: [],
+    };
+  }
+  if (!momentum.sessions.authorization(userId)) {
+    return {
+      ok: false,
+      error: 'No Kite session — Hold/Sell uses the last saved book, not a fresh CNC snapshot. Update the token and run again.',
+      imported: [],
+      updated: [],
+      removed: [],
+      skipped: [],
+    };
+  }
+  try {
+    const imported = await momentum.importLiveHoldings(userId);
+    return {
+      ok: true,
+      error: null,
+      imported: imported.imported,
+      updated: imported.updated,
+      removed: imported.removed,
+      skipped: imported.skipped,
+      cash: imported.cash,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err.message || 'Could not read Kite holdings',
+      imported: [],
+      updated: [],
+      removed: [],
+      skipped: [],
+    };
+  }
+}
+
+function alsoHeldRows(skipped) {
+  return (skipped || []).map((s) => ({
+    symbol: s.symbol,
+    qty: s.qty ?? null,
+    avgPrice: s.avgPrice ?? null,
+    lastPrice: s.lastPrice ?? null,
+    reason: s.reason,
+    suggestion: 'REVIEW',
+    note: 'Held at Kite but not in the large/mid scanner. Keep or sell yourself — the weekly book will not auto-replace this name.',
+  }));
+}
+
+async function scanDesk(momentum, userId, { capital, reset = false, mode = 'LIVE' } = {}) {
   const cap = Number(capital);
   if (!Number.isFinite(cap) || cap < 10_000) throw new ServiceError('BAD_REQUEST', 'Enter capital of at least ₹10,000');
   const wantLive = String(mode).toUpperCase() === 'LIVE';
   const live = momentum.store.getPortfolio(userId, 'LIVE');
   const useMode = wantLive && live ? 'LIVE' : 'PAPER';
+  let holdingsSync = null;
+  if (wantLive) holdingsSync = await syncHoldingsForLiveScan(momentum, userId, live);
   if (useMode === 'PAPER') {
     const existing = momentum.store.getPortfolio(userId, 'PAPER');
     if (!existing || reset) momentum.initPaper(userId, cap, { reset: !!existing });
@@ -255,9 +356,17 @@ function scanDesk(momentum, userId, { capital, reset = false, mode = 'LIVE' } = 
   }
   const r = momentum.runDecision({ userId, mode: useMode, kind: 'MANUAL', forceReview: true });
   const signalByKey = new Map((r.signals || []).map((s) => [s.decisionKey, s.id]));
-  const grouped = groupActions(r.result.decisions, signalByKey);
-  const schedule = buildSchedule(momentum.config(userId).params.horizon);
+  const cfg = momentum.config(userId);
   const book = momentum.store.getPortfolio(userId, useMode);
+  const posBySymbol = new Map((book ? momentum.store.listPositions(book.id) : []).map((p) => [p.symbol, p]));
+  const lastOf = (symbol) => momentum.marketData.priceFor(symbol)?.price ?? null;
+  const grouped = groupActions(r.result.decisions, signalByKey, {
+    posBySymbol,
+    lastOf,
+    maxDeviationPct: cfg.params.maxPriceDeviationPct ?? 0.04,
+    fillTime: FILL_CLOCK,
+  });
+  const schedule = buildSchedule(cfg.params.horizon);
   return {
     mode: useMode,
     usedPaperFallback: wantLive && useMode === 'PAPER',
@@ -268,6 +377,8 @@ function scanDesk(momentum, userId, { capital, reset = false, mode = 'LIVE' } = 
     headline: r.result.summary.headline,
     schedule,
     lastWeek: lastWeekPicks(momentum.store, book, r.result.asOf),
+    holdingsSync,
+    alsoHeld: alsoHeldRows(holdingsSync?.skipped),
     ...grouped,
   };
 }
@@ -283,4 +394,6 @@ module.exports = {
   paperReplay,
   deskOverview,
   scanDesk,
+  rowFromDecision,
+  suggestedLimitPrice,
 };

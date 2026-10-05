@@ -180,6 +180,14 @@ test('desk paper replay and live scan return entries, exits and a scan clock', a
   assert.ok(Array.isArray(scan.body.buy));
   assert.ok(Array.isArray(scan.body.hold));
   assert.ok(Array.isArray(scan.body.sell));
+  assert.ok(scan.body.holdingsSync);
+  assert.ok(Array.isArray(scan.body.alsoHeld));
+  for (const row of scan.body.buy) {
+    if (row.qty > 0 && row.priceRef) {
+      assert.ok(row.suggestedLimit > 0);
+      assert.match(row.fillHint || '', /LIMIT buy/);
+    }
+  }
   for (const row of [...scan.body.buy, ...scan.body.sell]) {
     if (row.canExecute) assert.ok(row.signalId > 0 && row.qty >= 0);
   }

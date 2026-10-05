@@ -2,7 +2,8 @@
 
 const { checkBuy } = require('../engine/risk');
 const { drawdownState } = require('../engine/rebalance');
-const { roundTick, round, inr } = require('../utils/math');
+const { round, inr } = require('../utils/math');
+const { suggestedLimitPrice } = require('./limit-price');
 const { istDate, marketStatus, tradingDaysBetween } = require('../utils/dates');
 
 const OPEN_STATUSES = ['QUEUED', 'SUBMITTED', 'OPEN', 'PARTIALLY_FILLED', 'UNKNOWN'];
@@ -228,9 +229,12 @@ class OrderManager {
   }
 
   finalize({ steps, qty, side, price, signal, risk, queue, queueReason, variety }) {
-    const dev = risk.maxPriceDeviationPct ?? 0.04;
-    const limit = side === 'BUY' ? Math.min(price * 1.005, (signal.priceRef || price) * (1 + dev)) : price * 0.995;
-    const limitPrice = roundTick(side === 'BUY' ? Math.max(limit, price) : limit);
+    const limitPrice = suggestedLimitPrice({
+      side,
+      price,
+      priceRef: signal.priceRef,
+      maxDeviationPct: risk.maxPriceDeviationPct ?? 0.04,
+    });
     steps.push({ id: 'order_built', pass: true, detail: `${side} ${qty} ${signal.symbol} LIMIT ${inr(limitPrice, 2)} (${variety})` });
     return { ok: true, steps, qty, limitPrice, queue, queueReason, variety };
   }
