@@ -71,17 +71,26 @@ class KiteTape {
     const failures = [];
     const fetched = [];
     await mapPool(symbols, concurrency, async (symbol) => {
+      const first = this.store.firstPriceDate(symbol);
       const last = this.store.lastPriceDate(symbol);
-      const start = last ? addDays(last, 1) : from;
-      if (start > to) return;
-      try {
-        const rows = await provider.fetchDaily(symbol, start, to);
-        if (rows?.length) {
-          newRows += this.store.upsertPrices(symbol, rows, 'kite');
-          fetched.push(symbol);
+      const ranges = [];
+      if (!first) ranges.push([from, to]);
+      else {
+        if (from < first) ranges.push([from, addDays(first, -1)]);
+        const next = addDays(last, 1);
+        if (next <= to) ranges.push([next, to]);
+      }
+      for (const [start, end] of ranges) {
+        if (start > end) continue;
+        try {
+          const rows = await provider.fetchDaily(symbol, start, end);
+          if (rows?.length) {
+            newRows += this.store.upsertPrices(symbol, rows, 'kite');
+            fetched.push(symbol);
+          }
+        } catch (err) {
+          failures.push({ symbol, error: err.message });
         }
-      } catch (err) {
-        failures.push({ symbol, error: err.message });
       }
     });
     if (newRows) this.invalidate();

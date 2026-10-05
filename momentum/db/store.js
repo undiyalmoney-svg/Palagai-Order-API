@@ -35,6 +35,10 @@ class Store {
     return this.db.prepare('SELECT MAX(date) AS d FROM historical_prices WHERE symbol=?').get(symbol)?.d || null;
   }
 
+  firstPriceDate(symbol) {
+    return this.db.prepare('SELECT MIN(date) AS d FROM historical_prices WHERE symbol=?').get(symbol)?.d || null;
+  }
+
   upsertPrices(symbol, rows, source) {
     if (!rows.length) return 0;
     const st = this.db.prepare(
