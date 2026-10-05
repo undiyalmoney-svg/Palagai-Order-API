@@ -256,6 +256,7 @@ test('scan universe is every NSE large-cap and mid-cap', () => {
   assert.ok(UNIVERSE.length <= 320, `universe leaked extras: ${UNIVERSE.length}`);
   assert.equal(new Set(UNIVERSE.map((u) => u.symbol)).size, UNIVERSE.length);
   assert.ok(!UNIVERSE.some((u) => /^(BNK|INF|FIN|ATO|PHM)\d+$/.test(u.symbol)));
+  assert.ok(!UNIVERSE.some((u) => ['NIFTYBEES', 'SILVERBEES', 'GOLDBEES'].includes(u.symbol)));
 });
 
 test('small-cap list is real NSE names and stays off the live scan', () => {

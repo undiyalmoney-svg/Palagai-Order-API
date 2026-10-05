@@ -91,6 +91,18 @@ function listUniverse() {
   return UNIVERSE.map((u) => ({ symbol: u.symbol, name: u.name, sector: u.sector }));
 }
 
+/** Held at Kite for many books. Never a weekly momentum *buy*, but Live must show qty and a sell price. */
+const BOOK_ETFS = [
+  { symbol: 'NIFTYBEES', name: 'Nifty BeES' },
+  { symbol: 'SILVERBEES', name: 'Silver BeES' },
+  { symbol: 'GOLDBEES', name: 'Gold BeES' },
+];
+const BOOK_ETF_BY_SYMBOL = new Map(BOOK_ETFS.map((u) => [u.symbol, u]));
+
+function isBookEtf(symbol) {
+  return BOOK_ETF_BY_SYMBOL.has(String(symbol || '').toUpperCase());
+}
+
 module.exports = {
   BENCHMARK,
   CORE_UNIVERSE,
@@ -99,5 +111,8 @@ module.exports = {
   UNIVERSE,
   SECTOR_BY_SYMBOL,
   UNIVERSE_BY_SYMBOL,
+  BOOK_ETFS,
+  BOOK_ETF_BY_SYMBOL,
+  isBookEtf,
   listUniverse,
 };

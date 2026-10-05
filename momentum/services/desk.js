@@ -14,6 +14,7 @@ const {
 const { ServiceError } = require('./momentum-service');
 const { suggestedLimitPrice } = require('../execution/limit-price');
 const { inr } = require('../utils/math');
+const { isBookEtf, BOOK_ETF_BY_SYMBOL } = require('../data/universe');
 
 const SCAN_CLOCK = '16:00 IST';
 const FILL_CLOCK = '09:15 IST';
@@ -165,16 +166,26 @@ function lastWeekPicks(store, portfolio, asOf) {
   return { week, picks };
 }
 
-function fillHint(side, limit, fillTime) {
+function fillHint(side, limit, fillTime, { qty, symbol } = {}) {
   if (limit == null) return null;
   const px = inr(limit, 2);
+  const units = Number(qty) > 0 && symbol ? `${qty} of ${symbol} ` : '';
   if (side === 'BUY') {
-    return `Rest a LIMIT buy at ${px} for the next ${fillTime} open (AMO after ${SCAN_CLOCK}). Do not pay more than 4% above last close.`;
+    return `Rest a LIMIT buy ${units}at ${px} for the next ${fillTime} open (AMO after ${SCAN_CLOCK}). Do not pay more than 4% above last close.`;
   }
   if (side === 'SELL') {
-    return `Rest a LIMIT sell at ${px} for the next ${fillTime} open.`;
+    return `Rest a LIMIT sell ${units}at ${px} for the next ${fillTime} open.`;
   }
   return null;
+}
+
+function sellLimitFor(lastPrice, priceRef, maxDeviationPct) {
+  return suggestedLimitPrice({
+    side: 'SELL',
+    price: lastPrice || priceRef,
+    priceRef: priceRef || lastPrice,
+    maxDeviationPct,
+  });
 }
 
 function rowFromDecision(d, signalId, extra = {}) {
@@ -183,15 +194,18 @@ function rowFromDecision(d, signalId, extra = {}) {
   const sell = ['SELL', 'EXIT', 'REDUCE'].includes(d.action);
   const pos = extra.position || null;
   const lastPrice = extra.lastPrice ?? d.priceRef;
-  const qty = d.action === 'HOLD' ? (pos?.qty ?? d.quantity) : d.quantity;
-  const suggestedLimit = buy || sell
+  const qty = Number(d.action === 'HOLD' ? (pos?.qty ?? d.quantity) : d.quantity) || 0;
+  const suggestedBuy = buy
     ? suggestedLimitPrice({
-        side: buy ? 'BUY' : 'SELL',
-        price: buy ? (d.priceRef || lastPrice) : (lastPrice || d.priceRef),
+        side: 'BUY',
+        price: d.priceRef || lastPrice,
         priceRef: d.priceRef,
         maxDeviationPct: extra.maxDeviationPct,
       })
     : null;
+  const suggestedSell = buy ? null : sellLimitFor(lastPrice, d.priceRef, extra.maxDeviationPct);
+  const suggestedLimit = buy ? suggestedBuy : suggestedSell;
+  const hintSide = buy ? 'BUY' : 'SELL';
   return {
     symbol: d.symbol,
     name: d.name || d.symbol,
@@ -203,7 +217,9 @@ function rowFromDecision(d, signalId, extra = {}) {
     avgPrice: pos?.avgPrice ?? null,
     stopPrice: d.risk?.stopPrice ?? null,
     suggestedLimit,
-    fillHint: fillHint(buy ? 'BUY' : sell ? 'SELL' : null, suggestedLimit, extra.fillTime || FILL_CLOCK),
+    suggestedBuy,
+    suggestedSell,
+    fillHint: fillHint(hintSide, suggestedLimit, extra.fillTime || FILL_CLOCK, { qty, symbol: d.symbol }),
     whyThisPrice: d.explanation?.whyThisPrice || null,
     allocationValue: d.allocationValue,
     reason: d.reason,
@@ -328,16 +344,63 @@ async function syncHoldingsForLiveScan(momentum, userId, live) {
   }
 }
 
-function alsoHeldRows(skipped) {
-  return (skipped || []).map((s) => ({
-    symbol: s.symbol,
-    qty: s.qty ?? null,
-    avgPrice: s.avgPrice ?? null,
-    lastPrice: s.lastPrice ?? null,
-    reason: s.reason,
-    suggestion: 'REVIEW',
-    note: 'Held at Kite but not in the large/mid scanner. Keep or sell yourself — the weekly book will not auto-replace this name.',
-  }));
+function alsoHeldRows(skipped, extra = {}) {
+  return (skipped || [])
+    .filter((s) => !isBookEtf(s.symbol))
+    .map((s) => {
+      const last = s.lastPrice || s.avgPrice || null;
+      const qty = Number(s.qty) || 0;
+      const suggestedSell = sellLimitFor(last, last, extra.maxDeviationPct);
+      return {
+        symbol: s.symbol,
+        name: s.symbol,
+        qty,
+        avgPrice: s.avgPrice ?? null,
+        lastPrice: last,
+        suggestedSell,
+        suggestedLimit: suggestedSell,
+        fillHint: fillHint('SELL', suggestedSell, extra.fillTime || FILL_CLOCK, { qty, symbol: s.symbol }),
+        reason: s.reason,
+        suggestion: 'REVIEW',
+        note: 'Held at Kite but not in the large/mid scanner. Keep or sell yourself — the weekly book will not auto-replace this name.',
+      };
+    });
+}
+
+function bookEtfHoldRows(skipped, extra = {}) {
+  const seen = new Set();
+  const rows = [];
+  for (const s of skipped || []) {
+    const symbol = String(s.symbol || '').toUpperCase();
+    if (!isBookEtf(symbol) || seen.has(symbol)) continue;
+    seen.add(symbol);
+    const meta = BOOK_ETF_BY_SYMBOL.get(symbol);
+    const last = s.lastPrice || s.avgPrice || null;
+    const qty = Number(s.qty) || 0;
+    const suggestedSell = sellLimitFor(last, last, extra.maxDeviationPct);
+    rows.push({
+      symbol,
+      name: meta?.name || symbol,
+      sector: 'ETF',
+      action: 'HOLD',
+      qty,
+      priceRef: last,
+      lastPrice: last,
+      avgPrice: s.avgPrice ?? null,
+      stopPrice: null,
+      suggestedLimit: suggestedSell,
+      suggestedBuy: null,
+      suggestedSell,
+      fillHint: fillHint('SELL', suggestedSell, extra.fillTime || FILL_CLOCK, { qty, symbol }),
+      whyThisPrice: null,
+      allocationValue: last && qty ? last * qty : 0,
+      reason: `${meta?.name || symbol} is in your Kite book (qty ${qty}). Not a weekly momentum pick — keep unless you want the cash.`,
+      score: null,
+      signalId: null,
+      canExecute: false,
+    });
+  }
+  return rows;
 }
 
 async function scanDesk(momentum, userId, { capital, reset = false, mode = 'LIVE' } = {}) {
@@ -367,6 +430,12 @@ async function scanDesk(momentum, userId, { capital, reset = false, mode = 'LIVE
     fillTime: FILL_CLOCK,
   });
   const schedule = buildSchedule(cfg.params.horizon);
+  const rowExtra = { maxDeviationPct: cfg.params.maxPriceDeviationPct ?? 0.04, fillTime: FILL_CLOCK };
+  const etfHolds = bookEtfHoldRows(holdingsSync?.skipped, rowExtra);
+  const holdSymbols = new Set(grouped.hold.map((h) => h.symbol));
+  for (const row of etfHolds) {
+    if (!holdSymbols.has(row.symbol)) grouped.hold.push(row);
+  }
   return {
     mode: useMode,
     usedPaperFallback: wantLive && useMode === 'PAPER',
@@ -378,7 +447,7 @@ async function scanDesk(momentum, userId, { capital, reset = false, mode = 'LIVE
     schedule,
     lastWeek: lastWeekPicks(momentum.store, book, r.result.asOf),
     holdingsSync,
-    alsoHeld: alsoHeldRows(holdingsSync?.skipped),
+    alsoHeld: alsoHeldRows(holdingsSync?.skipped, rowExtra),
     ...grouped,
   };
 }
@@ -395,5 +464,6 @@ module.exports = {
   deskOverview,
   scanDesk,
   rowFromDecision,
+  bookEtfHoldRows,
   suggestedLimitPrice,
 };
