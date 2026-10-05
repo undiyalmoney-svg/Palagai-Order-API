@@ -11,23 +11,17 @@ const { pctText } = require('./scoring');
 
 function explainBuy({ symbol, entry, score, f, regime, params, sector, sizing, rank, universeSize, kind, trigger }) {
   const risk = entry.risk;
-  const topComponents = Object.entries(score.components)
-    .sort((a, b) => b[1].contribution - a[1].contribution)
-    .slice(0, 3)
-    .map(([k, v]) => `${k.replace(/([A-Z])/g, ' $1').toLowerCase()} ${v.score}`);
   const whyBuy =
     kind === 'ADD'
-      ? `${symbol} is already held, its thesis is intact and it is below its target weight, so part of the new capital tops it up.`
-      : `${symbol} ranks #${rank} of ${universeSize} in the universe with a composite momentum score of ${score.total}/100 (strongest components: ${topComponents.join(', ')}). ${
+      ? `${symbol} is already held, Dual Momentum is intact and it is below its target weight, so spare cash tops it up.`
+      : `${symbol} ranks #${rank} of ${universeSize} on Dual Momentum 12-1 (12-month return skipping last month). Score ${score.total}/100. ${
           trigger === 'REPLACEMENT' ? 'It replaces a weaker holding. ' : ''
-        }Trend, momentum and relative strength all pass the entry rules.`;
-  const whyNow = `${entry.headline}. ${entry.setup !== 'NONE' ? `Setup: ${entry.setup.toLowerCase()}. ` : ''}Market regime is ${regime.regime} (score ${regime.score}/100), which permits new purchases${
-    regime.policy.scoreBonus ? ` with a ${regime.policy.scoreBonus}-point score premium` : ''
-  }.`;
+        }It beats NIFTY on 12-1 and the index absolute-momentum gate is on.`;
+  const whyNow = `${entry.headline}. Market regime is ${regime.regime} (score ${regime.score}/100). Dual Momentum only buys when Nifty’s own trend is alive.`;
   const whyThisStock = [
-    `3M return ${pctText(f.ret.m3)}, 6M ${pctText(f.ret.m6)}; ${pctText(f.rs.vsIndex3m)} vs NIFTY over 3M`,
-    f.trend.stack ? `${params.emaPeriods.join('/')} EMAs fully stacked` : `${f.trend.stackCount}/3 EMA pairs aligned`,
-    `ADX ${round(f.tech.adx, 0)}, RSI ${round(f.tech.rsi, 0)}, volume ${round(f.flow.rel, 2)}x average`,
+    `12-1 return ${pctText(f.ret.m12x1)} (${pctText(f.rs.vsIndex12x1)} vs NIFTY)`,
+    `3M ${pctText(f.ret.m3)}, 6M ${pctText(f.ret.m6)}`,
+    f.trend.aboveMid ? `Price above the ${params.emaPeriods[1]}-EMA` : `${f.trend.stackCount}/3 EMA pairs aligned`,
     sector && Number.isFinite(sector.ret3m) ? `sector ${pctText(sector.ret3m)} over 3M` : null,
   ]
     .filter(Boolean)

@@ -84,10 +84,10 @@ function analyzeExit({ position, f, score, rank, rankCutoff, regime, params, sec
   const scoreWeak = score.total < params.holdScore;
   const scoreSevere = score.total < params.sellScore;
   addThesis('score', 'Composite score above hold level', !scoreWeak, `Score ${score.total} (hold >= ${params.holdScore}, sell < ${params.sellScore})`);
-  const momentumFade = f.ret.m3 < 0;
-  addThesis('momentum', 'Momentum positive', !momentumFade, `3M ${pctText(f.ret.m3)}, 1M ${pctText(f.ret.m1)}`);
-  const rsBad = f.rs.vsIndex3m <= params.rsDeteriorationPct && f.rs.vsIndex1m < 0;
-  addThesis('relativeStrength', 'Relative strength holding', !rsBad, `3M vs NIFTY ${pctText(f.rs.vsIndex3m)}, 1M vs NIFTY ${pctText(f.rs.vsIndex1m)}`);
+  const momentumFade = Number.isFinite(f.ret.m12x1) ? f.ret.m12x1 < 0 : f.ret.m3 < 0;
+  addThesis('momentum', '12-1 Dual Momentum positive', !momentumFade, `12-1 ${pctText(f.ret.m12x1)}, 3M ${pctText(f.ret.m3)}`);
+  const rsBad = (Number.isFinite(f.rs.vsIndex12x1) ? f.rs.vsIndex12x1 : f.rs.vsIndex3m) <= params.rsDeteriorationPct && f.rs.vsIndex1m < 0;
+  addThesis('relativeStrength', 'Still beating NIFTY on 12-1', !rsBad, `12-1 vs NIFTY ${pctText(f.rs.vsIndex12x1)}, 1M vs NIFTY ${pctText(f.rs.vsIndex1m)}`);
   const distribution = f.flow.upDown < 0.7 && f.flow.rel > 1.2 && f.ret.d1 < 0;
   addThesis('volume', 'No distribution selling', !distribution, `Up/down volume ${round(f.flow.upDown, 2)}, relative volume ${round(f.flow.rel, 2)}x`);
   const marketBad = regime.regime === 'BEARISH';
@@ -146,36 +146,31 @@ function analyzeExit({ position, f, score, rank, rankCutoff, regime, params, sec
   if (scoreWeak) invalid.push('score');
   if (momentumFade) invalid.push('momentum');
   if (rsBad) invalid.push('relativeStrength');
-  if (distribution) invalid.push('volume');
-  if (sectorBad) invalid.push('sector');
   if (rankBad) invalid.push('rank');
 
-  const climax = f.tech.extensionAtr >= params.climaxExtensionAtr && f.tech.rsi >= params.climaxRsi;
   const failedLabels = thesis.filter((t) => !t.ok).map((t) => t.label.toLowerCase());
   const failedText = `failed: ${failedLabels.join(', ')}`;
   const detailLines = thesis.filter((t) => !t.ok).map((t) => `${t.label}: ${t.detail}`);
 
-  const severe = trendBreakSevere || scoreSevere || invalid.length >= 3;
-  const moderate = invalid.length >= 2 || scoreWeak;
+  // Dual Momentum exits: full sell, no partial REDUCE. Soft noise (volume /
+  // sector / one failed check) is not a reason to churn the weekly book.
+  const severe = trendBreakSevere || scoreSevere || momentumFade;
+  const moderate = (trendBreakSoft && rsBad) || (rankBad && scoreWeak);
 
   if (severe || moderate) {
-    if (!isReviewDay) {
+    if (!isReviewDay && !severe) {
       reasons.push(...detailLines);
       warnings.push(`Exit signals flagged (${failedText}); deferred to ${nextReviewLabel || 'the next review'} unless the stop is hit`);
       return done('HOLD', null, 0, `WAIT - thesis weakening (${failedText}); decision at ${nextReviewLabel || 'next review'}`, { timing: 'WAIT' });
     }
-    reasons.push(...detailLines);
-    const trigger = trendBreakSevere || trendBreakSoft ? 'TREND_REVERSAL' : scoreSevere || scoreWeak ? 'MOMENTUM_DETERIORATION' : rsBad ? 'RS_DETERIORATION' : sectorBad ? 'SECTOR_DETERIORATION' : 'THESIS_INVALID';
-    if (severe || position.partials?.reduced) {
-      return done('SELL', trigger, 1, `SELL - investment thesis no longer valid (${failedText})`);
+    if (!isReviewDay && severe && !trendBreakSevere && close > stop.price) {
+      reasons.push(...detailLines);
+      warnings.push(`12-1 faded; deferred to ${nextReviewLabel || 'the next review'} unless the stop is hit`);
+      return done('HOLD', null, 0, `WAIT - Dual Momentum fading; decision at ${nextReviewLabel || 'next review'}`, { timing: 'WAIT' });
     }
-    return done('REDUCE', trigger, params.reduceFraction, `REDUCE - thesis weakening (${failedText}); trimming ${Math.round(params.reduceFraction * 100)}% and re-checking at the next review`);
-  }
-
-  if (climax && !position.partials?.tookProfit) {
-    reasons.push(`Climactic run: ${round(f.tech.extensionAtr, 1)} ATR above ${params.emaPeriods[0]}-EMA with RSI ${round(f.tech.rsi, 0)}`);
-    reasons.push(`Banking part of a ${pctText(gainPct)} gain while the trailing stop protects the rest`);
-    return done('REDUCE', 'TAKE_PROFIT', params.climaxTakeFraction, 'REDUCE - taking partial profit into a climactic move');
+    reasons.push(...detailLines);
+    const trigger = trendBreakSevere || trendBreakSoft ? 'TREND_REVERSAL' : momentumFade ? 'MOMENTUM_DETERIORATION' : scoreSevere || scoreWeak ? 'MOMENTUM_DETERIORATION' : rsBad ? 'RS_DETERIORATION' : 'THESIS_INVALID';
+    return done('SELL', trigger, 1, `SELL - Dual Momentum no longer valid (${failedText})`);
   }
 
   if (invalid.length === 1) {

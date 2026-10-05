@@ -10,7 +10,14 @@ const crypto = require('crypto');
 
 const HORIZONS = ['DAILY', 'WEEKLY', 'MONTHLY'];
 
-/** Per-horizon behaviour: momentum look-back emphasis, review cadence, stops. */
+/**
+ * Per-horizon behaviour.
+ *
+ * Weekly (the product) is Dual Momentum: Jegadeesh–Titman 12-1 relative
+ * strength (12-month return skipping the last month, so we do not buy last
+ * month's reversal) plus Antonacci absolute momentum (stay in cash when Nifty
+ * itself has lost the 12-1 trend). Daily/monthly stay available for research.
+ */
 const HORIZON_PRESETS = {
   DAILY: {
     momentumWeights: { ret1: 0.1, ret5: 0.3, ret21: 0.35, ret63: 0.25 },
@@ -21,20 +28,20 @@ const HORIZON_PRESETS = {
     holdingHint: 'Short-term momentum — every position is re-evaluated every trading day.',
   },
   WEEKLY: {
-    momentumWeights: { ret5: 0.05, ret21: 0.2, ret63: 0.35, ret126: 0.3, ret231: 0.1 },
+    momentumWeights: { ret231: 0.7, ret126: 0.2, ret63: 0.1 },
     reviewEvery: 'WEEKLY',
-    stopAtrMult: 2.5,
-    trailAtrMult: 3.0,
-    expectedHolding: 'roughly 4-16 weeks, held while the thesis stays valid',
-    holdingHint: 'Primary mode — rank weekly, rebalance when required, hold while the thesis is valid.',
+    stopAtrMult: 4.0,
+    trailAtrMult: 5.0,
+    expectedHolding: 'roughly 4-16 weeks, held while Dual Momentum stays valid',
+    holdingHint: 'Dual Momentum — rank by 12-1, sit in cash when Nifty loses the trend, hold winners.',
   },
   MONTHLY: {
-    momentumWeights: { ret63: 0.2, ret126: 0.35, ret231: 0.45 },
+    momentumWeights: { ret63: 0.15, ret126: 0.25, ret231: 0.6 },
     reviewEvery: 'MONTHLY',
-    stopAtrMult: 3.0,
-    trailAtrMult: 4.0,
+    stopAtrMult: 4.0,
+    trailAtrMult: 5.5,
     expectedHolding: 'roughly 3-9 months, held while the long-term thesis stays valid',
-    holdingHint: 'Longer-term momentum — monthly review, strategic allocation, low turnover.',
+    holdingHint: 'Longer-term Dual Momentum — monthly review, cash when absolute momentum fails.',
   },
 };
 
@@ -67,11 +74,11 @@ const REGIME_POLICY = {
     trailMult: 0.8,
   },
   BEARISH: {
-    positionsMult: 0.25,
-    minCashPct: 0.5,
-    allowNewBuys: true,
-    minEntryStatus: 'BUY',
-    sizeMult: 0.5,
+    positionsMult: 0,
+    minCashPct: 1,
+    allowNewBuys: false,
+    minEntryStatus: 'STRONG_BUY',
+    sizeMult: 0,
     scoreBonus: 8,
     trailMult: 0.6,
   },
@@ -79,76 +86,76 @@ const REGIME_POLICY = {
 
 const BASE_PARAMS = {
   id: 'momentum-weekly',
-  name: 'Momentum - Weekly (primary)',
+  name: 'Dual Momentum - Weekly',
   horizon: 'WEEKLY',
 
   emaPeriods: [20, 50, 100, 200],
   breakoutLookback: 20,
 
   weights: {
-    momentum: 0.3,
+    momentum: 0.55,
+    relativeStrength: 0.25,
     trend: 0.2,
-    relativeStrength: 0.2,
-    volume: 0.1,
-    volatility: 0.05,
-    technical: 0.15,
+    volume: 0,
+    volatility: 0,
+    technical: 0,
   },
   momentumWeights: null,
 
-  minScore: 58,
-  strongScore: 70,
-  watchScore: 48,
-  holdScore: 42,
-  sellScore: 32,
+  minScore: 52,
+  strongScore: 68,
+  watchScore: 42,
+  holdScore: 36,
+  sellScore: 22,
   requireAboveLongEma: true,
   rsMin: 0,
 
-  minHistoryBars: 126,
+  minHistoryBars: 252,
   minPrice: 15,
   minAdvRs: 5_000_000,
 
   volBreakoutMult: 1.3,
-  maxExtensionAtr: 3.0,
-  rsiMax: 78,
-  minRewardRisk: 1.5,
+  maxExtensionAtr: 6.0,
+  rsiMax: 92,
+  minRewardRisk: 1.0,
   targetR: 3,
   stopAtrMult: null,
-  minStopPct: 0.03,
-  maxStopPct: 0.15,
+  minStopPct: 0.08,
+  maxStopPct: 0.22,
   pullbackMaxRsi: 62,
   pullbackMinRsi: 35,
   breakoutFreshBars: 3,
 
-  beAtR: 1.0,
-  trailStartR: 1.5,
+  beAtR: 1.5,
+  trailStartR: 2.0,
   trailAtrMult: null,
-  trendBreakBars: 2,
-  breakdownRelVol: 1.5,
-  rsDeteriorationPct: -0.05,
-  reduceFraction: 0.5,
-  climaxExtensionAtr: 4.5,
-  climaxRsi: 82,
-  climaxTakeFraction: 1 / 3,
-  sectorWeakPct: -0.03,
+  trendBreakBars: 3,
+  breakdownRelVol: 1.8,
+  rsDeteriorationPct: -0.08,
+  reduceFraction: 1,
+  climaxExtensionAtr: 8,
+  climaxRsi: 95,
+  climaxTakeFraction: 1,
+  sectorWeakPct: -0.05,
 
-  maxPositions: 10,
+  maxPositions: 5,
   minPositionValue: 2_000,
-  maxPositionPct: 0.2,
-  maxSectorPct: 0.35,
-  riskPerTradePct: 0.01,
-  maxOpenRiskPct: 0.08,
-  sizing: 'RISK_BASED',
+  maxPositionPct: 0.22,
+  maxSectorPct: 0.45,
+  riskPerTradePct: 0.015,
+  maxOpenRiskPct: 0.12,
+  sizing: 'EQUAL_WEIGHT',
   minCashPct: 0.05,
   maxAdvParticipation: 0.02,
-  corrLimit: 0.85,
+  corrLimit: 0.9,
   corrLookback: 60,
-  marginalDiversificationMin: 0.1,
-  maxDrawdownHaltPct: 0.2,
+  marginalDiversificationMin: 0.08,
+  maxDrawdownHaltPct: 0.25,
 
-  replaceMinScoreGain: 12,
+  replaceMinScoreGain: 22,
   edgePerScorePointPct: 0.25,
-  replaceCostMultiple: 2,
-  concentrationTolerance: 0.25,
+  replaceCostMultiple: 2.5,
+  concentrationTolerance: 0.3,
   addMinRoomPct: 0.02,
   minTicketValue: 200,
 
@@ -191,50 +198,51 @@ const DEFAULT_RISK_SETTINGS = {
 const STRATEGY_PRESETS = [
   {
     id: 'momentum-weekly',
-    name: 'Momentum - Weekly (primary)',
-    description: 'Weekly scan and rank, hold while the thesis is valid, protective stops checked daily.',
+    name: 'Dual Momentum - Weekly',
+    description:
+      'Buy the NSE large/mid names with the strongest 12-month return (skip last month). Equal-weight 2–5 stocks. Sit in cash when Nifty itself loses the 12-1 trend. Hold winners; sell when rank or absolute momentum fails.',
     overrides: { horizon: 'WEEKLY' },
   },
   {
     id: 'momentum-daily',
     name: 'Momentum - Daily (short-term)',
     description: 'Short-term momentum: entries and exits evaluated every day with tighter stops.',
-    overrides: { horizon: 'DAILY', minScore: 62, maxPositions: 8 },
+    overrides: { horizon: 'DAILY', minScore: 62, maxPositions: 8, minHistoryBars: 126, sizing: 'RISK_BASED' },
   },
   {
     id: 'momentum-monthly',
-    name: 'Momentum - Monthly (long-term)',
-    description: 'Longer-term momentum with monthly review, wide trailing stops and low turnover.',
-    overrides: { horizon: 'MONTHLY', minScore: 58, maxPositions: 12 },
+    name: 'Dual Momentum - Monthly',
+    description: 'Same 12-1 Dual Momentum, reviewed once a month, fewer trades.',
+    overrides: { horizon: 'MONTHLY', minScore: 52, maxPositions: 5 },
   },
   {
     id: 'momentum-conservative',
-    name: 'Momentum - Conservative',
-    description: 'Higher score bar, fewer positions, smaller risk per trade, tighter stops.',
+    name: 'Dual Momentum - Conservative',
+    description: 'Higher 12-1 bar, 3 names, more cash when Nifty is messy.',
     overrides: {
       horizon: 'WEEKLY',
-      minScore: 68,
-      strongScore: 78,
-      maxPositions: 7,
-      riskPerTradePct: 0.0075,
-      stopAtrMult: 2.0,
-      trailAtrMult: 2.5,
-      maxPositionPct: 0.18,
+      minScore: 60,
+      strongScore: 74,
+      maxPositions: 3,
+      riskPerTradePct: 0.01,
+      stopAtrMult: 3.5,
+      trailAtrMult: 4.5,
+      maxPositionPct: 0.28,
     },
   },
   {
     id: 'momentum-aggressive',
-    name: 'Momentum - Aggressive',
-    description: 'Lower score bar, more positions, wider stops to ride trends longer.',
+    name: 'Dual Momentum - Aggressive',
+    description: 'Slightly lower bar, up to 7 names, still cash when absolute momentum fails.',
     overrides: {
       horizon: 'WEEKLY',
-      minScore: 54,
-      strongScore: 68,
-      maxPositions: 12,
-      riskPerTradePct: 0.0125,
-      stopAtrMult: 3.0,
-      trailAtrMult: 3.75,
-      maxPositionPct: 0.22,
+      minScore: 48,
+      strongScore: 64,
+      maxPositions: 7,
+      riskPerTradePct: 0.018,
+      stopAtrMult: 4.5,
+      trailAtrMult: 5.5,
+      maxPositionPct: 0.24,
     },
   },
 ];
@@ -281,25 +289,26 @@ function resolveParams(overrides = {}) {
     p.momentumWeights = { ...preset.momentumWeights };
   }
 
-  p.minScore = num(p.minScore, 58, 30, 95);
-  p.strongScore = num(p.strongScore, 70, p.minScore, 99);
-  p.watchScore = num(p.watchScore, 48, 10, p.minScore);
-  p.holdScore = num(p.holdScore, 42, 5, p.minScore);
-  p.sellScore = num(p.sellScore, 32, 0, p.holdScore);
-  p.maxPositions = Math.round(num(p.maxPositions, 10, 1, 40));
+  p.minScore = num(p.minScore, 52, 30, 95);
+  p.strongScore = num(p.strongScore, 68, p.minScore, 99);
+  p.watchScore = num(p.watchScore, 42, 10, p.minScore);
+  p.holdScore = num(p.holdScore, 36, 5, p.minScore);
+  p.sellScore = num(p.sellScore, 22, 0, p.holdScore);
+  p.maxPositions = Math.round(num(p.maxPositions, 5, 1, 40));
   p.minPositionValue = num(p.minPositionValue, 2_000, 200, 10_000_000);
-  p.maxPositionPct = num(p.maxPositionPct, 0.2, 0.03, 1);
-  p.maxSectorPct = num(p.maxSectorPct, 0.35, 0.05, 1);
-  p.riskPerTradePct = num(p.riskPerTradePct, 0.01, 0.001, 0.05);
-  p.maxOpenRiskPct = num(p.maxOpenRiskPct, 0.08, 0.01, 0.4);
+  p.maxPositionPct = num(p.maxPositionPct, 0.22, 0.03, 1);
+  p.maxSectorPct = num(p.maxSectorPct, 0.45, 0.05, 1);
+  p.riskPerTradePct = num(p.riskPerTradePct, 0.015, 0.001, 0.05);
+  p.maxOpenRiskPct = num(p.maxOpenRiskPct, 0.12, 0.01, 0.4);
   p.minCashPct = num(p.minCashPct, 0.05, 0, 0.9);
   p.minTicketValue = num(p.minTicketValue, 200, 50, 1_000_000);
   p.stopAtrMult = num(p.stopAtrMult, preset.stopAtrMult, 0.5, 8);
   p.trailAtrMult = num(p.trailAtrMult, preset.trailAtrMult, 0.5, 10);
   p.volBreakoutMult = num(p.volBreakoutMult, 1.3, 0.5, 5);
   p.rsMin = num(p.rsMin, 0, -0.5, 0.5);
-  p.maxDrawdownHaltPct = num(p.maxDrawdownHaltPct, 0.2, 0.03, 0.9);
-  if (!['RISK_BASED', 'EQUAL_WEIGHT'].includes(p.sizing)) p.sizing = 'RISK_BASED';
+  p.maxDrawdownHaltPct = num(p.maxDrawdownHaltPct, 0.25, 0.03, 0.9);
+  p.minHistoryBars = Math.round(num(p.minHistoryBars, 252, 60, 400));
+  if (!['RISK_BASED', 'EQUAL_WEIGHT'].includes(p.sizing)) p.sizing = 'EQUAL_WEIGHT';
   if (!Array.isArray(p.emaPeriods) || p.emaPeriods.length !== 4) p.emaPeriods = [...BASE_PARAMS.emaPeriods];
   p.emaPeriods = p.emaPeriods.map((x, i) => Math.round(num(x, BASE_PARAMS.emaPeriods[i], 2, 400)));
   for (let i = 1; i < 4; i += 1) {
@@ -373,17 +382,17 @@ function scaleParamsForCapital(params, equity) {
   const p = { ...params };
   const cap = Number(equity);
   if (!Number.isFinite(cap) || cap <= 0) return p;
-  if (cap <= 25_000) {
+  if (cap < 25_000) {
     p.minPositionValue = Math.min(p.minPositionValue, Math.max(500, Math.round(cap * 0.12)));
     p.minTicketValue = Math.min(p.minTicketValue || 200, 200);
     p.maxPositionPct = Math.max(p.maxPositionPct, 0.4);
     p.maxSectorPct = Math.max(p.maxSectorPct, 0.55);
-    p.maxPositions = Math.min(p.maxPositions, 3);
+    p.maxPositions = Math.min(p.maxPositions, 2);
     p.minCashPct = Math.min(p.minCashPct, 0.02);
     p.minAdvRs = Math.min(p.minAdvRs, 2_000_000);
     p.minPrice = Math.min(p.minPrice || 15, 10);
     p.maxOpenRiskPct = Math.max(p.maxOpenRiskPct, 0.12);
-    p.replaceMinScoreGain = Math.max(p.replaceMinScoreGain || 12, 18);
+    p.replaceMinScoreGain = Math.max(p.replaceMinScoreGain || 18, 22);
   } else if (cap <= 75_000) {
     p.minPositionValue = Math.min(p.minPositionValue, 3_000);
     p.minTicketValue = Math.min(p.minTicketValue || 200, 500);

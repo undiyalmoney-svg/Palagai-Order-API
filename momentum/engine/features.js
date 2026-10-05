@@ -42,6 +42,7 @@ function computeFeatures(ind, i, bench, params) {
     m1: bench ? bench.ret21[i] : NaN,
     m3: bench ? bench.ret63[i] : NaN,
     m6: bench ? bench.ret126[i] : NaN,
+    m12x1: bench ? bench.ret231[i] : NaN,
   };
   const ret = {
     d1: num(ind.ret1[i]),
@@ -77,6 +78,7 @@ function computeFeatures(ind, i, bench, params) {
       vsIndex1m: ret.m1 - benchRet.m1,
       vsIndex3m: ret.m3 - benchRet.m3,
       vsIndex6m: ret.m6 - benchRet.m6,
+      vsIndex12x1: ret.m12x1 - benchRet.m12x1,
     },
     flow: {
       rel: ind.volume[i] / ind.volAvg20Prior[i],

@@ -71,9 +71,11 @@ function relativeStrengthScore(f, ctx, sectorRet3m) {
   const p3 = ctx.percentileRs3(f.rs.vsIndex3m);
   const p6 = ctx.percentileRs6(f.rs.vsIndex6m);
   const abs3 = 50 + 50 * Math.tanh(f.rs.vsIndex3m / 0.1);
+  const abs12 = 50 + 50 * Math.tanh((Number.isFinite(f.rs.vsIndex12x1) ? f.rs.vsIndex12x1 : f.rs.vsIndex3m) / 0.15);
   const secRel = Number.isFinite(sectorRet3m) ? f.ret.m3 - sectorRet3m : 0;
   const secScore = 50 + 50 * Math.tanh(secRel / 0.1);
-  const s = 0.35 * p3 + 0.25 * p6 + 0.2 * abs3 + 0.2 * secScore;
+  const s = 0.45 * abs12 + 0.2 * p3 + 0.15 * p6 + 0.1 * abs3 + 0.1 * secScore;
+  notes.push(`12-1 vs NIFTY ${pctText(f.rs.vsIndex12x1)} (Dual Momentum relative)`);
   notes.push(`3M vs NIFTY ${pctText(f.rs.vsIndex3m)} (percentile ${Math.round(p3)})`);
   notes.push(`6M vs NIFTY ${pctText(f.rs.vsIndex6m)} (percentile ${Math.round(p6)})`);
   if (Number.isFinite(sectorRet3m)) notes.push(`3M vs sector average ${pctText(secRel)}`);

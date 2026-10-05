@@ -185,7 +185,7 @@ test('desk paper replay and live scan return entries, exits and a scan clock', a
   for (const row of scan.body.buy) {
     if (row.qty > 0 && row.priceRef) {
       assert.ok(row.suggestedLimit > 0);
-      assert.match(row.fillHint || '', /LIMIT buy/);
+      assert.match(row.fillHint || '', /LIMIT/);
     }
   }
   for (const row of [...scan.body.buy, ...scan.body.sell]) {
@@ -252,5 +252,54 @@ test('AI narrator answers from stored decisions and cannot invent trades', async
   assert.equal(r.status, 200);
   assert.equal(r.body.source, 'deterministic-narrator');
   assert.ok(r.body.answer);
+  await s.close();
+});
+
+test('desk overview is a Dual Momentum product: paper defaults, live guide, Get Token steps', async () => {
+  const s = await serve();
+  const r = await s.call('GET', '/desk');
+  assert.equal(r.status, 200);
+  assert.match(r.body.strategy.name, /Dual Momentum/i);
+  assert.ok(r.body.paperDefaults.from);
+  assert.ok(r.body.paperDefaults.to);
+  assert.equal(r.body.paperDefaults.auto, true);
+  assert.ok(Array.isArray(r.body.guide));
+  assert.equal(r.body.guide[0].href, '/dashboard/get-token');
+  assert.equal(r.body.tokenReady, false);
+  await s.close();
+});
+
+test('paper replay without dates uses ~12 months, this week picks, and is not an all-loss bull book', async () => {
+  const s = await serve();
+  const bull = await s.call('POST', '/desk/paper', { capital: 100000, from: '2020-08-03', to: '2021-03-31' });
+  assert.equal(bull.status, 200);
+  assert.ok(bull.body.summary?.headline);
+  assert.ok(bull.body.thisWeek);
+  const closed = bull.body.closed || [];
+  const wins = closed.filter((t) => Number(t.pnl) > 0).length;
+  const losses = closed.filter((t) => Number(t.pnl) <= 0).length;
+  assert.ok(
+    bull.body.totalProfit > 0 || wins >= losses,
+    `Dual Momentum should not dump an all-loss paper book on a bull window (profit ${bull.body.totalProfit}, wins ${wins}, losses ${losses})`,
+  );
+
+  const auto = await s.call('POST', '/desk/paper', { capital: 10000 });
+  assert.equal(auto.status, 200);
+  assert.equal(auto.body.kind, 'PAPER');
+  assert.ok(auto.body.autoRange);
+  assert.ok(auto.body.thisWeek);
+  assert.ok(auto.body.nextAction);
+  await s.close();
+});
+
+test('paper scan this week returns Dual Momentum buy cards sized from virtual cash', async () => {
+  const s = await serve();
+  const r = await s.call('POST', '/desk/scan', { capital: 25000, reset: true, mode: 'PAPER' });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.mode, 'PAPER');
+  assert.equal(r.body.product.kind, 'PAPER');
+  assert.ok(r.body.nextAction);
+  const spend = (r.body.buy || []).reduce((a, row) => a + (Number(row.qty) || 0) * (Number(row.priceRef) || 0), 0);
+  assert.ok(spend <= 25000 + 1);
   await s.close();
 });

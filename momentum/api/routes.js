@@ -56,7 +56,7 @@ function createMomentumRouter(app, { auth = siteAuth } = {}) {
 
   router.get('/status', wrap(async (req) => ({ ...(await m.status(req.user.id)), phrases: { live: ENABLE_LIVE_PHRASE, auto: ENABLE_AUTO_PHRASE } })));
   router.get('/desk', wrap((req) => desk.deskOverview(m, req.user.id)));
-  router.post('/desk/paper', wrap((req) => desk.paperReplay(research, req.user.id, req.body || {})));
+  router.post('/desk/paper', wrap((req) => desk.paperReplay(research, m, req.user.id, req.body || {})));
   router.post('/desk/scan', wrap((req) => desk.scanDesk(m, req.user.id, req.body || {})));
   router.get('/dashboard', wrap((req) => m.dashboard(req.user.id)));
   router.get('/screener', wrap((req) => m.screener(req.user.id, req.query)));

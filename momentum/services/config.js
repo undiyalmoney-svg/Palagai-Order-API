@@ -47,7 +47,7 @@ function resolveUserConfig(store, userId) {
   return {
     settings,
     risk,
-    strategy: { id: strategy.id, name: strategy.name },
+    strategy: { id: strategy.id, name: strategy.name, description: strategy.description || null },
     params,
     costs: normalizeCosts(settings.costs),
     slippageBps: settings.slippageBps,

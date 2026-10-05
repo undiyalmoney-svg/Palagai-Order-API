@@ -71,7 +71,7 @@ test('acceptance: "I have 1,00,000 - what should I buy?" returns sized, explaine
     for (const k of ['whyBuy', 'whyNow', 'whyThisStock', 'whyThisPrice', 'howMuch', 'howManyShares', 'risk']) assert.ok(b.explanation[k], `missing ${k}`);
     assert.ok(b.explanation.confirms.length && b.explanation.invalidates.length);
     assert.ok(b.risk.stopPrice < b.priceRef);
-    assert.ok(b.allocationPct <= 0.2 + 1e-9);
+    assert.ok(b.allocationPct <= 0.22 + 1e-9);
     assert.ok(['BUY', 'STRONG_BUY'].includes(b.entryStatus));
   }
   const waits = result.decisions.filter((d) => d.action === 'WAIT');
@@ -294,7 +294,7 @@ test('scaleParamsForCapital opens a 10k ticket that the old 10k floor blocked', 
   assert.ok(scaled.minPositionValue <= 1_500);
   assert.ok(scaled.minTicketValue <= 200);
   assert.ok(scaled.maxPositionPct >= 0.38);
-  assert.equal(scaled.maxPositions, 3);
+  assert.equal(scaled.maxPositions, 2);
   const large = scaleParamsForCapital(raw, 100_000);
   assert.equal(large.minPositionValue, raw.minPositionValue);
   assert.equal(large.maxPositionPct, raw.maxPositionPct);

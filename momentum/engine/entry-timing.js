@@ -141,8 +141,20 @@ function analyzeEntry({ f, score, elig, regime, params, sector, horizonPresets, 
     true,
     `Price ${inr(f.price, 2)} vs ${params.emaPeriods[1]}-EMA ${inr(f.ema.mid, 2)}, ${params.emaPeriods[2]}-EMA ${inr(f.ema.slow, 2)}, ${params.emaPeriods[3]}-EMA ${inr(f.ema.long, 2)}`,
   );
-  const momentumOk = f.ret.m3 > 0 && f.rs.vsIndex3m >= params.rsMin;
-  add('momentum', 'Positive momentum & relative strength', momentumOk, true, `3M ${pctText(f.ret.m3)}, vs NIFTY ${pctText(f.rs.vsIndex3m)} (need >= ${pctText(params.rsMin)})`);
+  const mom12 = Number.isFinite(f.ret.m12x1) ? f.ret.m12x1 : f.ret.m3;
+  const rs12 = Number.isFinite(f.rs.vsIndex12x1) ? f.rs.vsIndex12x1 : f.rs.vsIndex3m;
+  const momentumOk = weeklyReview
+    ? mom12 > 0 && rs12 >= params.rsMin
+    : f.ret.m3 > 0 && f.rs.vsIndex3m >= params.rsMin;
+  add(
+    'momentum',
+    weeklyReview ? '12-1 Dual Momentum vs NIFTY' : 'Positive momentum & relative strength',
+    momentumOk,
+    true,
+    weeklyReview
+      ? `12-1 ${pctText(mom12)}, vs NIFTY ${pctText(rs12)} (need > 0)`
+      : `3M ${pctText(f.ret.m3)}, vs NIFTY ${pctText(f.rs.vsIndex3m)} (need >= ${pctText(params.rsMin)})`,
+  );
   const scoreOk = score.total >= effMin;
   add('score', 'Composite score above entry threshold', scoreOk, true, `Score ${score.total} vs required ${effMin}${policy.scoreBonus ? ` (${params.minScore} + ${policy.scoreBonus} regime premium)` : ''}`);
 
@@ -187,27 +199,18 @@ function analyzeEntry({ f, score, elig, regime, params, sector, horizonPresets, 
       headline = `WAIT - score ${score.total} is too low`;
     }
   } else if (weeklyReview) {
-    // Classic weekly momentum: buy the ranked leaders on review day. Daily
-    // breakout / pullback confirmation is the next-day timing layer, not the
-    // weekly decision. Waiting for it left the 10k desk with zero buys.
+    // Dual Momentum weekly: rank-and-buy the 12-1 leaders. No daily breakout
+    // or RSI confirmation — those filters were skipping the actual leaders.
     if (!setup || !setup.confirmed) {
       setup = {
-        type: 'WEEKLY_RANK',
+        type: 'DUAL_MOMENTUM',
         confirmed: true,
-        note: `Weekly momentum rank — relative strength vs NIFTY ${pctText(f.rs.vsIndex3m)}, 3M ${pctText(f.ret.m3)}`,
+        note: `Dual Momentum 12-1 ${pctText(mom12)} vs NIFTY ${pctText(rs12)}`,
       };
     }
-    if (f.tech.extensionAtr > params.climaxExtensionAtr || f.tech.rsi > params.climaxRsi) {
-      status = 'WATCH';
-      waitFor.push(
-        `Weekly rank is extended (${round(f.tech.extensionAtr, 1)} ATR, RSI ${round(f.tech.rsi, 0)}); wait for a pullback toward the ${params.emaPeriods[0]}-EMA`,
-      );
-      headline = 'WAIT FOR BETTER ENTRY - weekly leader is too extended to buy this week';
-    } else {
-      const strong = score.total >= params.strongScore && regime.regime === 'BULLISH';
-      status = strong ? 'STRONG_BUY' : 'BUY';
-      headline = `${status.replace('_', ' ')} - weekly rank entry confirmed with trend, momentum and regime support`;
-    }
+    const strong = score.total >= params.strongScore && regime.regime === 'BULLISH' && mom12 > 0 && rs12 > 0;
+    status = strong ? 'STRONG_BUY' : 'BUY';
+    headline = `${status.replace('_', ' ')} - Dual Momentum 12-1 leader (relative + absolute)`;
   } else if (!setup) {
     status = 'WATCH';
     const ph = f.tech.donchHigh;

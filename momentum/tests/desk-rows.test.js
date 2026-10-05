@@ -24,7 +24,7 @@ test('HOLD desk rows use the share count from the live book, not zero', () => {
   assert.equal(row.stopPrice, 3200);
   assert.equal(row.suggestedSell, 3502.4);
   assert.equal(row.suggestedLimit, 3502.4);
-  assert.match(row.fillHint, /LIMIT sell 10 of TCS/);
+  assert.match(row.fillHint, /Sell 10 TCS/);
 });
 
 test('BUY desk rows include a LIMIT the owner can rest in advance', () => {
@@ -34,7 +34,7 @@ test('BUY desk rows include a LIMIT the owner can rest in advance', () => {
     { lastPrice: 1500, maxDeviationPct: 0.04 },
   );
   assert.equal(row.suggestedLimit, 1507.5);
-  assert.match(row.fillHint, /LIMIT buy 4 of INFY/);
+  assert.match(row.fillHint, /Buy 4 INFY/);
   assert.match(row.fillHint, /09:15 IST/);
   assert.equal(row.canExecute, true);
   assert.equal(row.signalId, 12);

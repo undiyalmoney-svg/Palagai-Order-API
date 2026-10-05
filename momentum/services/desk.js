@@ -94,16 +94,16 @@ function buildSchedule(horizon, now = new Date()) {
           ? `Run the scanner every trading day after ${SCAN_CLOCK}. New buys fill the next morning at ${FILL_CLOCK}.`
           : horizon === 'MONTHLY'
             ? `Run the buy scanner on the last trading day of the month after ${SCAN_CLOCK}. New buys fill the next morning at ${FILL_CLOCK}.`
-            : `Run the buy scanner on the last trading day of the week after ${SCAN_CLOCK} (usually Friday). New buys fill the next morning at ${FILL_CLOCK}.`,
+            : `After ${SCAN_CLOCK} on the last trading day of the week (usually Friday). Rest LIMIT orders. They fill next morning at ${FILL_CLOCK}.`,
     },
     sell: {
       date: sellDate,
       weekday: WEEKDAYS[weekday(sellDate)],
       time: SCAN_CLOCK,
       when: sellWhen,
-      instruction: `Run the scanner every trading day after ${SCAN_CLOCK} for sells. If the row says HOLD, do nothing. If it says SELL or EXIT, sell at the next open (${FILL_CLOCK}). A stop can appear any day — do not wait for Friday.`,
+      instruction: `Check sells every trading day after ${SCAN_CLOCK}. HOLD means do nothing. SELL means rest a LIMIT for the next ${FILL_CLOCK} open.`,
     },
-    holdRule: 'HOLD means keep the stock. Do not sell until a later scan says SELL or EXIT.',
+    holdRule: 'HOLD means keep the stock. Dual Momentum does not sell just because a week passed.',
   };
 }
 
@@ -169,13 +169,9 @@ function lastWeekPicks(store, portfolio, asOf) {
 function fillHint(side, limit, fillTime, { qty, symbol } = {}) {
   if (limit == null) return null;
   const px = inr(limit, 2);
-  const units = Number(qty) > 0 && symbol ? `${qty} of ${symbol} ` : '';
-  if (side === 'BUY') {
-    return `Rest a LIMIT buy ${units}at ${px} for the next ${fillTime} open (AMO after ${SCAN_CLOCK}). Do not pay more than 4% above last close.`;
-  }
-  if (side === 'SELL') {
-    return `Rest a LIMIT sell ${units}at ${px} for the next ${fillTime} open.`;
-  }
+  const units = Number(qty) > 0 && symbol ? `${qty} ${symbol} ` : '';
+  if (side === 'BUY') return `Buy ${units}at ${px} LIMIT for the next ${fillTime} open.`;
+  if (side === 'SELL') return `Sell ${units}at ${px} LIMIT for the next ${fillTime} open.`;
   return null;
 }
 
@@ -249,11 +245,137 @@ function groupActions(decisions, signalByKey, extra = {}) {
   };
 }
 
-function paperReplay(research, userId, { from, to, capital }) {
+function defaultPaperRange(panel, from, to) {
+  const last = panel.dates[panel.lastIndex] || to;
+  const hist = Math.min(panel.lastIndex, 260);
+  const first = panel.dates[hist] || from;
+  let end = last;
+  if (to) {
+    const idx = panel.indexOnOrBefore(to);
+    if (idx >= 0) end = panel.dates[idx];
+  }
+  let start;
+  if (from) {
+    const idx = panel.indexOnOrBefore(from);
+    start = idx >= 0 ? panel.dates[idx] : first;
+  } else {
+    const idx = panel.indexOnOrBefore(addDays(end, -370));
+    start = idx >= 0 ? panel.dates[Math.max(idx, hist)] : first;
+  }
+  if (start && end && daysBetween(start, end) < 90) {
+    const idx = panel.indexOnOrBefore(addDays(end, -180));
+    if (idx >= 0) start = panel.dates[Math.max(idx, hist)];
+  }
+  if (!start || start >= end) start = first;
+  return { from: start, to: end, auto: !from || !to };
+}
+
+function signedInr(n) {
+  const v = Number(n) || 0;
+  const abs = inr(Math.abs(v));
+  if (v > 0) return `+${abs}`;
+  if (v < 0) return `−${abs}`;
+  return abs;
+}
+
+function paperSummary({ capital, closed, open, metrics, from, to }) {
+  const m = metrics || {};
+  const wins = (closed || []).filter((t) => Number(t.pnl) > 0).length;
+  const losses = (closed || []).filter((t) => Number(t.pnl) <= 0).length;
+  const retPct = Number(m.totalReturnPct);
+  const dd = Number(m.maxDrawdownPct);
+  const winRate = Number(m.winRatePct);
+  const profit = Number(m.totalPnl ?? 0);
+  const headline =
+    Number.isFinite(retPct) && retPct >= 0
+      ? `Paper made ${signedInr(profit)} (${retPct.toFixed(1)}%) from ${from} to ${to}.`
+      : `Paper P&L ${signedInr(profit)} from ${from} to ${to}.`;
+  const bullets = [
+    `${wins} winning closed trade(s), ${losses} losing.`,
+    Number.isFinite(winRate) ? `Win rate ${winRate.toFixed(0)}%.` : null,
+    Number.isFinite(dd) ? `Worst drop ${dd.toFixed(1)}%.` : null,
+    `${(open || []).length} still held at the end.`,
+    'Dual Momentum sits in cash when Nifty’s own trend is broken, so a bear stretch is not a forced buy list.',
+    capital < 25_000
+      ? 'A book this small pays the same DP/STT as a larger one. Dual Momentum’s edge is clearer from about ₹25,000. This week’s tickets still work.'
+      : null,
+  ].filter(Boolean);
+  return {
+    headline,
+    bullets,
+    honestNote:
+      'This is a 4–16 week hold, not a one-week scalp. One week of P&L is noise. Use this 12-month paper as the proof; this week’s cards are the live work.',
+    started: capital,
+    ended: Number.isFinite(Number(m.endCapital)) ? Number(m.endCapital) : null,
+    returnPct: Number.isFinite(retPct) ? retPct : null,
+    winRatePct: Number.isFinite(winRate) ? winRate : null,
+    maxDrawdownPct: Number.isFinite(dd) ? dd : null,
+  };
+}
+
+function nextActionLine(schedule, scan) {
+  const buys = scan?.buy?.length || 0;
+  const sells = scan?.sell?.length || 0;
+  if (sells && buys) return `Sell ${sells} name(s) and buy ${buys} name(s). Rest LIMITs after ${SCAN_CLOCK} for the ${FILL_CLOCK} open.`;
+  if (sells) return `Sell ${sells} name(s). Rest LIMITs after ${SCAN_CLOCK} for the ${FILL_CLOCK} open.`;
+  if (buys) return `Buy ${buys} name(s). Rest LIMITs after ${schedule?.buy?.when || SCAN_CLOCK} for the ${FILL_CLOCK} open.`;
+  if (scan?.hold?.length) return 'Hold. Do nothing until a later scan says Sell.';
+  return `Next buy scan: ${schedule?.buy?.when || 'Friday after 16:00 IST'}.`;
+}
+
+function liveGuide({ tokenReady, fundsReady, cash }) {
+  return [
+    {
+      step: 1,
+      title: 'Get Token',
+      body: 'Open Get Token once each morning. That is the only login Palagai needs.',
+      href: '/dashboard/get-token',
+      done: !!tokenReady,
+    },
+    {
+      step: 2,
+      title: 'We read your cash',
+      body: tokenReady
+        ? fundsReady
+          ? `Kite equity cash ${inr(cash, 0)}. Palagai sizes 2–5 Dual Momentum names from this. You do not type capital.`
+          : 'Token is in. Update it if funds did not load, then open Live again.'
+        : 'After the token, Palagai reads Kite equity cash and sizes the book for you.',
+      done: !!tokenReady && !!fundsReady,
+    },
+    {
+      step: 3,
+      title: 'Follow this week’s tickets',
+      body: 'Buy, Hold or Sell — one card each. Rest the LIMIT after 16:00 IST for the next 09:15 IST open.',
+      done: !!tokenReady && !!fundsReady,
+    },
+  ];
+}
+
+function thisWeekFromEngine(momentum, userId, capital, extra = {}) {
+  const cap = Number(capital);
+  if (!Number.isFinite(cap) || cap < 0) return null;
+  const { result } = momentum.decideNow({ userId, capital: Math.max(cap, 10_000), forceReview: true });
+  const grouped = groupActions(result.decisions, new Map(), extra);
+  return {
+    asOf: result.asOf,
+    headline: result.summary?.headline || '',
+    answer: result.summary?.answer || '',
+    regime: result.regime?.regime || null,
+    ...grouped,
+  };
+}
+
+function paperReplay(research, momentum, userId, { from, to, capital } = {}) {
   const cap = Number(capital);
   if (!Number.isFinite(cap) || cap < 10_000) throw new ServiceError('BAD_REQUEST', 'Enter capital of at least ₹10,000');
-  if (!from || !to) throw new ServiceError('BAD_REQUEST', 'Choose a from date and a to date');
-  const bt = research.runBacktest(userId, { capital: cap, from, to, name: `Paper desk ${from} to ${to}` });
+  const panel = research.marketData.loadPanel();
+  const range = defaultPaperRange(panel, from, to);
+  const bt = research.runBacktest(userId, {
+    capital: cap,
+    from: range.from,
+    to: range.to,
+    name: `Paper desk ${range.from} to ${range.to}`,
+  });
   const closed = pairClosedTrades(bt.trades);
   const open = (bt.extra?.openPositions || []).map((p) => ({
     symbol: p.symbol,
@@ -268,17 +390,38 @@ function paperReplay(research, userId, { from, to, capital }) {
   }));
   const closedPnl = closed.reduce((a, t) => a + (Number(t.pnl) || 0), 0);
   const openPnl = open.reduce((a, t) => a + (Number(t.pnl) || 0), 0);
+  const fromDate = bt.extra?.actualFrom || bt.from;
+  const toDate = bt.extra?.actualTo || bt.to;
+  const totalProfit = Math.round((closedPnl + openPnl) * 100) / 100;
+  const cfg = momentum.config(userId);
+  const lastOf = (symbol) => momentum.marketData.priceFor(symbol)?.price ?? null;
+  const rowExtra = { maxDeviationPct: cfg.params.maxPriceDeviationPct ?? 0.04, fillTime: FILL_CLOCK, lastOf };
+  const thisWeek = thisWeekFromEngine(momentum, userId, cap, rowExtra);
+  const summary = paperSummary({
+    capital: cap,
+    closed,
+    open,
+    metrics: { ...bt.metrics, totalPnl: totalProfit, endCapital: bt.metrics?.endCapital },
+    from: fromDate,
+    to: toDate,
+  });
   return {
-    from: bt.extra?.actualFrom || bt.from,
-    to: bt.extra?.actualTo || bt.to,
+    kind: 'PAPER',
+    from: fromDate,
+    to: toDate,
+    autoRange: range.auto,
     capital: cap,
     strategy: bt.strategyId,
+    strategyName: cfg.strategy?.name || 'Dual Momentum - Weekly',
     fillTime: FILL_CLOCK,
     scanTime: SCAN_CLOCK,
-    totalProfit: Math.round((closedPnl + openPnl) * 100) / 100,
+    totalProfit,
     closedProfit: Math.round(closedPnl * 100) / 100,
     openProfit: Math.round(openPnl * 100) / 100,
     metrics: bt.metrics,
+    summary,
+    thisWeek,
+    nextAction: nextActionLine(buildSchedule(cfg.params.horizon), thisWeek),
     closed,
     open,
   };
@@ -385,13 +528,36 @@ async function deskOverview(momentum, userId, now = new Date()) {
     };
   }
   return {
+    kind: 'DESK',
+    strategy: {
+      id: cfg.strategy.id,
+      name: cfg.strategy.name,
+      horizon: cfg.params.horizon,
+      description:
+        cfg.strategy.description ||
+        'Dual Momentum 12-1: buy the strongest NSE large/mid names, sit in cash when Nifty’s trend is broken.',
+    },
     schedule: buildSchedule(cfg.params.horizon, now),
-    strategy: { id: cfg.strategy.id, name: cfg.strategy.name, horizon: cfg.params.horizon },
+    paperDefaults: (() => {
+      try {
+        const panel = momentum.marketData.loadPanel();
+        const range = defaultPaperRange(panel);
+        return { capital: 25_000, ...range };
+      } catch {
+        return { capital: 25_000, from: null, to: null, auto: true };
+      }
+    })(),
     lastWeek: lastWeekPicks(momentum.store, book, asOf),
     liveEnabled: !!cfg.settings.live.enabled,
     hasLive: !!live,
     hasPaper: !!paper,
+    tokenReady: !!momentum.sessions.authorization(userId),
     funds,
+    guide: liveGuide({
+      tokenReady: !!momentum.sessions.authorization(userId),
+      fundsReady: funds.ok,
+      cash: funds.ok ? funds.equityCash : null,
+    }),
     lastScan,
   };
 }
@@ -630,6 +796,17 @@ async function scanDesk(momentum, userId, { capital, reset = false, mode = 'LIVE
   const schedule = buildSchedule(cfg.params.horizon);
   const rowExtra = { maxDeviationPct: cfg.params.maxPriceDeviationPct ?? 0.04, fillTime: FILL_CLOCK, lastOf };
   const overlay = applyCncOverlay(grouped, holdingsSync, rowExtra);
+  const tokenReady = !!momentum.sessions.authorization(userId);
+  const product = {
+    kind: wantLive ? 'LIVE' : 'PAPER',
+    strategy: 'Dual Momentum 12-1',
+    tokenReady,
+    fundsReady: !!funds.ok,
+    cash: cap,
+    sizedFrom,
+    nextAction: nextActionLine(schedule, overlay),
+    guide: liveGuide({ tokenReady, fundsReady: funds.ok, cash: cap }),
+  };
   return {
     mode: useMode,
     usedPaperFallback: wantLive && useMode === 'PAPER',
@@ -643,6 +820,8 @@ async function scanDesk(momentum, userId, { capital, reset = false, mode = 'LIVE
     schedule,
     lastWeek: lastWeekPicks(momentum.store, book, r.result.asOf),
     holdingsSync,
+    product,
+    nextAction: product.nextAction,
     ...overlay,
   };
 }
@@ -663,4 +842,7 @@ module.exports = {
   cncHoldRows,
   applyCncOverlay,
   suggestedLimitPrice,
+  defaultPaperRange,
+  paperSummary,
+  liveGuide,
 };
