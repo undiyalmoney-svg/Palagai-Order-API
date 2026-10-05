@@ -125,7 +125,7 @@ class MarketDataService {
 
   /**
    * Pull (or refresh) the Kite daily tape without touching synthetic rows.
-   * `from` defaults to ~4.5 years so Dual Momentum 12-1 has warmup in one Kite chunk.
+   * `from` defaults to ~7.5 years so 2021 payday months are on the tape.
    */
   async activateKite(provider, { from } = {}) {
     if (!this.kiteTape) {
@@ -134,7 +134,7 @@ class MarketDataService {
       throw err;
     }
     const to = provider.lastDate();
-    const fromDate = from || addDays(to, -1600);
+    const fromDate = from || addDays(to, -2800);
     const stats = await this.kiteTape.ensure({ provider, from: fromDate, to });
     this.livePanel = this.kiteTape.loadPanel();
     this.liveMeta = { provider: 'kite', simulated: false, ...stats };
