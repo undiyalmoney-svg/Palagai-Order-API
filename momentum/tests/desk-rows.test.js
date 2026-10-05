@@ -55,3 +55,28 @@ test('Nifty / Gold / Silver BeES skipped holdings become Hold rows with qty and 
   assert.match(gold.reason, /qty 25/);
   assert.ok(!rows.some((r) => r.symbol === 'NOTAINDEX'));
 });
+
+test('CNC overlay adds universe holdings and BeES onto Hold with qty and sell LIMIT', () => {
+  const { applyCncOverlay } = require('../services/desk');
+  const out = applyCncOverlay(
+    {
+      buy: [{ symbol: 'INFY', action: 'BUY', qty: 4, suggestedLimit: 1507.5 }],
+      hold: [],
+      sell: [],
+    },
+    {
+      preview: true,
+      universeHoldings: [{ symbol: 'TCS', qty: 10, avgPrice: 3500, lastPrice: 3520 }],
+      skipped: [
+        { symbol: 'GOLDBEES', qty: 25, avgPrice: 70, lastPrice: 72, reason: 'outside momentum universe' },
+        { symbol: 'NOTAINDEX', qty: 8, avgPrice: 10, lastPrice: 11, reason: 'outside momentum universe' },
+      ],
+    },
+    { lastOf: (s) => (s === 'TCS' ? 3520 : null) },
+  );
+  assert.equal(out.hold.find((r) => r.symbol === 'TCS').qty, 10);
+  assert.ok(out.hold.find((r) => r.symbol === 'TCS').suggestedSell > 0);
+  assert.equal(out.hold.find((r) => r.symbol === 'GOLDBEES').qty, 25);
+  assert.equal(out.alsoHeld.find((r) => r.symbol === 'NOTAINDEX').qty, 8);
+  assert.equal(out.buy.length, 1);
+});

@@ -191,6 +191,37 @@ test('desk paper replay and live scan return entries, exits and a scan clock', a
   for (const row of [...scan.body.buy, ...scan.body.sell]) {
     if (row.canExecute) assert.ok(row.signalId > 0 && row.qty >= 0);
   }
+  const after = await s.call('GET', '/desk');
+  assert.ok(after.body.lastScan);
+  assert.ok(Array.isArray(after.body.lastScan.buy));
+  await s.close();
+});
+
+test('live scan and desk overview show CNC qty and sell price before live trading is enabled', async () => {
+  const broker = new MockBroker({ live: true });
+  broker.holdingsData = [
+    { symbol: 'TCS', qty: 10, avgPrice: 3500, lastPrice: 3520, exchange: 'NSE' },
+    { symbol: 'GOLDBEES', qty: 25, avgPrice: 70, lastPrice: 72, exchange: 'NSE' },
+  ];
+  const s = await serve({ appOptions: { brokerOverride: () => broker } });
+  s.app.momentum.sessions.save('u1', 'kitekey', 'token');
+  const scan = await s.call('POST', '/desk/scan', { capital: 150000, reset: true, mode: 'LIVE' });
+  assert.equal(scan.status, 200);
+  assert.equal(scan.body.usedPaperFallback, true);
+  assert.equal(scan.body.holdingsSync.ok, true);
+  assert.equal(scan.body.holdingsSync.preview, true);
+  const tcs = scan.body.hold.find((r) => r.symbol === 'TCS');
+  assert.ok(tcs);
+  assert.equal(tcs.qty, 10);
+  assert.ok(tcs.suggestedSell > 0);
+  const gold = scan.body.hold.find((r) => r.symbol === 'GOLDBEES');
+  assert.ok(gold);
+  assert.equal(gold.qty, 25);
+  const overview = await s.call('GET', '/desk');
+  assert.equal(overview.status, 200);
+  const held = overview.body.lastScan?.hold || [];
+  assert.equal(held.find((r) => r.symbol === 'TCS')?.qty, 10);
+  assert.ok(held.find((r) => r.symbol === 'TCS')?.suggestedSell > 0);
   await s.close();
 });
 

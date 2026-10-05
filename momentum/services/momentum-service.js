@@ -285,6 +285,54 @@ class MomentumService {
     return { cash: funds.equityCash, funds };
   }
 
+  classifyBrokerHoldings(raw) {
+    const universe = new Set(listUniverse().map((u) => u.symbol));
+    const wanted = new Map();
+    const skipped = [];
+    for (const h of raw || []) {
+      const symbol = String(h.symbol || h.tradingsymbol || '').toUpperCase();
+      const qty = Math.floor(Number(h.qty ?? h.quantity) || 0);
+      const avgPrice = Number(h.avgPrice ?? h.average_price) || 0;
+      const lastPrice = Number(h.lastPrice ?? h.last_price) || avgPrice || 0;
+      const exchange = String(h.exchange || 'NSE').toUpperCase();
+      if (!symbol || qty <= 0) continue;
+      if (exchange && exchange !== 'NSE' && exchange !== 'BSE') {
+        skipped.push({ symbol, qty, avgPrice, lastPrice: lastPrice || avgPrice || 0, reason: `exchange ${exchange}` });
+        continue;
+      }
+      if (!universe.has(symbol)) {
+        skipped.push({ symbol, qty, avgPrice, lastPrice: lastPrice || avgPrice || 0, reason: 'outside momentum universe' });
+        continue;
+      }
+      const px = avgPrice || this.marketData.priceFor(symbol)?.price || lastPrice || 0;
+      if (!px) {
+        skipped.push({ symbol, qty, avgPrice, lastPrice: lastPrice || 0, reason: 'no price' });
+        continue;
+      }
+      wanted.set(symbol, { symbol, qty, avgPrice: px, lastPrice: lastPrice || px });
+    }
+    return { wanted, skipped };
+  }
+
+  /** Read CNC holdings without enabling live trading or writing a live book. */
+  async previewCncHoldings(userId) {
+    if (!this.sessions.authorization(userId)) {
+      throw new ServiceError('NO_BROKER', 'No Kite session', 400);
+    }
+    const broker = this.brokerFor({ mode: 'LIVE' }, userId);
+    if (typeof broker.holdings !== 'function') {
+      throw new ServiceError('NOT_SUPPORTED', 'This broker does not report holdings', 400);
+    }
+    let raw;
+    try {
+      raw = await broker.holdings();
+    } catch (err) {
+      throw new ServiceError('BROKER_ERROR', `Could not read broker holdings: ${err.message}`, 502);
+    }
+    const classified = this.classifyBrokerHoldings(raw);
+    return { universeHoldings: [...classified.wanted.values()], skipped: classified.skipped };
+  }
+
   /**
    * Seed / refresh the live book from CNC holdings the broker reports.
    * Cash is set to available equity funds so holdings are not double-counted.
@@ -302,30 +350,7 @@ class MomentumService {
     } catch (err) {
       throw new ServiceError('BROKER_ERROR', `Could not read broker holdings: ${err.message}`, 502);
     }
-    const universe = new Set(listUniverse().map((u) => u.symbol));
-    const wanted = new Map();
-    const skipped = [];
-    for (const h of raw || []) {
-      const symbol = String(h.symbol || h.tradingsymbol || '').toUpperCase();
-      const qty = Math.floor(Number(h.qty ?? h.quantity) || 0);
-      const avgPrice = Number(h.avgPrice ?? h.average_price) || 0;
-      const exchange = String(h.exchange || 'NSE').toUpperCase();
-      if (!symbol || qty <= 0) continue;
-      if (exchange && exchange !== 'NSE' && exchange !== 'BSE') {
-        skipped.push({ symbol, qty, avgPrice, lastPrice: Number(h.lastPrice) || avgPrice || 0, reason: `exchange ${exchange}` });
-        continue;
-      }
-      if (!universe.has(symbol)) {
-        skipped.push({ symbol, qty, avgPrice, lastPrice: Number(h.lastPrice) || avgPrice || 0, reason: 'outside momentum universe' });
-        continue;
-      }
-      const px = avgPrice || this.marketData.priceFor(symbol)?.price || 0;
-      if (!px) {
-        skipped.push({ symbol, qty, avgPrice, lastPrice: Number(h.lastPrice) || 0, reason: 'no price' });
-        continue;
-      }
-      wanted.set(symbol, { symbol, qty, avgPrice: px });
-    }
+    const { wanted, skipped } = this.classifyBrokerHoldings(raw);
     const today = this.today();
     const existing = this.store.listPositions(p.id);
     const imported = [];

@@ -154,7 +154,7 @@ function lastWeekPicks(store, portfolio, asOf) {
       picks.push({
         symbol: d.symbol,
         name: d.name || d.symbol,
-        qty: d.quantity,
+        qty: Number(d.quantity) || 0,
         priceRef: d.priceRef,
         suggestedLimit: suggestedLimitPrice({ side: 'BUY', price: d.priceRef, priceRef: d.priceRef }),
         date: run.asOf,
@@ -284,12 +284,57 @@ function paperReplay(research, userId, { from, to, capital }) {
   };
 }
 
-function deskOverview(momentum, userId, now = new Date()) {
+async function deskOverview(momentum, userId, now = new Date()) {
   const cfg = momentum.config(userId);
   const asOf = lastCompletedTradingDate(now);
   const live = momentum.store.getPortfolio(userId, 'LIVE');
   const paper = momentum.store.getPortfolio(userId, 'PAPER');
   const book = live || paper;
+  const lastOf = (symbol) => momentum.marketData.priceFor(symbol)?.price ?? null;
+  const rowExtra = { maxDeviationPct: cfg.params.maxPriceDeviationPct ?? 0.04, fillTime: FILL_CLOCK, lastOf };
+  let lastScan = latestScanFromStore(momentum, userId, { cfg, lastOf });
+  let holdingsSync = null;
+  if (momentum.sessions.authorization(userId)) {
+    try {
+      const preview = await momentum.previewCncHoldings(userId);
+      holdingsSync = {
+        ok: true,
+        error: null,
+        preview: !live,
+        imported: preview.universeHoldings.map((h) => h.symbol),
+        updated: [],
+        removed: [],
+        skipped: preview.skipped,
+        universeHoldings: preview.universeHoldings,
+      };
+    } catch (err) {
+      holdingsSync = {
+        ok: false,
+        error: err.message || 'Could not read Kite holdings',
+        preview: !live,
+        imported: [],
+        updated: [],
+        removed: [],
+        skipped: [],
+        universeHoldings: [],
+      };
+    }
+    const overlay = applyCncOverlay(lastScan || { buy: [], hold: [], sell: [] }, holdingsSync, rowExtra);
+    lastScan = {
+      ...(lastScan || {
+        mode: live ? 'LIVE' : 'PAPER',
+        usedPaperFallback: !live,
+        capital: book?.initialCapital ?? 0,
+        asOf,
+        runId: null,
+        answer: '',
+        headline: overlay.hold.length || overlay.alsoHeld.length ? 'Kite CNC holdings' : '',
+        lastWeek: lastWeekPicks(momentum.store, book, asOf),
+      }),
+      holdingsSync,
+      ...overlay,
+    };
+  }
   return {
     schedule: buildSchedule(cfg.params.horizon, now),
     strategy: { id: cfg.strategy.id, name: cfg.strategy.name, horizon: cfg.params.horizon },
@@ -297,50 +342,52 @@ function deskOverview(momentum, userId, now = new Date()) {
     liveEnabled: !!cfg.settings.live.enabled,
     hasLive: !!live,
     hasPaper: !!paper,
+    lastScan,
   };
 }
 
 async function syncHoldingsForLiveScan(momentum, userId, live) {
-  if (!live) {
-    return {
-      ok: false,
-      error: 'Live book is not enabled, so this scan cannot read your CNC holdings. Connect Token and enable live trading.',
-      imported: [],
-      updated: [],
-      removed: [],
-      skipped: [],
-    };
-  }
+  const empty = { imported: [], updated: [], removed: [], skipped: [], universeHoldings: [] };
   if (!momentum.sessions.authorization(userId)) {
     return {
       ok: false,
-      error: 'No Kite session — Hold/Sell uses the last saved book, not a fresh CNC snapshot. Update the token and run again.',
-      imported: [],
-      updated: [],
-      removed: [],
-      skipped: [],
+      error: 'No Kite session — Hold/Sell cannot read your CNC book. Update the token and run again.',
+      preview: !live,
+      ...empty,
     };
   }
+  if (live) {
+    try {
+      const imported = await momentum.importLiveHoldings(userId);
+      return {
+        ok: true,
+        error: null,
+        preview: false,
+        imported: imported.imported,
+        updated: imported.updated,
+        removed: imported.removed,
+        skipped: imported.skipped,
+        cash: imported.cash,
+        universeHoldings: imported.holdings || [],
+      };
+    } catch (err) {
+      return { ok: false, error: err.message || 'Could not read Kite holdings', preview: false, ...empty };
+    }
+  }
   try {
-    const imported = await momentum.importLiveHoldings(userId);
+    const preview = await momentum.previewCncHoldings(userId);
     return {
       ok: true,
       error: null,
-      imported: imported.imported,
-      updated: imported.updated,
-      removed: imported.removed,
-      skipped: imported.skipped,
-      cash: imported.cash,
-    };
-  } catch (err) {
-    return {
-      ok: false,
-      error: err.message || 'Could not read Kite holdings',
-      imported: [],
+      preview: true,
+      imported: preview.universeHoldings.map((h) => h.symbol),
       updated: [],
       removed: [],
-      skipped: [],
+      skipped: preview.skipped,
+      universeHoldings: preview.universeHoldings,
     };
+  } catch (err) {
+    return { ok: false, error: err.message || 'Could not read Kite holdings', preview: true, ...empty };
   }
 }
 
@@ -365,6 +412,103 @@ function alsoHeldRows(skipped, extra = {}) {
         note: 'Held at Kite but not in the large/mid scanner. Keep or sell yourself — the weekly book will not auto-replace this name.',
       };
     });
+}
+
+function cncHoldRows(holdings, extra = {}) {
+  return (holdings || []).map((h) => {
+    const symbol = String(h.symbol || '').toUpperCase();
+    const last = extra.lastOf?.(symbol) || h.lastPrice || h.avgPrice || null;
+    const qty = Number(h.qty) || 0;
+    const suggestedSell = sellLimitFor(last, last, extra.maxDeviationPct);
+    const reason =
+      typeof extra.reasonFor === 'function'
+        ? extra.reasonFor(h)
+        : `${symbol} is in your Kite CNC book (qty ${qty}).`;
+    return {
+      symbol,
+      name: h.name || symbol,
+      sector: h.sector || '',
+      action: 'HOLD',
+      qty,
+      priceRef: last,
+      lastPrice: last,
+      avgPrice: h.avgPrice ?? null,
+      stopPrice: null,
+      suggestedLimit: suggestedSell,
+      suggestedBuy: null,
+      suggestedSell,
+      fillHint: fillHint('SELL', suggestedSell, extra.fillTime || FILL_CLOCK, { qty, symbol }),
+      whyThisPrice: null,
+      allocationValue: last && qty ? last * qty : 0,
+      reason,
+      score: null,
+      signalId: null,
+      canExecute: false,
+    };
+  });
+}
+
+function applyCncOverlay(grouped, holdingsSync, extra = {}) {
+  const alsoHeld = alsoHeldRows(holdingsSync?.skipped, extra);
+  const etfHolds = bookEtfHoldRows(holdingsSync?.skipped, extra);
+  const taken = new Set([
+    ...(grouped.hold || []).map((h) => h.symbol),
+    ...(grouped.sell || []).map((h) => h.symbol),
+  ]);
+  const hold = [...(grouped.hold || [])];
+  const preview = !!holdingsSync?.preview;
+  const cncRows = cncHoldRows(holdingsSync?.universeHoldings, {
+    ...extra,
+    reasonFor: (h) =>
+      preview
+        ? `${h.symbol} is in your Kite CNC book (qty ${h.qty}). Live trading is not enabled — qty and sell price only.`
+        : `${h.symbol} is in your Kite CNC book (qty ${h.qty}).`,
+  });
+  for (const row of [...etfHolds, ...cncRows]) {
+    if (taken.has(row.symbol)) continue;
+    hold.push(row);
+    taken.add(row.symbol);
+  }
+  const buy = (grouped.buy || []).filter((b) => !taken.has(b.symbol));
+  return { buy, hold, sell: grouped.sell || [], alsoHeld };
+}
+
+function latestScanFromStore(momentum, userId, extra = {}) {
+  const live = momentum.store.getPortfolio(userId, 'LIVE');
+  const paper = momentum.store.getPortfolio(userId, 'PAPER');
+  const book = live || paper;
+  if (!book) return null;
+  const latest = momentum.store.listDecisionRuns(book.id, 1)[0];
+  if (!latest) return null;
+  const full = momentum.store.getDecisionRunById(latest.id);
+  const decisions = full?.result?.decisions || [];
+  const signals = momentum.store.listSignals({ userId, portfolioId: book.id, limit: 400 });
+  const signalByKey = new Map();
+  for (const s of signals) {
+    if (s.decisionKey) signalByKey.set(s.decisionKey, s.id);
+  }
+  const cfg = extra.cfg || momentum.config(userId);
+  const lastOf = extra.lastOf || ((symbol) => momentum.marketData.priceFor(symbol)?.price ?? null);
+  const posBySymbol = new Map((momentum.store.listPositions(book.id) || []).map((p) => [p.symbol, p]));
+  const grouped = groupActions(decisions, signalByKey, {
+    posBySymbol,
+    lastOf,
+    maxDeviationPct: cfg.params.maxPriceDeviationPct ?? 0.04,
+    fillTime: FILL_CLOCK,
+  });
+  return {
+    mode: book.mode,
+    usedPaperFallback: book.mode === 'PAPER',
+    capital: book.initialCapital,
+    asOf: latest.asOf,
+    runId: latest.id,
+    answer: full?.summary?.answer || latest.answer || '',
+    headline: full?.summary?.headline || '',
+    lastWeek: lastWeekPicks(momentum.store, book, latest.asOf),
+    holdingsSync: null,
+    alsoHeld: [],
+    ...grouped,
+  };
 }
 
 function bookEtfHoldRows(skipped, extra = {}) {
@@ -430,12 +574,8 @@ async function scanDesk(momentum, userId, { capital, reset = false, mode = 'LIVE
     fillTime: FILL_CLOCK,
   });
   const schedule = buildSchedule(cfg.params.horizon);
-  const rowExtra = { maxDeviationPct: cfg.params.maxPriceDeviationPct ?? 0.04, fillTime: FILL_CLOCK };
-  const etfHolds = bookEtfHoldRows(holdingsSync?.skipped, rowExtra);
-  const holdSymbols = new Set(grouped.hold.map((h) => h.symbol));
-  for (const row of etfHolds) {
-    if (!holdSymbols.has(row.symbol)) grouped.hold.push(row);
-  }
+  const rowExtra = { maxDeviationPct: cfg.params.maxPriceDeviationPct ?? 0.04, fillTime: FILL_CLOCK, lastOf };
+  const overlay = applyCncOverlay(grouped, holdingsSync, rowExtra);
   return {
     mode: useMode,
     usedPaperFallback: wantLive && useMode === 'PAPER',
@@ -447,8 +587,7 @@ async function scanDesk(momentum, userId, { capital, reset = false, mode = 'LIVE
     schedule,
     lastWeek: lastWeekPicks(momentum.store, book, r.result.asOf),
     holdingsSync,
-    alsoHeld: alsoHeldRows(holdingsSync?.skipped, rowExtra),
-    ...grouped,
+    ...overlay,
   };
 }
 
@@ -465,5 +604,7 @@ module.exports = {
   scanDesk,
   rowFromDecision,
   bookEtfHoldRows,
+  cncHoldRows,
+  applyCncOverlay,
   suggestedLimitPrice,
 };
