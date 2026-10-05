@@ -3,7 +3,9 @@
 const { openDatabase } = require('../db/database');
 const { Store } = require('../db/store');
 const { panelFromStore } = require('./panel');
-const { BENCHMARK } = require('./universe');
+const { BENCHMARK, LARGE_CAP, BOOK_ETFS } = require('./universe');
+
+const KITE_SCAN = new Set([...LARGE_CAP, ...BOOK_ETFS].map((u) => u.symbol));
 const { addDays } = require('../utils/dates');
 
 /**
@@ -44,7 +46,7 @@ class KiteTape {
     const stats = this.store.priceStats();
     const key = `${stats.rows}|${stats.last}`;
     if (this.panelCache && this.panelCache.key === key) return this.panelCache.panel;
-    const panel = panelFromStore(this.store, BENCHMARK.symbol);
+    const panel = panelFromStore(this.store, BENCHMARK.symbol, { keep: KITE_SCAN });
     this.panelCache = { key, panel };
     return panel;
   }

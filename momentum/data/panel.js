@@ -314,11 +314,12 @@ class MarketView {
   }
 }
 
-function panelFromStore(store, benchmark) {
+function panelFromStore(store, benchmark, { keep } = {}) {
   const stocks = new Map(store.listStocks().map((s) => [s.symbol, s]));
   const rows = store.allPriceRows();
   const bySymbol = new Map();
   for (const r of rows) {
+    if (keep && r.symbol !== benchmark && !keep.has(r.symbol)) continue;
     if (!bySymbol.has(r.symbol)) bySymbol.set(r.symbol, []);
     bySymbol.get(r.symbol).push(r);
   }
