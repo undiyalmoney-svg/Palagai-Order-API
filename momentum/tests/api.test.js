@@ -305,6 +305,10 @@ test('paper replay without dates uses ~12 months, this week picks, and is not an
   const week = await s.call('POST', '/desk/paper', { capital: 25000, period: 'last_week' });
   assert.equal(week.status, 200);
   assert.equal(week.body.period, 'last_week');
+  assert.equal(week.body.startCapital, 25000);
+  assert.ok(week.body.lookback);
+  assert.equal(week.body.lookback.period, 'last_12m');
+  assert.ok(Number.isFinite(week.body.lookback.totalProfit));
   const { daysBetween } = require('../utils/dates');
   assert.ok(daysBetween(week.body.from, week.body.to) <= 10, `last week window ${week.body.from} → ${week.body.to}`);
   assert.ok(week.body.lastWeek);

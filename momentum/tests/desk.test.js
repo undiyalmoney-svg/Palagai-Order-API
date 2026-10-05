@@ -38,9 +38,25 @@ test('pairClosedTrades joins each buy to its later sell', () => {
   assert.equal(closed[0].entryDate, '2026-01-05');
   assert.equal(closed[0].exitDate, '2026-02-10');
   assert.equal(closed[0].holdingDays, 36);
-  assert.equal(closed[0].pnl, 180);
+  assert.equal(closed[0].pnl, 200);
   assert.equal(closed[0].entryTime, '09:15 IST');
   assert.equal(closed[0].exitTime, '09:15 IST');
+});
+
+test('pairClosedTrades P&L matches in/out prices across partial lots', () => {
+  const closed = pairClosedTrades([
+    { side: 'BUY', symbol: 'MOTHERSON', date: '2026-07-07', price: 145.4, qty: 11, cost: 2 },
+    { side: 'SELL', symbol: 'MOTHERSON', date: '2026-08-10', price: 169.9, qty: 11, cost: 3, pnl: 999 },
+    { side: 'BUY', symbol: 'MOTHERSON', date: '2026-08-11', price: 168.6, qty: 62, cost: 8 },
+    { side: 'SELL', symbol: 'MOTHERSON', date: '2026-09-30', price: 160.25, qty: 62, cost: 10, pnl: 837 },
+  ]);
+  assert.equal(closed.length, 2);
+  assert.equal(closed[0].entryPrice, 145.4);
+  assert.equal(closed[0].qty, 11);
+  assert.equal(closed[1].entryDate, '2026-08-11');
+  assert.equal(closed[1].entryPrice, 168.6);
+  assert.equal(closed[1].qty, 62);
+  assert.ok(closed[1].pnl < 0, `down-move must be a loss, got ${closed[1].pnl}`);
 });
 
 test('previousIsoWeek is the week before the given date', () => {

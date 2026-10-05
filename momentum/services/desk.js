@@ -13,7 +13,7 @@ const {
 } = require('../utils/dates');
 const { ServiceError } = require('./momentum-service');
 const { suggestedLimitPrice } = require('../execution/limit-price');
-const { inr } = require('../utils/math');
+const { inr, round } = require('../utils/math');
 const { isBookEtf, BOOK_ETF_BY_SYMBOL } = require('../data/universe');
 const { runBacktest } = require('../backtest/backtester');
 const { computeMetrics } = require('../backtest/metrics');
@@ -116,27 +116,53 @@ function pairClosedTrades(fills) {
   for (const f of fills || []) {
     if (f.side === 'BUY') {
       const q = lots.get(f.symbol) || [];
-      q.push({ date: f.date, price: f.price, qty: f.qty });
+      q.push({ date: f.date, price: f.price, qty: f.qty, cost: Number(f.cost) || 0 });
       lots.set(f.symbol, q);
-    } else {
-      const q = lots.get(f.symbol) || [];
-      const buy = q.shift();
-      closed.push({
-        symbol: f.symbol,
-        qty: f.qty,
-        entryDate: buy?.date || null,
-        entryTime: FILL_CLOCK,
-        entryPrice: buy?.price ?? null,
-        exitDate: f.date,
-        exitTime: FILL_CLOCK,
-        exitPrice: f.price,
-        holdingDays: f.holdingDays,
-        pnl: f.pnl,
-        pnlPct: f.pnlPct,
-        exitReason: f.reason,
-        trigger: f.trigger || null,
-      });
+      continue;
     }
+    let left = Number(f.qty) || 0;
+    const q = lots.get(f.symbol) || [];
+    let qty = 0;
+    let costBasis = 0;
+    let buyCost = 0;
+    let entryDate = null;
+    while (left > 0 && q.length) {
+      const buy = q[0];
+      const take = Math.min(buy.qty, left);
+      if (!entryDate) entryDate = buy.date;
+      costBasis += buy.price * take;
+      const share = buy.qty > 0 ? take / buy.qty : 0;
+      buyCost += buy.cost * share;
+      buy.cost -= buy.cost * share;
+      buy.qty -= take;
+      left -= take;
+      qty += take;
+      if (buy.qty <= 0) q.shift();
+    }
+    const entryPrice = qty ? costBasis / qty : null;
+    const sellCost = Number(f.cost) || 0;
+    const pnl =
+      entryPrice != null
+        ? round((f.price - entryPrice) * qty - sellCost - buyCost, 2)
+        : Number.isFinite(Number(f.pnl))
+          ? Number(f.pnl)
+          : null;
+    const basis = entryPrice != null ? costBasis + buyCost : 0;
+    closed.push({
+      symbol: f.symbol,
+      qty: qty || f.qty,
+      entryDate,
+      entryTime: FILL_CLOCK,
+      entryPrice: entryPrice != null ? round(entryPrice, 2) : null,
+      exitDate: f.date,
+      exitTime: FILL_CLOCK,
+      exitPrice: f.price,
+      holdingDays: entryDate ? daysBetween(entryDate, f.date) : f.holdingDays,
+      pnl,
+      pnlPct: basis > 0 && pnl != null ? round(pnl / basis, 4) : f.pnlPct,
+      exitReason: f.reason,
+      trigger: f.trigger || null,
+    });
   }
   return closed;
 }
@@ -329,7 +355,8 @@ function windowBacktest(bt, from, to, capital, { warmupDays = 0 } = {}) {
   const equity = (bt.equity || []).filter((e) => e.date >= from && e.date <= to);
   const fills = (bt.fills || []).filter((f) => f.date >= from && f.date <= to);
   const srcEq = equity.length ? equity : bt.equity || [];
-  const startCapital = warmupDays ? srcEq[0]?.equity ?? capital : capital;
+  const rawStart = srcEq[0]?.equity ?? capital;
+  const rebase = warmupDays > 0;
   const metrics = srcEq.length
     ? computeMetrics({
         equity: srcEq,
@@ -347,9 +374,16 @@ function windowBacktest(bt, from, to, capital, { warmupDays = 0 } = {}) {
           }
           return sliced.length > 1 ? sliced : null;
         })(),
-        startCapital,
+        startCapital: rebase ? rawStart : capital,
       })
     : bt.metrics;
+  if (rebase && srcEq.length && metrics) {
+    const rawEnd = srcEq[srcEq.length - 1]?.equity ?? rawStart;
+    const ret = rawStart > 0 ? rawEnd / rawStart : 1;
+    metrics.startCapital = round(capital, 2);
+    metrics.endCapital = round(capital * ret, 2);
+    metrics.totalReturnPct = round((ret - 1) * 100, 2);
+  }
   return {
     metrics,
     fills,
@@ -390,17 +424,19 @@ function signedInr(n) {
 function paperSummary({ capital, closed, open, metrics, from, to, priceSource } = {}) {
   const m = metrics || {};
   const wins = (closed || []).filter((t) => Number(t.pnl) > 0).length;
-  const losses = (closed || []).filter((t) => Number(t.pnl) <= 0).length;
+  const losses = (closed || []).filter((t) => Number(t.pnl) < 0).length;
+  const flats = (closed || []).filter((t) => Number(t.pnl) === 0).length;
   const retPct = Number(m.totalReturnPct);
   const dd = Number(m.maxDrawdownPct);
-  const winRate = Number(m.winRatePct);
+  const decided = wins + losses;
+  const winRate = decided ? (wins / decided) * 100 : null;
   const profit = Number(m.totalPnl ?? 0);
   const headline =
     Number.isFinite(retPct) && retPct >= 0
       ? `Paper made ${signedInr(profit)} (${retPct.toFixed(1)}%) from ${from} to ${to}.`
       : `Paper P&L ${signedInr(profit)} from ${from} to ${to}.`;
   const bullets = [
-    `${wins} winning closed trade(s), ${losses} losing.`,
+    `${wins} winning closed trade(s), ${losses} losing${flats ? `, ${flats} flat` : ''}.`,
     Number.isFinite(winRate) ? `Win rate ${winRate.toFixed(0)}%.` : null,
     Number.isFinite(dd) ? `Worst drop ${dd.toFixed(1)}%.` : null,
     `${(open || []).length} still held at the end.`,
@@ -416,7 +452,7 @@ function paperSummary({ capital, closed, open, metrics, from, to, priceSource } 
     headline,
     bullets,
     honestNote: kite
-      ? 'This is a 2–3 name Dual Momentum 12-1 book on live NSE daily bars (Gold / Silver / Nifty BeES included when they lead). Last week is noise — read last 12 months and last year. The ~15% months are this sleeve’s paydays; cash months are Nifty’s trend off.'
+      ? 'This is a 2–3 name Dual Momentum 12-1 book on live NSE daily bars (Gold / Silver / Nifty BeES included when they lead). Last week is one noisy week — the ~15% months show on Last 12 months and Last year. Cash months are Nifty’s trend off, not a miss.'
       : 'These paper numbers use SIMULATED prices, not NSE. Get Token, then Show results — Palagai replays Dual Momentum on live Kite daily history. That is the tape with the ~15% months.',
     started,
     ended,
@@ -569,6 +605,22 @@ async function paperReplay(research, momentum, userId, { from, to, capital, peri
   const fromDate = windowed.from;
   const toDate = windowed.to;
   const totalProfit = Math.round((Number(windowed.metrics?.endCapital) - Number(windowed.metrics?.startCapital || cap)) * 100) / 100;
+  let lookback = null;
+  if (range.period === 'last_week') {
+    const m12 = resolvePaperPeriod(panel, { period: 'last_12m' });
+    const long = windowBacktest(raw, m12.from, m12.to, cap, { warmupDays: 0 });
+    const longProfit = Math.round((Number(long.metrics?.endCapital) - Number(long.metrics?.startCapital || cap)) * 100) / 100;
+    lookback = {
+      period: 'last_12m',
+      periodLabel: m12.label,
+      from: long.from,
+      to: long.to,
+      startCapital: Number(long.metrics?.startCapital) || cap,
+      endCapital: Number(long.metrics?.endCapital),
+      totalProfit: longProfit,
+      returnPct: Number(long.metrics?.totalReturnPct),
+    };
+  }
   const lastOf = (symbol) => momentum.marketData.priceFor(symbol)?.price ?? null;
   const rowExtra = { maxDeviationPct: cfg.params.maxPriceDeviationPct ?? 0.04, fillTime: FILL_CLOCK, lastOf };
   const thisWeek = thisWeekFromEngine(momentum, userId, cap, rowExtra);
@@ -610,6 +662,7 @@ async function paperReplay(research, momentum, userId, { from, to, capital, peri
     summary,
     thisWeek,
     lastWeek,
+    lookback,
     nextAction: nextActionLine(buildSchedule(cfg.params.horizon), thisWeek),
     closed,
     open,
