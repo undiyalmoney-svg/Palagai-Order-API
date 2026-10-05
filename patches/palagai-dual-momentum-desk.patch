@@ -1,0 +1,867 @@
+From eb0b2b83ad291c4bf93b80902d90fba14bb6c1a4 Mon Sep 17 00:00:00 2001
+From: Cursor Agent <cursoragent@cursor.com>
+Date: Mon, 5 Oct 2026 13:36:21 +0000
+Subject: [PATCH] Make Paper and Live unique Dual Momentum desks.
+
+Paper: this week's stocks plus last 12 months, no date pickers. Live: Get Token only, then Buy/Hold/Sell cards sized from Kite cash. Settings leads with Get Token; the rest is optional.
+---
+ .../momentum/momentum-api.service.spec.ts     |   6 +-
+ .../momentum/momentum-api.service.ts          |   2 +-
+ .../momentum/momentum-shell.component.ts      |   2 +-
+ .../dashboard/momentum/momentum.models.ts     |  54 +-
+ .../momentum/tabs/desk-tab.component.ts       | 515 +++++++-----------
+ .../momentum/tabs/settings-tab.component.ts   |   8 +
+ src/styles/momentum.css                       |  17 +
+ 7 files changed, 278 insertions(+), 326 deletions(-)
+
+diff --git a/src/app/features/dashboard/momentum/momentum-api.service.spec.ts b/src/app/features/dashboard/momentum/momentum-api.service.spec.ts
+index 1cd05a7..310afa5 100644
+--- a/src/app/features/dashboard/momentum/momentum-api.service.spec.ts
++++ b/src/app/features/dashboard/momentum/momentum-api.service.spec.ts
+@@ -26,12 +26,12 @@ describe('MomentumApiService', () => {
+     http.verify();
+   });
+ 
+-  it('sends paper dates and capital to the desk replay', async () => {
++  it('sends paper capital to the desk replay and lets the server pick 12 months', async () => {
+     const { api, http } = setup();
+-    const pending = api.deskPaper({ capital: 200000, from: '2024-01-01', to: '2024-12-31' });
++    const pending = api.deskPaper({ capital: 200000 });
+     const req = http.expectOne('/api/momentum/desk/paper');
+     expect(req.request.method).toBe('POST');
+-    expect(req.request.body).toEqual({ capital: 200000, from: '2024-01-01', to: '2024-12-31' });
++    expect(req.request.body).toEqual({ capital: 200000 });
+     req.flush({ status: 'ok', closed: [], open: [], totalProfit: 0 });
+     await pending;
+     http.verify();
+diff --git a/src/app/features/dashboard/momentum/momentum-api.service.ts b/src/app/features/dashboard/momentum/momentum-api.service.ts
+index 7412b3d..81b2b86 100644
+--- a/src/app/features/dashboard/momentum/momentum-api.service.ts
++++ b/src/app/features/dashboard/momentum/momentum-api.service.ts
+@@ -107,7 +107,7 @@ export class MomentumApiService {
+   }
+ 
+   desk = () => this.get<DeskOverview>('/desk');
+-  deskPaper = (body: { capital: number; from: string; to: string }) => this.post<DeskPaperReplay>('/desk/paper', body);
++  deskPaper = (body: { capital: number; from?: string; to?: string }) => this.post<DeskPaperReplay>('/desk/paper', body);
+   deskScan = (body: { capital: number; reset?: boolean; mode?: PortfolioMode }) => this.post<DeskScan>('/desk/scan', body);
+ 
+   // ---- read models
+diff --git a/src/app/features/dashboard/momentum/momentum-shell.component.ts b/src/app/features/dashboard/momentum/momentum-shell.component.ts
+index 1c55e4e..75fbbb8 100644
+--- a/src/app/features/dashboard/momentum/momentum-shell.component.ts
++++ b/src/app/features/dashboard/momentum/momentum-shell.component.ts
+@@ -45,7 +45,7 @@ export function visibleMomentumTabs(_liveAvailable: boolean): Tab[] {
+         @if (state.status(); as s) {
+           <span class="meta mp-small mp-muted">
+             <span class="dot" [class.open]="s.market.open"></span>
+-            {{ s.market.open ? 'Market open' : s.market.reason }} · data to {{ s.data.last }}
++            {{ s.market.open ? 'Market open' : s.market.reason }}
+           </span>
+         }
+       </nav>
+diff --git a/src/app/features/dashboard/momentum/momentum.models.ts b/src/app/features/dashboard/momentum/momentum.models.ts
+index ebd273b..7e35703 100644
+--- a/src/app/features/dashboard/momentum/momentum.models.ts
++++ b/src/app/features/dashboard/momentum/momentum.models.ts
+@@ -710,15 +710,27 @@ export interface DeskAlsoHeld {
+   note: string;
+ }
+ 
++export interface DeskGuideStep {
++  step: number;
++  title: string;
++  body: string;
++  href?: string;
++  done?: boolean;
++}
++
+ export interface DeskOverview {
+   status?: string;
++  kind?: string;
+   schedule: DeskSchedule;
+-  strategy: { id: string; name: string; horizon: string };
++  strategy: { id: string; name: string; horizon: string; description?: string | null };
++  paperDefaults?: { capital: number; from: string | null; to: string | null; auto?: boolean };
+   lastWeek: { week: string | null; picks: DeskLastWeekPick[] };
+   liveEnabled: boolean;
+   hasLive: boolean;
+   hasPaper: boolean;
++  tokenReady?: boolean;
+   funds?: DeskFunds | null;
++  guide?: DeskGuideStep[];
+   lastScan?: DeskScan | null;
+ }
+ 
+@@ -750,18 +762,45 @@ export interface DeskOpenTrade {
+   status: string;
+ }
+ 
++export interface DeskPaperSummary {
++  headline: string;
++  bullets: string[];
++  honestNote: string;
++  started: number;
++  ended: number | null;
++  returnPct: number | null;
++  winRatePct: number | null;
++  maxDrawdownPct: number | null;
++}
++
++export interface DeskThisWeek {
++  asOf: string;
++  headline: string;
++  answer: string;
++  regime: string | null;
++  buy: DeskActionRow[];
++  hold: DeskActionRow[];
++  sell: DeskActionRow[];
++}
++
+ export interface DeskPaperReplay {
+   status?: string;
++  kind?: 'PAPER';
+   from: string;
+   to: string;
++  autoRange?: boolean;
+   capital: number;
+   strategy: string;
++  strategyName?: string;
+   fillTime: string;
+   scanTime: string;
+   totalProfit: number;
+   closedProfit: number;
+   openProfit: number;
+   metrics: Metrics | null;
++  summary?: DeskPaperSummary;
++  thisWeek?: DeskThisWeek | null;
++  nextAction?: string;
+   closed: DeskClosedTrade[];
+   open: DeskOpenTrade[];
+ }
+@@ -797,6 +836,17 @@ export interface DeskFunds {
+   source?: string | null;
+ }
+ 
++export interface DeskProduct {
++  kind: PortfolioMode;
++  strategy: string;
++  tokenReady: boolean;
++  fundsReady: boolean;
++  cash: number;
++  sizedFrom?: 'kite-funds' | 'entered';
++  nextAction: string;
++  guide: DeskGuideStep[];
++}
++
+ export interface DeskScan {
+   status?: string;
+   mode: PortfolioMode;
+@@ -812,6 +862,8 @@ export interface DeskScan {
+   lastWeek: { week: string | null; picks: DeskLastWeekPick[] };
+   holdingsSync?: DeskHoldingsSync | null;
+   alsoHeld?: DeskAlsoHeld[];
++  product?: DeskProduct;
++  nextAction?: string;
+   buy: DeskActionRow[];
+   hold: DeskActionRow[];
+   sell: DeskActionRow[];
+diff --git a/src/app/features/dashboard/momentum/tabs/desk-tab.component.ts b/src/app/features/dashboard/momentum/tabs/desk-tab.component.ts
+index 8ff621a..638e483 100644
+--- a/src/app/features/dashboard/momentum/tabs/desk-tab.component.ts
++++ b/src/app/features/dashboard/momentum/tabs/desk-tab.component.ts
+@@ -1,3 +1,4 @@
++import { NgTemplateOutlet } from '@angular/common';
+ import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
+ import { toSignal } from '@angular/core/rxjs-interop';
+ import { FormsModule } from '@angular/forms';
+@@ -7,341 +8,230 @@ import { MomentumApiService } from '../momentum-api.service';
+ import { MomentumStateService } from '../momentum-state.service';
+ import {
+   DeskActionRow,
++  DeskGuideStep,
+   DeskOverview,
+   DeskPaperReplay,
+   DeskScan,
+   PortfolioMode,
+ } from '../momentum.models';
+-import { actionTone, errorMessage, inr, pctNum, shortDate, signedInr, tone } from '../format.util';
++import { errorMessage, inr, pctNum, shortDate, signedInr, tone } from '../format.util';
+ 
+ @Component({
+   selector: 'app-momentum-desk-tab',
+   standalone: true,
+   changeDetection: ChangeDetectionStrategy.OnPush,
+-  imports: [FormsModule, RouterLink],
++  imports: [FormsModule, RouterLink, NgTemplateOutlet],
+   template: `
+     <div class="mp-page">
+       @if (error()) { <div class="mp-banner" data-tone="down" role="alert">{{ error() }}</div> }
+       @if (notice()) { <div class="mp-banner" data-tone="info" role="status">{{ notice() }}</div> }
+ 
+       @if (kind() !== 'live') {
++        <section class="mp-hero">
++          <p class="mp-kicker">Practice</p>
++          <h2>Paper — Dual Momentum, virtual money</h2>
++          <p>
++            Palagai ranks NSE large-caps and mid-caps by <strong>12-month return, skipping last month</strong>
++            (classic Dual Momentum). It buys 2–5 leaders, equal-weight, and sits in cash when Nifty’s own trend is broken.
++            No Kite token. ₹25,000 is enough for paper to cover delivery costs.
++          </p>
++        </section>
++
+         <div class="mp-card">
+           <div class="mp-card-head"><div>
+-            <h2>Paper — see what the system did</h2>
+-            <p class="mp-sub">Pick a date range and capital — ₹10,000 is enough. The scanner ranks every NSE large-cap and mid-cap (Nifty 100 + Midcap 150), buys the weekly momentum leaders at the next 09:15 IST open, and sells the same way. A 10k book holds 2–3 stocks.</p>
++            <h3>This week’s stocks</h3>
++            <p class="mp-sub">One tap. Palagai sizes the book from this virtual cash.</p>
+           </div></div>
+-          <form class="mp-row" (ngSubmit)="runPaper()">
+-            <div class="mp-field"><label for="desk-from">From</label>
+-              <input id="desk-from" class="ui-input" type="date" name="from" [(ngModel)]="from" required /></div>
+-            <div class="mp-field"><label for="desk-to">To</label>
+-              <input id="desk-to" class="ui-input" type="date" name="to" [(ngModel)]="to" required /></div>
+-            <div class="mp-field"><label for="desk-cap">Capital (₹)</label>
+-              <input id="desk-cap" class="ui-input" type="number" name="cap" min="10000" step="1000" [(ngModel)]="capital" required /></div>
+-            <button type="submit" class="ui-btn ui-btn-primary" [disabled]="busy()">{{ busy() ? 'Running…' : 'Show picks' }}</button>
++          <form class="mp-row" (ngSubmit)="runPaperScan()">
++            <div class="mp-field"><label for="paper-cap">Virtual cash (₹)</label>
++              <input id="paper-cap" class="ui-input" type="number" name="pcap" min="10000" step="1000" [(ngModel)]="capital" required /></div>
++            <button type="submit" class="ui-btn ui-btn-primary" [disabled]="busy()">{{ busy() ? 'Picking…' : 'Show this week’s stocks' }}</button>
+           </form>
+         </div>
+ 
++        @if (paperScan(); as s) {
++          <p class="mp-next">{{ s.nextAction || s.headline }}</p>
++          <ng-container [ngTemplateOutlet]="planCards" [ngTemplateOutletContext]="{ $implicit: s }" />
++        }
++
++        <div class="mp-card">
++          <div class="mp-card-head"><div>
++            <h3>Last 12 months</h3>
++            <p class="mp-sub">How Dual Momentum would have treated this cash. A week is noise — this is the proof.</p>
++          </div></div>
++          <button type="button" class="ui-btn ui-btn-secondary" [disabled]="busy()" (click)="runPaperYear()">
++            {{ busy() ? 'Replaying…' : 'See last 12 months' }}
++          </button>
++        </div>
++
+         @if (paper(); as p) {
+           <div class="mp-stats">
+-            <div class="mp-stat"><span class="mp-stat-label">Total profit</span>
++            <div class="mp-stat"><span class="mp-stat-label">Paper P&amp;L</span>
+               <span class="mp-stat-value" [class]="'mp-' + tone(p.totalProfit)">{{ signedInr(p.totalProfit) }}</span>
+-              <span class="mp-stat-hint">closed {{ signedInr(p.closedProfit) }} · still open {{ signedInr(p.openProfit) }}</span></div>
+-            <div class="mp-stat"><span class="mp-stat-label">Capital</span>
+-              <span class="mp-stat-value">{{ inr(p.capital) }}</span>
+               <span class="mp-stat-hint">{{ p.from }} → {{ p.to }}</span></div>
+-            <div class="mp-stat"><span class="mp-stat-label">Closed trades</span>
+-              <span class="mp-stat-value">{{ p.closed.length }}</span>
+-              <span class="mp-stat-hint">entry &amp; exit at {{ p.fillTime }}</span></div>
++            <div class="mp-stat"><span class="mp-stat-label">Return</span>
++              <span class="mp-stat-value" [class]="'mp-' + tone(p.summary?.returnPct ?? p.metrics?.totalReturnPct)">
++                {{ pctNum(p.summary?.returnPct ?? p.metrics?.totalReturnPct, 1, true) }}
++              </span>
++              <span class="mp-stat-hint">started {{ inr(p.capital) }}</span></div>
++            <div class="mp-stat"><span class="mp-stat-label">Win rate</span>
++              <span class="mp-stat-value">{{ pctNum(p.summary?.winRatePct ?? p.metrics?.winRatePct, 0) }}</span>
++              <span class="mp-stat-hint">{{ p.closed.length }} closed · {{ p.open.length }} still held</span></div>
+           </div>
+-
++          @if (p.summary; as sum) {
++            <div class="mp-callout" [attr.data-tone]="tone(p.totalProfit) === 'down' ? 'warn' : 'info'">
++              <p class="mp-answer">{{ sum.headline }}</p>
++              <ul class="mp-list">@for (b of sum.bullets; track b) { <li>{{ b }}</li> }</ul>
++              <p class="mp-sub">{{ sum.honestNote }}</p>
++            </div>
++          }
+           <div class="mp-card">
+-            <div class="mp-card-head"><div><h3>Entered and sold</h3>
+-              <p class="mp-sub">Decision after 16:00 IST the previous session. Fill at 09:15 IST the next trading morning.</p></div></div>
++            <div class="mp-card-head"><h3>Closed trades</h3></div>
+             <div class="mp-table-wrap"><table class="mp-table">
+-              <thead><tr>
+-                <th>Stock</th><th class="num">Qty</th>
+-                <th>Entry</th><th class="num">Entry ₹</th>
+-                <th>Exit</th><th class="num">Exit ₹</th>
+-                <th class="num">Held</th><th class="num">Profit</th><th>Why sold</th>
+-              </tr></thead>
++              <thead><tr><th>Stock</th><th class="num">Qty</th><th>In</th><th>Out</th><th class="num">P&amp;L</th></tr></thead>
+               <tbody>
+                 @for (t of p.closed; track t.symbol + t.entryDate + t.exitDate) {
+                   <tr>
+                     <td class="mp-sym">{{ t.symbol }}</td>
+                     <td class="num">{{ t.qty }}</td>
+-                    <td>{{ shortDate(t.entryDate) }}<div class="mp-small mp-muted">{{ t.entryTime }}</div></td>
+-                    <td class="num">{{ inr(t.entryPrice, 2) }}</td>
+-                    <td>{{ shortDate(t.exitDate) }}<div class="mp-small mp-muted">{{ t.exitTime }}</div></td>
+-                    <td class="num">{{ inr(t.exitPrice, 2) }}</td>
+-                    <td class="num">{{ t.holdingDays ?? '—' }}d</td>
+-                    <td class="num" [class]="'mp-' + tone(t.pnl)">{{ signedInr(t.pnl) }}@if (t.pnlPct != null) { <div class="mp-small">{{ pctNum(t.pnlPct * 100, 1, true) }}</div> }</td>
+-                    <td class="reason">{{ t.exitReason }}</td>
+-                  </tr>
+-                } @empty {
+-                  <tr><td colspan="9" class="mp-empty">No completed trades in this range.</td></tr>
+-                }
+-              </tbody>
+-            </table></div>
+-          </div>
+-
+-          <div class="mp-card">
+-            <div class="mp-card-head"><h3>Still holding at the end</h3></div>
+-            <div class="mp-table-wrap"><table class="mp-table">
+-              <thead><tr><th>Stock</th><th class="num">Qty</th><th>Entry</th><th class="num">Entry ₹</th><th class="num">Last ₹</th><th class="num">Held</th><th class="num">Open P&amp;L</th></tr></thead>
+-              <tbody>
+-                @for (t of p.open; track t.symbol) {
+-                  <tr>
+-                    <td class="mp-sym">{{ t.symbol }}</td>
+-                    <td class="num">{{ t.qty }}</td>
+-                    <td>{{ shortDate(t.entryDate) }}<div class="mp-small mp-muted">{{ t.entryTime }}</div></td>
+-                    <td class="num">{{ inr(t.entryPrice, 2) }}</td>
+-                    <td class="num">{{ inr(t.lastPrice, 2) }}</td>
+-                    <td class="num">{{ t.holdingDays ?? '—' }}d</td>
++                    <td>{{ shortDate(t.entryDate) }}<div class="mp-small mp-muted">{{ inr(t.entryPrice, 2) }}</div></td>
++                    <td>{{ shortDate(t.exitDate) }}<div class="mp-small mp-muted">{{ inr(t.exitPrice, 2) }}</div></td>
+                     <td class="num" [class]="'mp-' + tone(t.pnl)">{{ signedInr(t.pnl) }}</td>
+                   </tr>
+                 } @empty {
+-                  <tr><td colspan="7" class="mp-empty">Flat at the end of the range.</td></tr>
++                  <tr><td colspan="5" class="mp-empty">No completed trades — Dual Momentum held or stayed in cash.</td></tr>
+                 }
+               </tbody>
+             </table></div>
+           </div>
+         }
+-      } @else {
+-        @if (overview(); as o) {
+-          <div class="mp-card when">
+-            <div class="mp-card-head"><div>
+-              <h2>When to run the scanner</h2>
+-              <p class="mp-sub">{{ o.strategy.name }} · {{ o.schedule.horizon.toLowerCase() }} review. Decisions use the completed daily bar. Orders fill the next morning.</p>
+-            </div></div>
+-            <div class="mp-grid">
+-              <div class="mp-col-6">
+-                <div class="when-kicker">Buy / add new stocks</div>
+-                <div class="when-when">{{ o.schedule.buy.when }}</div>
+-                <p class="mp-sub">{{ o.schedule.buy.instruction }}</p>
+-              </div>
+-              <div class="mp-col-6">
+-                <div class="when-kicker">Check sells</div>
+-                <div class="when-when">{{ o.schedule.sell.when }}</div>
+-                <p class="mp-sub">{{ o.schedule.sell.instruction }}</p>
+-              </div>
+-            </div>
+-            <p class="mp-sub hold-rule">{{ o.schedule.holdRule }}</p>
+-          </div>
+-        }
+ 
+-        <div class="mp-card">
+-          <div class="mp-card-head"><div>
+-            <h2>This week</h2>
+-            <p class="mp-sub">Scans every NSE large-cap and mid-cap, and checks the stocks you already hold at Kite. New-buy qty is sized from <strong>Kite equity cash</strong> (2–3 names). Press Buy or Sell only on the rows you want. New buys show a LIMIT you can rest in advance for the next 09:15 IST open.</p>
+-          </div></div>
+-          <form class="mp-row" (ngSubmit)="runScan()">
+-            @if (kiteCash() != null) {
+-              <div class="mp-field"><span class="when-kicker">Kite cash</span>
+-                <div class="mp-ticket">{{ inr(kiteCash()!, 0) }}</div>
+-                <small>Qty is sized from this, not a typed ₹10,000.</small></div>
+-            } @else {
+-              <div class="mp-field"><label for="live-cap">Capital (₹)</label>
+-                <input id="live-cap" class="ui-input" type="number" name="lcap" min="10000" step="1000" [(ngModel)]="capital" required /></div>
+-            }
+-            @if (kiteCash() == null) {
+-              <label class="ui-check"><input type="checkbox" name="reset" [(ngModel)]="resetBook" /> Start fresh with this capital</label>
+-            }
+-            <button type="submit" class="ui-btn ui-btn-primary" [disabled]="busy()">{{ busy() ? 'Scanning…' : 'Run scanner' }}</button>
+-          </form>
+-          @if (fundsError()) {
+-            <div class="mp-banner" data-tone="down" role="alert">Could not read Kite funds: {{ fundsError() }}. Qty is using the capital box until the token works.</div>
+-          }
+-          @if (scan()?.sizedFrom === 'kite-funds' && scan()?.capital != null) {
+-            <p class="mp-sub">This scan sized new buys from Kite cash {{ inr(scan()!.capital, 0) }}.</p>
+-          }
+-          @if (scan()?.usedPaperFallback) {
+-            <div class="mp-banner" data-tone="info" role="status">Kite CNC is read for qty and sell prices even if live trading is not enabled. Buy still uses the paper book until you enable live in Settings.</div>
+-          }
+-          @if (scan()?.holdingsSync; as hs) {
+-            @if (hs.ok) {
+-              <p class="mp-sub">Kite CNC: {{ (hs.imported?.length || 0) + (hs.updated?.length || 0) }} name(s)@if (hs.preview) { (read-only) }@if (hs.skipped?.length; as skippedCount) { · {{ skippedCount }} not in this scanner }.</p>
+-            } @else if (hs.error) {
+-              <div class="mp-banner" data-tone="down" role="alert">Could not refresh CNC holdings: {{ hs.error }}</div>
+-            }
+-          }
+-        </div>
+-
+-        @if (scan(); as s) {
+-          <div class="mp-pick-strip">
+-            @for (r of s.buy; track r.symbol) {
+-              <div class="mp-pick" data-kind="buy">
+-                <div class="when-kicker">Buy</div>
+-                <strong>{{ r.symbol }}</strong>
+-                <div class="mp-ticket">{{ r.qty }} sh · {{ r.suggestedLimit != null ? inr(r.suggestedLimit, 2) : inr(r.priceRef, 2) }}</div>
+-              </div>
+-            }
+-            @for (r of s.hold; track r.symbol) {
+-              <div class="mp-pick" data-kind="hold">
+-                <div class="when-kicker">Hold</div>
+-                <strong>{{ r.symbol }}</strong>
+-                <div class="mp-ticket">{{ r.qty }} sh · sell {{ r.suggestedSell != null ? inr(r.suggestedSell, 2) : inr(r.lastPrice ?? r.priceRef, 2) }}</div>
+-              </div>
+-            }
+-            @for (r of s.sell; track r.symbol + r.action) {
+-              <div class="mp-pick" data-kind="sell">
+-                <div class="when-kicker">Sell</div>
+-                <strong>{{ r.symbol }}</strong>
+-                <div class="mp-ticket">{{ r.qty }} sh · {{ r.suggestedSell != null ? inr(r.suggestedSell, 2) : inr(r.suggestedLimit ?? r.priceRef, 2) }}</div>
+-              </div>
+-            }
+-          </div>
+-        }
+-
+-        <div class="mp-card">
+-          <div class="mp-card-head"><div><h3>Last week’s picks</h3>
+-            <p class="mp-sub">@if (lastWeekLabel()) { Week {{ lastWeekLabel() }}. } @else { Run the scanner at least once to store a week. }</p></div></div>
+-          <div class="mp-table-wrap"><table class="mp-table">
+-            <thead><tr><th>Date</th><th>Stock</th><th class="num">Qty</th><th class="num">Ref ₹</th><th class="num">Buy at ₹</th><th>Why</th></tr></thead>
+-            <tbody>
+-              @for (p of lastWeekPicks(); track p.symbol + p.date) {
+-                <tr>
+-                  <td>{{ shortDate(p.date) }}</td>
+-                  <td class="mp-sym">{{ p.symbol }}
+-                    <div class="mp-ticket">{{ p.qty }} sh · {{ p.suggestedLimit != null ? inr(p.suggestedLimit, 2) : inr(p.priceRef, 2) }}</div></td>
+-                  <td class="num">{{ p.qty }}</td>
+-                  <td class="num">{{ inr(p.priceRef, 2) }}</td>
+-                  <td class="num">{{ p.suggestedLimit != null ? inr(p.suggestedLimit, 2) : '—' }}</td>
+-                  <td class="reason">{{ p.reason }}</td>
+-                </tr>
+-              } @empty {
+-                <tr><td colspan="6" class="mp-empty">No saved pick from last week.</td></tr>
+-              }
+-            </tbody>
+-          </table></div>
+-        </div>
++        <p class="mp-cta">Ready to use real cash? Open <a class="mp-link" routerLink="../live">Live</a> and Get Token. Palagai reads Kite funds and prints this week’s tickets.</p>
++      } @else {
++        <section class="mp-hero mp-hero-live">
++          <p class="mp-kicker">Invest</p>
++          <h2>Live — Get Token. We handle the rest.</h2>
++          <p>
++            You log in once each morning. Palagai reads Kite equity cash, sizes 2–5 Dual Momentum names, and tells you
++            Buy / Hold / Sell. Rest the LIMIT after 16:00 IST for the next 09:15 IST open.
++          </p>
++        </section>
+ 
+-        @if (scan(); as s) {
+-          <p class="mp-sub">As of {{ s.asOf }} close · {{ s.headline }}</p>
++        @if (!tokenReady()) {
+           <div class="mp-card">
+-            <div class="mp-card-head">
+-              <div><h3>Buy</h3><p class="mp-sub">New names. Rest the Buy-at LIMIT for the next 09:15 IST open (AMO after 16:00). Ref is last close.</p></div>
+-              @if (executable(s.buy).length) {
+-                <button type="button" class="ui-btn ui-btn-primary mp-btn-sm" [disabled]="busy()" (click)="executeRows(s.buy)">Buy all</button>
++            <div class="mp-card-head"><h3>Three steps. You only do the first.</h3></div>
++            <ol class="mp-steps">
++              @for (g of guide(); track g.step) {
++                <li [class.done]="g.done">
++                  <strong>{{ g.step }}. {{ g.title }}</strong>
++                  <p>{{ g.body }}</p>
++                  @if (g.href) {
++                    <a class="ui-btn ui-btn-primary" [routerLink]="g.href">Get Token</a>
++                  }
++                </li>
+               }
+-            </div>
+-            <div class="mp-table-wrap"><table class="mp-table">
+-              <thead><tr><th>Stock</th><th class="num">Qty</th><th class="num">Ref ₹</th><th class="num">Buy at ₹</th><th class="num">Value</th><th>Why</th><th></th></tr></thead>
+-              <tbody>
+-                @for (r of s.buy; track r.symbol) {
+-                  <tr>
+-                    <td class="mp-sym">{{ r.symbol }}
+-                      <div class="mp-ticket">{{ r.qty }} sh · {{ r.suggestedLimit != null ? inr(r.suggestedLimit, 2) : inr(r.priceRef, 2) }}</div></td>
+-                    <td class="num">{{ r.qty }}</td>
+-                    <td class="num">{{ inr(r.priceRef, 2) }}</td>
+-                    <td class="num"><strong>{{ r.suggestedLimit != null ? inr(r.suggestedLimit, 2) : '—' }}</strong>
+-                      @if (r.fillHint) { <div class="mp-small mp-muted">{{ r.fillHint }}</div> }</td>
+-                    <td class="num">{{ inr(r.allocationValue) }}</td>
+-                    <td class="reason">{{ r.reason }}</td>
+-                    <td class="num">
+-                      @if (r.canExecute) {
+-                        <button type="button" class="ui-btn ui-btn-primary mp-btn-sm" [disabled]="busy()" (click)="executeOne(r)">Buy</button>
+-                      }
+-                    </td>
+-                  </tr>
+-                } @empty { <tr><td colspan="7" class="mp-empty">Nothing to buy today.</td></tr> }
+-              </tbody>
+-            </table></div>
+-          </div>
+-
+-          <div class="mp-card">
+-            <div class="mp-card-head"><div><h3>Hold</h3><p class="mp-sub">Already in your Kite CNC book, including Nifty BeES / Gold BeES / Silver BeES. Qty and a Sell-at LIMIT are on every row.</p></div></div>
+-            <div class="mp-table-wrap"><table class="mp-table">
+-              <thead><tr><th>Stock</th><th class="num">Qty</th><th class="num">Entry ₹</th><th class="num">Last ₹</th><th class="num">Sell at ₹</th><th>Why</th></tr></thead>
+-              <tbody>
+-                @for (r of s.hold; track r.symbol) {
+-                  <tr>
+-                    <td class="mp-sym">{{ r.symbol }}
+-                      <div class="mp-ticket">{{ r.qty }} sh · sell {{ r.suggestedSell != null ? inr(r.suggestedSell, 2) : inr(r.lastPrice ?? r.priceRef, 2) }}</div></td>
+-                    <td class="num">{{ r.qty }}</td>
+-                    <td class="num">{{ r.avgPrice != null ? inr(r.avgPrice, 2) : '—' }}</td>
+-                    <td class="num">{{ inr(r.lastPrice ?? r.priceRef, 2) }}</td>
+-                    <td class="num"><strong>{{ r.suggestedSell != null ? inr(r.suggestedSell, 2) : (r.suggestedLimit != null ? inr(r.suggestedLimit, 2) : '—') }}</strong>
+-                      @if (r.fillHint) { <div class="mp-small mp-muted">{{ r.fillHint }}</div> }</td>
+-                    <td class="reason">{{ r.reason }}</td>
+-                  </tr>
+-                } @empty { <tr><td colspan="6" class="mp-empty">No holdings to hold. If you already own stocks or BeES at Kite, update the token and open Live again — CNC qty is read even before live trading is enabled.</td></tr> }
+-              </tbody>
+-            </table></div>
++            </ol>
+           </div>
+-
++        } @else {
+           <div class="mp-card">
+-            <div class="mp-card-head">
+-              <div><h3>Sell</h3><p class="mp-sub">Exit or reduce names you already hold. Rest the Sell-at LIMIT for the next 09:15 IST open.</p></div>
+-              @if (executable(s.sell).length) {
+-                <button type="button" class="ui-btn ui-btn-danger mp-btn-sm" [disabled]="busy()" (click)="executeRows(s.sell)">Sell all</button>
++            <div class="mp-card-head"><div>
++              <h3>This week</h3>
++              <p class="mp-sub">
++                @if (kiteCash() != null) { Kite cash {{ inr(kiteCash()!, 0) }} — Palagai sizes from this. }
++                @else { Token is in. Palagai will read cash on scan. }
++              </p>
++            </div></div>
++            <form class="mp-row" (ngSubmit)="runScan()">
++              @if (kiteCash() == null) {
++                <div class="mp-field"><label for="live-cap">Fallback capital (₹)</label>
++                  <input id="live-cap" class="ui-input" type="number" name="lcap" min="10000" step="1000" [(ngModel)]="capital" required /></div>
+               }
+-            </div>
+-            <div class="mp-table-wrap"><table class="mp-table">
+-              <thead><tr><th>Stock</th><th>Action</th><th class="num">Qty</th><th class="num">Sell at ₹</th><th>Why</th><th></th></tr></thead>
+-              <tbody>
+-                @for (r of s.sell; track r.symbol + r.action) {
+-                  <tr>
+-                    <td class="mp-sym">{{ r.symbol }}
+-                      <div class="mp-ticket">{{ r.qty }} sh · {{ r.suggestedSell != null ? inr(r.suggestedSell, 2) : inr(r.suggestedLimit ?? r.priceRef, 2) }}</div></td>
+-                    <td><span class="mp-badge" [attr.data-tone]="actionTone(r.action)">{{ r.action }}</span></td>
+-                    <td class="num">{{ r.qty }}</td>
+-                    <td class="num"><strong>{{ r.suggestedSell != null ? inr(r.suggestedSell, 2) : (r.suggestedLimit != null ? inr(r.suggestedLimit, 2) : inr(r.priceRef, 2)) }}</strong>
+-                      @if (r.fillHint) { <div class="mp-small mp-muted">{{ r.fillHint }}</div> }</td>
+-                    <td class="reason">{{ r.reason }}</td>
+-                    <td class="num">
+-                      @if (r.canExecute) {
+-                        <button type="button" class="ui-btn ui-btn-danger mp-btn-sm" [disabled]="busy()" (click)="executeOne(r)">Sell</button>
+-                      }
+-                    </td>
+-                  </tr>
+-                } @empty { <tr><td colspan="6" class="mp-empty">Nothing to sell today.</td></tr> }
+-              </tbody>
+-            </table></div>
++              <button type="submit" class="ui-btn ui-btn-primary" [disabled]="busy()">{{ busy() ? 'Scanning…' : 'Refresh this week' }}</button>
++            </form>
++            @if (fundsError()) {
++              <div class="mp-banner" data-tone="down" role="alert">{{ fundsError() }} — update Get Token, then refresh.</div>
++            }
+           </div>
+ 
+-          @if (s.alsoHeld?.length) {
+-            <div class="mp-card">
+-              <div class="mp-card-head"><div>
+-                <h3>Also in your CNC book</h3>
+-                <p class="mp-sub">Held at Kite but not in the large/mid weekly scanner. Qty and a Sell-at LIMIT are listed. The system will not auto-replace these.</p>
+-              </div></div>
+-              <div class="mp-table-wrap"><table class="mp-table">
+-                <thead><tr><th>Stock</th><th class="num">Qty</th><th class="num">Avg ₹</th><th class="num">Last ₹</th><th class="num">Sell at ₹</th><th>Why skipped</th></tr></thead>
+-                <tbody>
++          @if (scan(); as s) {
++            <p class="mp-next">{{ s.nextAction || s.headline }}</p>
++            <ng-container [ngTemplateOutlet]="planCards" [ngTemplateOutletContext]="{ $implicit: s }" />
++
++            @if (s.alsoHeld?.length) {
++              <div class="mp-card">
++                <div class="mp-card-head"><div>
++                  <h3>Also at Kite</h3>
++                  <p class="mp-sub">Held, but not in this Dual Momentum book. Palagai will not replace them.</p>
++                </div></div>
++                <ul class="mp-list">
+                   @for (h of s.alsoHeld; track h.symbol) {
+-                    <tr>
+-                      <td class="mp-sym">{{ h.symbol }}
+-                        <div class="mp-ticket">{{ h.qty ?? '—' }} sh · sell {{ h.suggestedSell != null ? inr(h.suggestedSell, 2) : '—' }}</div></td>
+-                      <td class="num">{{ h.qty ?? '—' }}</td>
+-                      <td class="num">{{ h.avgPrice != null ? inr(h.avgPrice, 2) : '—' }}</td>
+-                      <td class="num">{{ h.lastPrice != null ? inr(h.lastPrice, 2) : '—' }}</td>
+-                      <td class="num"><strong>{{ h.suggestedSell != null ? inr(h.suggestedSell, 2) : '—' }}</strong>
+-                        @if (h.fillHint) { <div class="mp-small mp-muted">{{ h.fillHint }}</div> }</td>
+-                      <td class="reason">{{ h.reason }}</td>
+-                    </tr>
++                    <li><strong>{{ h.symbol }}</strong> · {{ h.qty ?? '—' }} sh
++                      @if (h.suggestedSell != null) { · sell {{ inr(h.suggestedSell, 2) }} }</li>
+                   }
+-                </tbody>
+-              </table></div>
+-            </div>
++                </ul>
++              </div>
++            }
+           }
+         }
+       }
+-
+-      <p class="mp-small mp-muted more"><a class="mp-link" routerLink="../settings">Settings</a>
+-        · <a class="mp-link" routerLink="../backtest">Research tools</a></p>
+     </div>
++
++    <ng-template #planCards let-s>
++      <div class="mp-plan">
++        @for (r of s.buy; track r.symbol) {
++          <article class="mp-ticket-card" data-kind="buy">
++            <div class="mp-kicker">Buy</div>
++            <h3>{{ r.symbol }}</h3>
++            <p class="mp-ticket-qty">{{ r.qty }} shares @ {{ r.suggestedLimit != null ? inr(r.suggestedLimit, 2) : inr(r.priceRef, 2) }}</p>
++            <p class="mp-sub">{{ r.fillHint || r.reason }}</p>
++            @if (kind() === 'live' && r.canExecute) {
++              <button type="button" class="ui-btn ui-btn-primary mp-btn-sm" [disabled]="busy()" (click)="executeOne(r)">Place buy</button>
++            }
++          </article>
++        }
++        @for (r of s.hold; track r.symbol) {
++          <article class="mp-ticket-card" data-kind="hold">
++            <div class="mp-kicker">Hold</div>
++            <h3>{{ r.symbol }}</h3>
++            <p class="mp-ticket-qty">{{ r.qty }} shares · last {{ inr(r.lastPrice ?? r.priceRef, 2) }}</p>
++            <p class="mp-sub">{{ r.reason }}</p>
++          </article>
++        }
++        @for (r of s.sell; track r.symbol + r.action) {
++          <article class="mp-ticket-card" data-kind="sell">
++            <div class="mp-kicker">Sell</div>
++            <h3>{{ r.symbol }}</h3>
++            <p class="mp-ticket-qty">{{ r.qty }} shares @ {{ r.suggestedSell != null ? inr(r.suggestedSell, 2) : inr(r.suggestedLimit ?? r.priceRef, 2) }}</p>
++            <p class="mp-sub">{{ r.fillHint || r.reason }}</p>
++            @if (kind() === 'live' && r.canExecute) {
++              <button type="button" class="ui-btn ui-btn-danger mp-btn-sm" [disabled]="busy()" (click)="executeOne(r)">Place sell</button>
++            }
++          </article>
++        }
++      </div>
++      @if (!s.buy?.length && !s.hold?.length && !s.sell?.length) {
++        <div class="mp-card mp-empty">Nothing to do this week. Dual Momentum is in cash, or Nifty’s trend is off.</div>
++      }
++    </ng-template>
+   `,
+   styles: `
+-    .when-kicker { font-size: 0.75rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--pg-muted); }
+-    .when-when { font-size: 1.15rem; font-weight: 700; margin: 0.25rem 0 0.4rem; letter-spacing: -0.02em; }
+-    .hold-rule { margin-top: 0.85rem; font-weight: 600; }
+-    .more { margin-top: 0.25rem; }
+-    .mp-ticket { font-weight: 750; font-variant-numeric: tabular-nums; font-size: 0.92rem; margin-top: 0.2rem; letter-spacing: -0.02em; }
+-    .mp-pick-strip { display: flex; flex-wrap: wrap; gap: 0.6rem; margin: 0 0 1rem; }
+-    .mp-pick { background: #fff; border: 1px solid var(--pg-line); border-radius: 10px; padding: 0.7rem 0.9rem; min-width: 11.5rem; }
+-    .mp-pick[data-kind='buy'] { border-color: #16a34a; }
+-    .mp-pick[data-kind='sell'] { border-color: #dc2626; }
+-    .mp-pick strong { display: block; font-size: 1.05rem; }
++    .mp-hero { background: var(--pg-bg-elevated); border: 1px solid var(--pg-line); border-radius: var(--pg-radius-lg); padding: 1.2rem 1.3rem; }
++    .mp-hero-live { border-color: #86efac; background: var(--pg-bull-soft); }
++    .mp-kicker { margin: 0 0 0.25rem; font-size: 0.72rem; font-weight: 750; letter-spacing: 0.08em; text-transform: uppercase; color: var(--pg-muted); }
++    .mp-hero h2 { margin: 0 0 0.45rem; font-size: 1.35rem; letter-spacing: -0.03em; }
++    .mp-hero p { margin: 0; color: var(--pg-ink); line-height: 1.5; font-size: 0.92rem; }
++    .mp-next { margin: 0; font-size: 1.05rem; font-weight: 700; letter-spacing: -0.02em; }
++    .mp-cta { margin: 0; font-size: 0.9rem; }
++    .mp-plan { display: grid; gap: 0.75rem; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
++    .mp-ticket-card { background: #fff; border: 1px solid var(--pg-line); border-radius: 14px; padding: 1rem 1.05rem; display: flex; flex-direction: column; gap: 0.3rem; }
++    .mp-ticket-card[data-kind='buy'] { border-color: #16a34a; }
++    .mp-ticket-card[data-kind='sell'] { border-color: #dc2626; }
++    .mp-ticket-card h3 { margin: 0; font-size: 1.25rem; }
++    .mp-ticket-qty { margin: 0; font-weight: 750; font-variant-numeric: tabular-nums; }
++    .mp-steps { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 1rem; }
++    .mp-steps li { padding-left: 0; }
++    .mp-steps p { margin: 0.25rem 0 0.5rem; color: var(--pg-muted); font-size: 0.88rem; line-height: 1.45; }
++    .mp-steps li.done strong { color: var(--pg-bull-deep); }
+   `,
+ })
+ export class DeskTabComponent implements OnInit {
+@@ -354,22 +244,19 @@ export class DeskTabComponent implements OnInit {
+ 
+   protected readonly overview = signal<DeskOverview | null>(null);
+   protected readonly paper = signal<DeskPaperReplay | null>(null);
++  protected readonly paperScan = signal<DeskScan | null>(null);
+   protected readonly scan = signal<DeskScan | null>(null);
+   protected readonly error = signal('');
+   protected readonly notice = signal('');
+   protected readonly busy = signal(false);
+ 
+-  protected capital = 10000;
+-  protected from = '2024-01-01';
+-  protected to = '2024-12-31';
+-  protected resetBook = false;
++  protected capital = 25000;
+ 
+   protected readonly inr = inr;
+   protected readonly signedInr = signedInr;
+   protected readonly pctNum = pctNum;
+   protected readonly tone = tone;
+   protected readonly shortDate = shortDate;
+-  protected readonly actionTone = actionTone;
+ 
+   protected readonly kiteCash = computed(() => {
+     const fromScan = this.scan()?.funds;
+@@ -385,44 +272,51 @@ export class DeskTabComponent implements OnInit {
+     return f.error || '';
+   });
+ 
+-  ngOnInit(): void {
+-    const last = this.state.status()?.data.last;
+-    if (last) this.to = last;
+-    void this.loadOverview();
+-  }
+-
+-  protected lastWeekPicks() {
+-    return this.scan()?.lastWeek.picks ?? this.overview()?.lastWeek.picks ?? [];
+-  }
++  protected readonly tokenReady = computed(() => {
++    return !!(this.overview()?.tokenReady || this.state.status()?.broker?.configured);
++  });
+ 
+-  protected lastWeekLabel() {
+-    return this.scan()?.lastWeek.week ?? this.overview()?.lastWeek.week ?? '';
+-  }
++  protected readonly guide = computed<DeskGuideStep[]>(() => this.overview()?.guide ?? []);
+ 
+-  protected executable(rows: DeskActionRow[]): DeskActionRow[] {
+-    return rows.filter((r) => r.canExecute && r.signalId);
++  ngOnInit(): void {
++    const def = this.overview()?.paperDefaults?.capital;
++    if (def) this.capital = def;
++    void this.loadOverview();
+   }
+ 
+   private async loadOverview(): Promise<void> {
+     try {
+       const o = await this.api.desk();
+       this.overview.set(o);
++      if (o.paperDefaults?.capital) this.capital = o.paperDefaults.capital;
+       if (this.kind() === 'live') {
+         if (o.lastScan) this.scan.set(o.lastScan);
+-        if (o.funds?.ok && o.lastScan?.sizedFrom !== 'kite-funds') await this.runScan();
++        if (this.tokenReady() && o.funds?.ok) await this.runScan();
+       }
+     } catch (err) {
+-      this.error.set(errorMessage(err, 'Could not load the scan calendar'));
++      this.error.set(errorMessage(err, 'Could not load Palagai Momentum'));
+     }
+   }
+ 
+-  protected async runPaper(): Promise<void> {
++  protected async runPaperScan(): Promise<void> {
+     this.busy.set(true);
+     this.error.set('');
+     try {
+-      this.paper.set(await this.api.deskPaper({ capital: Number(this.capital), from: this.from, to: this.to }));
++      this.paperScan.set(await this.api.deskScan({ capital: Number(this.capital), reset: true, mode: 'PAPER' }));
+     } catch (err) {
+-      this.error.set(errorMessage(err, 'Could not replay that date range'));
++      this.error.set(errorMessage(err, 'Could not pick this week’s stocks'));
++    } finally {
++      this.busy.set(false);
++    }
++  }
++
++  protected async runPaperYear(): Promise<void> {
++    this.busy.set(true);
++    this.error.set('');
++    try {
++      this.paper.set(await this.api.deskPaper({ capital: Number(this.capital) }));
++    } catch (err) {
++      this.error.set(errorMessage(err, 'Could not replay the last 12 months'));
+     } finally {
+       this.busy.set(false);
+     }
+@@ -436,12 +330,11 @@ export class DeskTabComponent implements OnInit {
+       const mode: PortfolioMode = 'LIVE';
+       const result = await this.api.deskScan({
+         capital: this.kiteCash() ?? Number(this.capital),
+-        reset: this.resetBook,
+         mode,
+       });
+       this.scan.set(result);
+     } catch (err) {
+-      this.error.set(errorMessage(err, 'Scanner failed'));
++      this.error.set(errorMessage(err, 'Could not build this week’s tickets'));
+     } finally {
+       this.busy.set(false);
+     }
+@@ -462,22 +355,4 @@ export class DeskTabComponent implements OnInit {
+       this.busy.set(false);
+     }
+   }
+-
+-  protected async executeRows(rows: DeskActionRow[]): Promise<void> {
+-    const ids = this.executable(rows).map((r) => r.signalId!).filter(Boolean);
+-    if (!ids.length) return;
+-    this.busy.set(true);
+-    this.error.set('');
+-    try {
+-      const out = await this.api.executeSignals(ids);
+-      const lines = out.results.map((r) => `${r.action} ${r.symbol} — ${r.status}`).join('; ');
+-      this.notice.set(lines || 'Nothing sent.');
+-      for (const row of rows) row.canExecute = false;
+-      this.scan.update((s) => (s ? { ...s } : s));
+-    } catch (err) {
+-      this.error.set(errorMessage(err, 'Could not send those orders'));
+-    } finally {
+-      this.busy.set(false);
+-    }
+-  }
+ }
+diff --git a/src/app/features/dashboard/momentum/tabs/settings-tab.component.ts b/src/app/features/dashboard/momentum/tabs/settings-tab.component.ts
+index 7d98b77..ffb837b 100644
+--- a/src/app/features/dashboard/momentum/tabs/settings-tab.component.ts
++++ b/src/app/features/dashboard/momentum/tabs/settings-tab.component.ts
+@@ -39,6 +39,14 @@ const RISK_FIELDS: RiskField[] = [
+       @if (error()) { <div class="mp-banner" data-tone="down" role="alert">{{ error() }}</div> }
+       @if (notice()) { <div class="mp-banner" data-tone="up" role="status">{{ notice() }}</div> }
+ 
++      <div class="mp-card">
++        <div class="mp-card-head"><div>
++          <h2>You only need Get Token</h2>
++          <p class="mp-sub">Live reads Kite cash and prints this week’s Dual Momentum tickets. Paper needs no token. Everything below is optional.</p>
++        </div></div>
++        <a class="ui-btn ui-btn-primary" routerLink="/dashboard/get-token">Get Token</a>
++      </div>
++
+       @if (cfg(); as c) {
+         <div class="mp-grid">
+           <div class="mp-card mp-col-6">
+diff --git a/src/styles/momentum.css b/src/styles/momentum.css
+index e2796f3..f4bc937 100644
+--- a/src/styles/momentum.css
++++ b/src/styles/momentum.css
+@@ -314,6 +314,23 @@
+ }
+ .mp-link:hover { text-decoration: underline; }
+ 
++    .mp-hero { background: var(--pg-bg-elevated); border: 1px solid var(--pg-line); border-radius: var(--pg-radius-lg); padding: 1.2rem 1.3rem; }
++.mp-hero-live { border-color: #86efac; background: var(--pg-bull-soft); }
++.mp-kicker { margin: 0 0 0.25rem; font-size: 0.72rem; font-weight: 750; letter-spacing: 0.08em; text-transform: uppercase; color: var(--pg-muted); }
++.mp-hero h2 { margin: 0 0 0.45rem; font-size: 1.35rem; letter-spacing: -0.03em; }
++.mp-hero p { margin: 0; line-height: 1.5; font-size: 0.92rem; }
++.mp-next { margin: 0; font-size: 1.05rem; font-weight: 700; letter-spacing: -0.02em; }
++.mp-cta { margin: 0; font-size: 0.9rem; }
++.mp-plan { display: grid; gap: 0.75rem; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
++.mp-ticket-card { background: #fff; border: 1px solid var(--pg-line); border-radius: 14px; padding: 1rem 1.05rem; display: flex; flex-direction: column; gap: 0.3rem; }
++.mp-ticket-card[data-kind='buy'] { border-color: #16a34a; }
++.mp-ticket-card[data-kind='sell'] { border-color: #dc2626; }
++.mp-ticket-card h3 { margin: 0; font-size: 1.25rem; }
++.mp-ticket-qty { margin: 0; font-weight: 750; font-variant-numeric: tabular-nums; }
++.mp-steps { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 1rem; }
++.mp-steps p { margin: 0.25rem 0 0.5rem; color: var(--pg-muted); font-size: 0.88rem; line-height: 1.45; }
++.mp-steps li.done strong { color: var(--pg-bull-deep); }
++
+ @media (max-width: 720px) {
+   .mp-card { padding: 1rem; }
+   .mp-kv { grid-template-columns: 1fr; }
+-- 
+2.43.0
+
