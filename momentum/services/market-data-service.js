@@ -1,40 +1,45 @@
 'use strict';
 
-const { MarketPanel } = require('../data/panel');
+const { panelFromStore } = require('../data/panel');
 const { BENCHMARK } = require('../data/universe');
 const { addDays } = require('../utils/dates');
 const { HISTORY_START } = require('../data/synthetic-provider');
+const { KiteTape } = require('../data/kite-tape');
 
 function buildPanel(store) {
-  const stocks = new Map(store.listStocks().map((s) => [s.symbol, s]));
-  const rows = store.allPriceRows();
-  const bySymbol = new Map();
-  for (const r of rows) {
-    if (!bySymbol.has(r.symbol)) bySymbol.set(r.symbol, []);
-    bySymbol.get(r.symbol).push(r);
+  return panelFromStore(store, BENCHMARK.symbol);
+}
+
+function lastCloseOf(panel, symbol) {
+  const d = panel.data.get(symbol);
+  if (!d) return { close: null, closeTs: null };
+  for (let i = panel.lastIndex; i >= 0; i -= 1) {
+    if (Number.isFinite(d.close[i])) return { close: d.close[i], closeTs: panel.dates[i] };
   }
-  const benchRows = bySymbol.get(BENCHMARK.symbol) || [];
-  const dates = benchRows.map((r) => r.date);
-  if (!dates.length) throw new Error('No market data loaded yet - run a data sync first');
-  const series = [];
-  for (const [symbol, list] of bySymbol) {
-    const meta = stocks.get(symbol) || { name: symbol, sector: 'OTHER' };
-    series.push({ symbol, name: meta.name, sector: meta.sector, rows: list });
-  }
-  return new MarketPanel({ dates, series, benchmark: BENCHMARK.symbol });
+  return { close: null, closeTs: null };
 }
 
 /**
  * Keeps the price tables in sync with the active provider and builds the
  * MarketPanel the engine works from. The panel is cached until new rows arrive.
+ *
+ * Live Kite daily history lives in a separate kite tape so it never mixes with
+ * the synthetic sqlite (that mix throws PROVIDER_MISMATCH).
  */
 class MarketDataService {
-  constructor({ store, providerFor, clock = () => new Date() }) {
+  constructor({ store, providerFor, clock = () => new Date(), kiteTapePath = null }) {
     this.store = store;
     this.providerFor = providerFor;
     this.clock = clock;
     this.panelCache = null;
     this.syncing = null;
+    this.livePanel = null;
+    this.liveMeta = null;
+    this.kiteTape = kiteTapePath ? new KiteTape({ dbPath: kiteTapePath, clock }) : null;
+  }
+
+  close() {
+    this.kiteTape?.close();
   }
 
   invalidate() {
@@ -89,8 +94,7 @@ class MarketDataService {
     return { provider: provider.id, simulated: !!provider.isSimulated, newRows, quotes, failures, ...stats };
   }
 
-  /** Full-history panel from the database. */
-  loadPanel() {
+  loadSyntheticPanel() {
     const stats = this.store.priceStats();
     const key = `${stats.rows}|${stats.last}`;
     if (this.panelCache && this.panelCache.key === key) return this.panelCache.panel;
@@ -99,12 +103,42 @@ class MarketDataService {
     return panel;
   }
 
+  /** Engine panel: live Kite tape when warmed, otherwise the synthetic store. */
+  loadPanel() {
+    if (this.livePanel) return this.livePanel;
+    return this.loadSyntheticPanel();
+  }
+
   hasData() {
     return this.store.priceStats().rows > 0;
   }
 
   latestDate() {
+    if (this.livePanel?.dates?.length) return this.livePanel.dates[this.livePanel.lastIndex];
     return this.store.priceStats().last;
+  }
+
+  priceSource() {
+    if (this.livePanel) return { id: 'kite', simulated: false, label: 'NSE daily history (Kite)' };
+    return { id: 'synthetic', simulated: true, label: 'Simulated prices' };
+  }
+
+  /**
+   * Pull (or refresh) the Kite daily tape without touching synthetic rows.
+   * `from` defaults to ~4.5 years so Dual Momentum 12-1 has warmup in one Kite chunk.
+   */
+  async activateKite(provider, { from } = {}) {
+    if (!this.kiteTape) {
+      const err = new Error('Kite tape is not configured');
+      err.code = 'NO_KITE_TAPE';
+      throw err;
+    }
+    const to = provider.lastDate();
+    const fromDate = from || addDays(to, -1600);
+    const stats = await this.kiteTape.ensure({ provider, from: fromDate, to });
+    this.livePanel = this.kiteTape.loadPanel();
+    this.liveMeta = { provider: 'kite', simulated: false, ...stats };
+    return { panel: this.livePanel, ...stats };
   }
 
   /**
@@ -112,25 +146,18 @@ class MarketDataService {
    * replace the last daily close (those ticks were showing as "the" stock price).
    */
   priceFor(symbol) {
-    const q = this.store.getQuote(symbol);
-    const panel = this.loadPanel();
-    const d = panel.data.get(symbol);
-    let close = null;
-    let closeTs = null;
-    if (d) {
-      for (let i = panel.lastIndex; i >= 0; i -= 1) {
-        if (Number.isFinite(d.close[i])) {
-          close = d.close[i];
-          closeTs = panel.dates[i];
-          break;
-        }
-      }
+    const kiteQ = this.kiteTape?.store.getQuote(symbol);
+    if (kiteQ && Number.isFinite(kiteQ.last) && !kiteQ.simulated) {
+      return { price: kiteQ.last, source: 'quote', ts: kiteQ.ts, simulated: false };
     }
+    const q = this.store.getQuote(symbol);
+    const panel = this.livePanel || this.loadSyntheticPanel();
+    const { close, closeTs } = lastCloseOf(panel, symbol);
     if (q && Number.isFinite(q.last) && !q.simulated) {
       return { price: q.last, source: 'quote', ts: q.ts, simulated: false };
     }
     if (close != null) {
-      return { price: close, source: 'close', ts: closeTs, simulated: !!(q && q.simulated) };
+      return { price: close, source: 'close', ts: closeTs, simulated: !this.livePanel };
     }
     if (q && Number.isFinite(q.last)) {
       return { price: q.last, source: 'quote', ts: q.ts, simulated: !!q.simulated };

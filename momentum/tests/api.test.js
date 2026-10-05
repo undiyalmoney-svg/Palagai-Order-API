@@ -297,8 +297,10 @@ test('paper replay without dates uses ~12 months, this week picks, and is not an
   assert.ok(auto.body.nextAction);
   assert.ok(auto.body.lastWeek);
   assert.equal(auto.body.period, 'last_12m');
-  assert.ok(Number.isFinite(auto.body.startCapital));
+  assert.equal(auto.body.startCapital, 10000);
   assert.ok(auto.body.endCapital != null);
+  assert.equal(auto.body.priceSource, 'synthetic');
+  assert.equal(auto.body.simulated, true);
 
   const week = await s.call('POST', '/desk/paper', { capital: 25000, period: 'last_week' });
   assert.equal(week.status, 200);

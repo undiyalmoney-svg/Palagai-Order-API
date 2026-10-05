@@ -8,8 +8,8 @@ const OPEN = new Date('2026-09-30T05:00:00Z'); // Wed 10:30 IST, market open
 let cachedRows = null;
 
 /** Fresh in-memory app with the deterministic synthetic history loaded. */
-async function makeApp({ clock = () => NOW, brokerOverride = null } = {}) {
-  const app = createMomentumApp({ dbPath: ':memory:', clock, brokerOverride, coreOnly: true });
+async function makeApp({ clock = () => NOW, brokerOverride = null, ...appOptions } = {}) {
+  const app = createMomentumApp({ dbPath: ':memory:', clock, brokerOverride, coreOnly: true, ...appOptions });
   if (cachedRows) {
     const stocks = cachedRows.stocks;
     app.store.upsertStocks(stocks.map((s) => ({ ...s, benchmark: !!s.benchmark })));

@@ -325,10 +325,11 @@ function paperPeriodCatalog(panel) {
   };
 }
 
-function windowBacktest(bt, from, to, capital) {
+function windowBacktest(bt, from, to, capital, { warmupDays = 0 } = {}) {
   const equity = (bt.equity || []).filter((e) => e.date >= from && e.date <= to);
   const fills = (bt.fills || []).filter((f) => f.date >= from && f.date <= to);
   const srcEq = equity.length ? equity : bt.equity || [];
+  const startCapital = warmupDays ? srcEq[0]?.equity ?? capital : capital;
   const metrics = srcEq.length
     ? computeMetrics({
         equity: srcEq,
@@ -346,7 +347,7 @@ function windowBacktest(bt, from, to, capital) {
           }
           return sliced.length > 1 ? sliced : null;
         })(),
-        startCapital: srcEq[0]?.equity ?? capital,
+        startCapital,
       })
     : bt.metrics;
   return {
@@ -386,7 +387,7 @@ function signedInr(n) {
   return abs;
 }
 
-function paperSummary({ capital, closed, open, metrics, from, to }) {
+function paperSummary({ capital, closed, open, metrics, from, to, priceSource } = {}) {
   const m = metrics || {};
   const wins = (closed || []).filter((t) => Number(t.pnl) > 0).length;
   const losses = (closed || []).filter((t) => Number(t.pnl) <= 0).length;
@@ -410,17 +411,62 @@ function paperSummary({ capital, closed, open, metrics, from, to }) {
   ].filter(Boolean);
   const started = Number.isFinite(Number(m.startCapital)) ? Number(m.startCapital) : capital;
   const ended = Number.isFinite(Number(m.endCapital)) ? Number(m.endCapital) : null;
+  const kite = priceSource === 'kite';
   return {
     headline,
     bullets,
-    honestNote:
-      'This is a 2–3 name Dual Momentum 12-1 book (Gold / Silver / Nifty BeES included when they lead). Last week is noise — read last 12 months and last year. The ~15% months are this sleeve’s paydays; cash months are Nifty’s trend off.',
+    honestNote: kite
+      ? 'This is a 2–3 name Dual Momentum 12-1 book on live NSE daily bars (Gold / Silver / Nifty BeES included when they lead). Last week is noise — read last 12 months and last year. The ~15% months are this sleeve’s paydays; cash months are Nifty’s trend off.'
+      : 'These paper numbers use SIMULATED prices, not NSE. Get Token, then Show results — Palagai replays Dual Momentum on live Kite daily history. That is the tape with the ~15% months.',
     started,
     ended,
     returnPct: Number.isFinite(retPct) ? retPct : null,
     winRatePct: Number.isFinite(winRate) ? winRate : null,
     maxDrawdownPct: Number.isFinite(dd) ? dd : null,
   };
+}
+
+async function enginePanelForUser(momentum, userId, { from } = {}) {
+  const fallback = () => ({
+    panel: momentum.marketData.loadSyntheticPanel(),
+    priceSource: 'synthetic',
+    simulated: true,
+    priceError: null,
+  });
+  try {
+    const provider = typeof momentum.paperProviderFor === 'function' ? await momentum.paperProviderFor(userId) : null;
+    if (!provider || !momentum.marketData.kiteTape) return fallback();
+    await momentum.marketData.activateKite(provider, { from });
+    return {
+      panel: momentum.marketData.loadPanel(),
+      priceSource: 'kite',
+      simulated: false,
+      priceError: null,
+    };
+  } catch (err) {
+    const had = momentum.marketData.kiteTape?.hasData?.();
+    if (had) {
+      try {
+        momentum.marketData.livePanel = momentum.marketData.kiteTape.loadPanel();
+        return {
+          panel: momentum.marketData.livePanel,
+          priceSource: 'kite',
+          simulated: false,
+          priceError: err.message,
+        };
+      } catch {
+        /* fall through */
+      }
+    }
+    return { ...fallback(), priceError: err.message };
+  }
+}
+
+function warmKiteTape(momentum, userId) {
+  if (typeof momentum.paperProviderFor !== 'function' || !momentum.marketData.kiteTape) return;
+  if (!momentum.sessions.authorization(userId)) return;
+  if (momentum.marketData.livePanel) return;
+  void enginePanelForUser(momentum, userId).catch(() => {});
 }
 
 function nextActionLine(schedule, scan) {
@@ -475,11 +521,19 @@ function thisWeekFromEngine(momentum, userId, capital, extra = {}) {
   };
 }
 
-function paperReplay(research, momentum, userId, { from, to, capital, period, strategyId } = {}) {
+async function paperReplay(research, momentum, userId, { from, to, capital, period, strategyId } = {}) {
   const cap = Number(capital);
   if (!Number.isFinite(cap) || cap < 10_000) throw new ServiceError('BAD_REQUEST', 'Enter capital of at least ₹10,000');
-  const panel = research.marketData.loadPanel();
+  let { panel, priceSource, simulated, priceError } = await enginePanelForUser(momentum, userId);
   const range = resolvePaperPeriod(panel, { from, to, period });
+  const needFrom = addDays(range.from, -(range.warmupDays || 400));
+  if (priceSource === 'kite' && panel.dates[0] > needFrom) {
+    const again = await enginePanelForUser(momentum, userId, { from: needFrom });
+    panel = again.panel;
+    priceSource = again.priceSource;
+    simulated = again.simulated;
+    priceError = again.priceError;
+  }
   const warmIdx = range.warmupDays
     ? panel.indexOnOrBefore(addDays(range.from, -range.warmupDays))
     : panel.indexOnOrBefore(range.from);
@@ -495,7 +549,7 @@ function paperReplay(research, momentum, userId, { from, to, capital, period, st
     slippageBps: cfg.slippageBps,
     maxPriceDeviationPct: cfg.params.maxPriceDeviationPct ?? 0.04,
   });
-  const windowed = windowBacktest(raw, range.from, range.to, cap);
+  const windowed = windowBacktest(raw, range.from, range.to, cap, { warmupDays: range.warmupDays || 0 });
   const closed = pairClosedTrades(raw.fills).filter(
     (t) => t.exitDate && t.exitDate >= range.from && t.exitDate <= range.to,
   );
@@ -527,6 +581,7 @@ function paperReplay(research, momentum, userId, { from, to, capital, period, st
     metrics: { ...windowed.metrics, totalPnl: totalProfit },
     from: fromDate,
     to: toDate,
+    priceSource,
   });
   return {
     kind: 'PAPER',
@@ -538,6 +593,12 @@ function paperReplay(research, momentum, userId, { from, to, capital, period, st
     capital: cap,
     startCapital: summary.started,
     endCapital: summary.ended,
+    priceSource,
+    simulated,
+    priceError,
+    priceNote: simulated
+      ? 'Simulated prices — Get Token so paper uses live NSE daily history.'
+      : 'NSE daily bars via Kite (not the mock tape).',
     strategy: cfg.strategy.id,
     strategyName: cfg.strategy.name || 'Dual Momentum - Weekly',
     fillTime: FILL_CLOCK,
@@ -610,6 +671,7 @@ async function deskOverview(momentum, userId, now = new Date()) {
   const live = momentum.store.getPortfolio(userId, 'LIVE');
   const paper = momentum.store.getPortfolio(userId, 'PAPER');
   const book = live || paper;
+  warmKiteTape(momentum, userId);
   const lastOf = (symbol) => momentum.marketData.priceFor(symbol)?.price ?? null;
   const rowExtra = { maxDeviationPct: cfg.params.maxPriceDeviationPct ?? 0.04, fillTime: FILL_CLOCK, lastOf };
   let lastScan = latestScanFromStore(momentum, userId, { cfg, lastOf });
@@ -670,9 +732,10 @@ async function deskOverview(momentum, userId, now = new Date()) {
       try {
         const panel = momentum.marketData.loadPanel();
         const range = defaultPaperRange(panel);
-        return { capital: 25_000, ...range, periods: paperPeriodCatalog(panel) };
+        const src = momentum.marketData.priceSource();
+        return { capital: 25_000, ...range, periods: paperPeriodCatalog(panel), priceSource: src.id, simulated: src.simulated };
       } catch {
-        return { capital: 25_000, from: null, to: null, auto: true, period: 'last_12m', periods: null };
+        return { capital: 25_000, from: null, to: null, auto: true, period: 'last_12m', periods: null, priceSource: 'synthetic', simulated: true };
       }
     })(),
     lastWeek: lastWeekPicks(momentum.store, book, asOf),
@@ -909,6 +972,7 @@ async function scanDesk(momentum, userId, { capital, reset = false, mode = 'LIVE
   let holdingsSync = null;
   if (wantLive) holdingsSync = await syncHoldingsForLiveScan(momentum, userId, live);
   applySizingCash(momentum, userId, { live, useMode, cap, reset });
+  const tape = await enginePanelForUser(momentum, userId);
   const r = momentum.runDecision({ userId, mode: useMode, kind: 'MANUAL', forceReview: true });
   const signalByKey = new Map((r.signals || []).map((s) => [s.decisionKey, s.id]));
   const cfg = momentum.config(userId);
@@ -950,6 +1014,11 @@ async function scanDesk(momentum, userId, { capital, reset = false, mode = 'LIVE
     holdingsSync,
     product,
     nextAction: product.nextAction,
+    priceSource: tape.priceSource,
+    simulated: tape.simulated,
+    priceNote: tape.simulated
+      ? 'Simulated prices — Get Token so this week’s ranks use live NSE history.'
+      : 'NSE daily bars via Kite.',
     ...overlay,
   };
 }
@@ -975,4 +1044,6 @@ module.exports = {
   paperPeriodCatalog,
   paperSummary,
   liveGuide,
+  windowBacktest,
+  enginePanelForUser,
 };

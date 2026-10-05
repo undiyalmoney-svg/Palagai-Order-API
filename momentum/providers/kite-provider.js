@@ -3,6 +3,12 @@
 const { UNIVERSE, BENCHMARK } = require('../data/universe');
 const { lastCompletedTradingDate, marketStatus } = require('../utils/dates');
 
+/** NSE renamed a few book names; try these tradingsymbols when the primary is missing. */
+const SYMBOL_ALIASES = {
+  TATAMOTORS: ['TATAMOTORS', 'TMPV', 'TMCV'],
+  LTIM: ['LTIM', 'LTIMINDTREE'],
+};
+
 /**
  * Real market data through Kite Connect (needs a valid user session).
  * `api` is injectable so tests never touch the network.
@@ -59,6 +65,16 @@ class KiteProvider {
       map.set(cols[2].trim().toUpperCase(), Number(cols[0]));
     }
     map.set(BENCHMARK.symbol, BENCHMARK.kiteToken);
+    for (const [symbol, aliases] of Object.entries(SYMBOL_ALIASES)) {
+      if (map.has(symbol)) continue;
+      for (const alias of aliases) {
+        const tok = map.get(alias);
+        if (tok) {
+          map.set(symbol, tok);
+          break;
+        }
+      }
+    }
     this.tokens = map;
     return map;
   }
@@ -68,14 +84,19 @@ class KiteProvider {
     const tokens = await this.resolveTokens();
     const token = tokens.get(symbol);
     if (!token) throw new Error(`No Kite instrument token for ${symbol}`);
-    const bars = await this.api.fetchHistoricalInterval(auth, token, from, to, 'day');
+    const bars = await this.api.fetchHistoricalInterval(auth, token, from, to, 'day', { chunkGapMs: 250 });
     return bars.map((b) => ({ date: String(b.date).slice(0, 10), open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume }));
   }
 
   async fetchQuotes(symbols) {
     const auth = await this.authorization();
     const keys = symbols.map((s) => (s === BENCHMARK.symbol ? BENCHMARK.kiteKey : `NSE:${s}`));
-    const raw = await this.api.fetchQuotes(auth, keys);
+    const raw = {};
+    const CHUNK = 80;
+    for (let i = 0; i < keys.length; i += CHUNK) {
+      const slice = keys.slice(i, i + CHUNK);
+      Object.assign(raw, await this.api.fetchQuotes(auth, slice));
+    }
     const out = {};
     const ts = this.nowFn().toISOString();
     for (const s of symbols) {

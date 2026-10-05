@@ -314,4 +314,23 @@ class MarketView {
   }
 }
 
-module.exports = { MarketPanel, MarketView };
+function panelFromStore(store, benchmark) {
+  const stocks = new Map(store.listStocks().map((s) => [s.symbol, s]));
+  const rows = store.allPriceRows();
+  const bySymbol = new Map();
+  for (const r of rows) {
+    if (!bySymbol.has(r.symbol)) bySymbol.set(r.symbol, []);
+    bySymbol.get(r.symbol).push(r);
+  }
+  const benchRows = bySymbol.get(benchmark) || [];
+  const dates = benchRows.map((r) => r.date);
+  if (!dates.length) throw new Error('No market data loaded yet - run a data sync first');
+  const series = [];
+  for (const [symbol, list] of bySymbol) {
+    const meta = stocks.get(symbol) || { name: symbol, sector: 'OTHER' };
+    series.push({ symbol, name: meta.name, sector: meta.sector, rows: list });
+  }
+  return new MarketPanel({ dates, series, benchmark });
+}
+
+module.exports = { MarketPanel, MarketView, panelFromStore };
