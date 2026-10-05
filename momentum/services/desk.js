@@ -403,7 +403,7 @@ function paperSummary({ capital, closed, open, metrics, from, to }) {
     Number.isFinite(winRate) ? `Win rate ${winRate.toFixed(0)}%.` : null,
     Number.isFinite(dd) ? `Worst drop ${dd.toFixed(1)}%.` : null,
     `${(open || []).length} still held at the end.`,
-    'Dual Momentum sits in cash when Nifty’s own trend is broken, so a bear stretch is not a forced buy list.',
+    'Dual Momentum sits in cash when Nifty’s own trend is broken — those zero months are the filter, not a miss.',
     capital < 25_000
       ? 'A book this small pays the same DP/STT as a larger one. Dual Momentum’s edge is clearer from about ₹25,000. This week’s tickets still work.'
       : null,
@@ -414,7 +414,7 @@ function paperSummary({ capital, closed, open, metrics, from, to }) {
     headline,
     bullets,
     honestNote:
-      'This is a 4–16 week hold, not a one-week scalp. One week of P&L is noise unless you also read last 12 months and last year. Strong months happen when leaders (including Gold/Silver/Nifty BeES) run; they are not a 15% every-month guarantee.',
+      'This is a 2–3 name Dual Momentum 12-1 book (Gold / Silver / Nifty BeES included when they lead). Last week is noise — read last 12 months and last year. The ~15% months are this sleeve’s paydays; cash months are Nifty’s trend off.',
     started,
     ended,
     returnPct: Number.isFinite(retPct) ? retPct : null,
@@ -447,7 +447,7 @@ function liveGuide({ tokenReady, fundsReady, cash }) {
       title: 'We read your cash',
       body: tokenReady
         ? fundsReady
-          ? `Kite equity cash ${inr(cash, 0)}. Palagai sizes 2–5 Dual Momentum names from this. You do not type capital.`
+          ? `Kite equity cash ${inr(cash, 0)}. Palagai sizes 2–3 Dual Momentum names from this. You do not type capital.`
           : 'Token is in. Update it if funds did not load, then open Live again.'
         : 'After the token, Palagai reads Kite equity cash and sizes the book for you.',
       done: !!tokenReady && !!fundsReady,
@@ -663,7 +663,7 @@ async function deskOverview(momentum, userId, now = new Date()) {
       horizon: cfg.params.horizon,
       description:
         cfg.strategy.description ||
-        'Dual Momentum 12-1 plus Gold/Silver/Nifty BeES: buy the strongest NSE large/mid names (and BeES when they lead), sit in cash when Nifty’s trend is broken.',
+        'Dual Momentum 12-1 plus Gold/Silver/Nifty BeES: buy the strongest 2–3 NSE large/mid names (and BeES when they lead), sit in cash when Nifty’s trend is broken. That sleeve is the ~15% month book.',
     },
     schedule: buildSchedule(cfg.params.horizon, now),
     paperDefaults: (() => {

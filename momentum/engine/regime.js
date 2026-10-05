@@ -69,23 +69,28 @@ function computeRegime(view, params, prev = null) {
   // Dual Momentum absolute filter with hysteresis so a week of noise does
   // not dump the book and buy it back. Turn OFF only when the 200-day is
   // lost and 3-month Nifty is clearly negative. Turn back ON only after
-  // the 200-day is recaptured.
+  // the 200-day is recaptured. Strategies can disable the cash gate.
   const nifty12x1 = Number.isFinite(b.ret.m12x1) ? b.ret.m12x1 : b.ret.m12;
   const above200 = !!b.trend.aboveLong;
   const m3 = Number.isFinite(b.ret.m3) ? b.ret.m3 : 0;
-  let absOn;
-  if (prev === 'BEARISH') {
-    absOn = above200 && m3 > 0;
+  const absEnabled = params.absoluteMomentum !== false;
+  let absOn = true;
+  if (absEnabled) {
+    if (prev === 'BEARISH') {
+      absOn = above200 && m3 > 0;
+    } else {
+      absOn = above200 || m3 > 0.02;
+    }
+    if (!absOn) {
+      regime = 'BEARISH';
+      reasons.push(
+        `Absolute momentum OFF: NIFTY below 200-EMA and 3M ${pctText(b.ret.m3)} — Dual Momentum stays in cash`,
+      );
+    } else {
+      reasons.push(`Absolute momentum ON: NIFTY 12-1 ${pctText(nifty12x1)}, 3M ${pctText(b.ret.m3)}, ${above200 ? 'above' : 'below'} 200-EMA`);
+    }
   } else {
-    absOn = above200 || m3 > 0.02;
-  }
-  if (!absOn) {
-    regime = 'BEARISH';
-    reasons.push(
-      `Absolute momentum OFF: NIFTY below 200-EMA and 3M ${pctText(b.ret.m3)} — Dual Momentum stays in cash`,
-    );
-  } else {
-    reasons.push(`Absolute momentum ON: NIFTY 12-1 ${pctText(nifty12x1)}, 3M ${pctText(b.ret.m3)}, ${above200 ? 'above' : 'below'} 200-EMA`);
+    reasons.push('Absolute momentum gate off — book stays invested through Nifty trend breaks');
   }
 
   reasons.push(`Regime score ${round(score, 1)}/100 -> ${regime}`);

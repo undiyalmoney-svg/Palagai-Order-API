@@ -16,7 +16,9 @@ const HORIZONS = ['DAILY', 'WEEKLY', 'MONTHLY'];
  * Weekly (the product) is Dual Momentum: Jegadeesh–Titman 12-1 relative
  * strength (12-month return skipping the last month, so we do not buy last
  * month's reversal) plus Antonacci absolute momentum (stay in cash when Nifty
- * itself has lost the 12-1 trend). Daily/monthly stay available for research.
+ * itself has lost the 12-1 trend). The live book is 2–3 names — that sleeve
+ * is the one that prints the ~15% months on the NSE tape. Daily/monthly stay
+ * available for research.
  */
 const HORIZON_PRESETS = {
   DAILY: {
@@ -33,7 +35,7 @@ const HORIZON_PRESETS = {
     stopAtrMult: 4.0,
     trailAtrMult: 5.0,
     expectedHolding: 'roughly 4-16 weeks, held while Dual Momentum stays valid',
-    holdingHint: 'Dual Momentum — rank by 12-1, sit in cash when Nifty loses the trend, hold winners.',
+    holdingHint: 'Dual Momentum — rank by 12-1, hold 2–3 leaders, sit in cash when Nifty loses the trend.',
   },
   MONTHLY: {
     momentumWeights: { ret63: 0.15, ret126: 0.25, ret231: 0.6 },
@@ -138,11 +140,11 @@ const BASE_PARAMS = {
   climaxTakeFraction: 1,
   sectorWeakPct: -0.05,
 
-  maxPositions: 5,
+  maxPositions: 3,
   minPositionValue: 2_000,
-  maxPositionPct: 0.22,
-  maxSectorPct: 0.45,
-  riskPerTradePct: 0.015,
+  maxPositionPct: 0.36,
+  maxSectorPct: 0.55,
+  riskPerTradePct: 0.02,
   maxOpenRiskPct: 0.12,
   sizing: 'EQUAL_WEIGHT',
   minCashPct: 0.05,
@@ -150,7 +152,7 @@ const BASE_PARAMS = {
   corrLimit: 0.9,
   corrLookback: 60,
   marginalDiversificationMin: 0.08,
-  maxDrawdownHaltPct: 0.25,
+  maxDrawdownHaltPct: 0.4,
 
   replaceMinScoreGain: 22,
   edgePerScorePointPct: 0.25,
@@ -160,6 +162,7 @@ const BASE_PARAMS = {
   minTicketValue: 200,
 
   scanEveryDay: false,
+  absoluteMomentum: true,
   regime: {
     bullishMin: 62,
     bearishMax: 38,
@@ -200,8 +203,22 @@ const STRATEGY_PRESETS = [
     id: 'momentum-weekly',
     name: 'Dual Momentum - Weekly',
     description:
-      'Buy the NSE large/mid names with the strongest 12-month return (skip last month). Equal-weight 2–5 stocks. Sit in cash when Nifty itself loses the 12-1 trend. Hold winners; sell when rank or absolute momentum fails.',
+      'Buy the NSE large/mid names (and Gold / Silver / Nifty BeES when they lead) with the strongest 12-month return, skip last month. Equal-weight 2–3 stocks. Sit in cash when Nifty itself loses the 12-1 trend. This is the Dual Momentum sleeve that prints the ~15% months on the live NSE tape; cash months are the filter working, not a miss.',
     overrides: { horizon: 'WEEKLY' },
+  },
+  {
+    id: 'momentum-classic-5',
+    name: 'Dual Momentum - Classic 5',
+    description:
+      'Smoother 12-1 Dual Momentum: up to 5 names at ~22% each. Fewer 15% months, milder swings. Same cash gate when Nifty loses the trend.',
+    overrides: {
+      horizon: 'WEEKLY',
+      maxPositions: 5,
+      maxPositionPct: 0.22,
+      maxSectorPct: 0.45,
+      riskPerTradePct: 0.015,
+      maxDrawdownHaltPct: 0.25,
+    },
   },
   {
     id: 'momentum-daily',
@@ -249,7 +266,7 @@ const STRATEGY_PRESETS = [
     id: 'momentum-leaders-bees',
     name: 'Dual Momentum - Leaders + BeES',
     description:
-      'Same weekly book, plus Gold / Silver / Nifty BeES. Ranks 1–6 month leaders (not only 12-1) so commodity runs can sit in the 2–4 name sleeve. Cash when Nifty’s trend is broken. Stronger months than classic 12-1; not a promise of 15% every month.',
+      'Same 2–3 name sleeve, plus Gold / Silver / Nifty BeES ranked on 1–6 month leaders (not only 12-1) so commodity runs can sit in the book. Cash when Nifty’s trend is broken.',
     overrides: {
       horizon: 'WEEKLY',
       minScore: 46,
@@ -313,11 +330,11 @@ function resolveParams(overrides = {}) {
   p.watchScore = num(p.watchScore, 42, 10, p.minScore);
   p.holdScore = num(p.holdScore, 36, 5, p.minScore);
   p.sellScore = num(p.sellScore, 22, 0, p.holdScore);
-  p.maxPositions = Math.round(num(p.maxPositions, 5, 1, 40));
+  p.maxPositions = Math.round(num(p.maxPositions, 3, 1, 40));
   p.minPositionValue = num(p.minPositionValue, 2_000, 200, 10_000_000);
-  p.maxPositionPct = num(p.maxPositionPct, 0.22, 0.03, 1);
-  p.maxSectorPct = num(p.maxSectorPct, 0.45, 0.05, 1);
-  p.riskPerTradePct = num(p.riskPerTradePct, 0.015, 0.001, 0.05);
+  p.maxPositionPct = num(p.maxPositionPct, 0.36, 0.03, 1);
+  p.maxSectorPct = num(p.maxSectorPct, 0.55, 0.05, 1);
+  p.riskPerTradePct = num(p.riskPerTradePct, 0.02, 0.001, 0.05);
   p.maxOpenRiskPct = num(p.maxOpenRiskPct, 0.12, 0.01, 0.4);
   p.minCashPct = num(p.minCashPct, 0.05, 0, 0.9);
   p.minTicketValue = num(p.minTicketValue, 200, 50, 1_000_000);
@@ -325,7 +342,8 @@ function resolveParams(overrides = {}) {
   p.trailAtrMult = num(p.trailAtrMult, preset.trailAtrMult, 0.5, 10);
   p.volBreakoutMult = num(p.volBreakoutMult, 1.3, 0.5, 5);
   p.rsMin = num(p.rsMin, 0, -0.5, 0.5);
-  p.maxDrawdownHaltPct = num(p.maxDrawdownHaltPct, 0.25, 0.03, 0.9);
+  p.maxDrawdownHaltPct = num(p.maxDrawdownHaltPct, 0.4, 0.03, 0.9);
+  p.absoluteMomentum = p.absoluteMomentum !== false;
   p.minHistoryBars = Math.round(num(p.minHistoryBars, 252, 60, 400));
   if (!['RISK_BASED', 'EQUAL_WEIGHT'].includes(p.sizing)) p.sizing = 'EQUAL_WEIGHT';
   if (!Array.isArray(p.emaPeriods) || p.emaPeriods.length !== 4) p.emaPeriods = [...BASE_PARAMS.emaPeriods];

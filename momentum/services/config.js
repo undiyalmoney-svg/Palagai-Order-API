@@ -22,17 +22,34 @@ function mergeSettings(saved) {
   };
 }
 
-function mergeRisk(saved) {
-  return { ...DEFAULT_RISK_SETTINGS, ...(saved || {}) };
+/** Old factory risk (5 names × 22%) — rewrite to the 2–3 name payday book. */
+function isLegacyFactoryRisk(saved) {
+  if (!saved) return false;
+  return Number(saved.maxPositions) === 5 && Number(saved.maxPositionPct) === 0.22;
 }
 
-/** Seed the built-in presets for a user (idempotent). */
+function mergeRisk(saved) {
+  const merged = { ...DEFAULT_RISK_SETTINGS, ...(saved || {}) };
+  if (isLegacyFactoryRisk(saved)) {
+    merged.maxPositions = DEFAULT_RISK_SETTINGS.maxPositions;
+    merged.maxPositionPct = DEFAULT_RISK_SETTINGS.maxPositionPct;
+    merged.maxSectorPct = DEFAULT_RISK_SETTINGS.maxSectorPct;
+    merged.riskPerTradePct = DEFAULT_RISK_SETTINGS.riskPerTradePct;
+    merged.maxDrawdownHaltPct = DEFAULT_RISK_SETTINGS.maxDrawdownHaltPct;
+  }
+  return merged;
+}
+
+/** Seed / refresh the built-in presets for a user (idempotent). Custom strategies are left alone. */
 function ensureStrategies(store, userId) {
-  const existing = new Set(store.listStrategies(userId).map((s) => s.id));
+  const existing = new Map(store.listStrategies(userId).map((s) => [s.id, s]));
   for (const p of STRATEGY_PRESETS) {
-    if (existing.has(p.id)) continue;
     const params = paramsFromPreset(p.id);
-    store.saveStrategy(userId, { id: p.id, name: p.name, description: p.description, params, paramsHash: paramsHash(params), preset: true });
+    const hash = paramsHash(params);
+    const cur = existing.get(p.id);
+    if (cur && !cur.preset) continue;
+    if (cur && cur.preset && cur.paramsHash === hash) continue;
+    store.saveStrategy(userId, { id: p.id, name: p.name, description: p.description, params, paramsHash: hash, preset: true });
   }
 }
 

@@ -1,7 +1,7 @@
 'use strict';
 
 const { round, roundPrice, inr } = require('../utils/math');
-const { pctText } = require('./scoring');
+const { pctText, primaryMomentum } = require('./scoring');
 
 /**
  * Exit-timing engine.
@@ -84,10 +84,11 @@ function analyzeExit({ position, f, score, rank, rankCutoff, regime, params, sec
   const scoreWeak = score.total < params.holdScore;
   const scoreSevere = score.total < params.sellScore;
   addThesis('score', 'Composite score above hold level', !scoreWeak, `Score ${score.total} (hold >= ${params.holdScore}, sell < ${params.sellScore})`);
-  const momentumFade = Number.isFinite(f.ret.m12x1) ? f.ret.m12x1 < 0 : f.ret.m3 < 0;
-  addThesis('momentum', '12-1 Dual Momentum positive', !momentumFade, `12-1 ${pctText(f.ret.m12x1)}, 3M ${pctText(f.ret.m3)}`);
-  const rsBad = (Number.isFinite(f.rs.vsIndex12x1) ? f.rs.vsIndex12x1 : f.rs.vsIndex3m) <= params.rsDeteriorationPct && f.rs.vsIndex1m < 0;
-  addThesis('relativeStrength', 'Still beating NIFTY on 12-1', !rsBad, `12-1 vs NIFTY ${pctText(f.rs.vsIndex12x1)}, 1M vs NIFTY ${pctText(f.rs.vsIndex1m)}`);
+  const momGate = primaryMomentum(f, params);
+  const momentumFade = Number.isFinite(momGate.ret) ? momGate.ret < 0 : f.ret.m3 < 0;
+  addThesis('momentum', `${momGate.label} Dual Momentum positive`, !momentumFade, `${momGate.label} ${pctText(momGate.ret)}, 3M ${pctText(f.ret.m3)}`);
+  const rsBad = (Number.isFinite(momGate.rs) ? momGate.rs : f.rs.vsIndex3m) <= params.rsDeteriorationPct && f.rs.vsIndex1m < 0;
+  addThesis('relativeStrength', `Still beating NIFTY on ${momGate.label}`, !rsBad, `${momGate.label} vs NIFTY ${pctText(momGate.rs)}, 1M vs NIFTY ${pctText(f.rs.vsIndex1m)}`);
   const distribution = f.flow.upDown < 0.7 && f.flow.rel > 1.2 && f.ret.d1 < 0;
   addThesis('volume', 'No distribution selling', !distribution, `Up/down volume ${round(f.flow.upDown, 2)}, relative volume ${round(f.flow.rel, 2)}x`);
   const marketBad = regime.regime === 'BEARISH';
@@ -165,7 +166,7 @@ function analyzeExit({ position, f, score, rank, rankCutoff, regime, params, sec
     }
     if (!isReviewDay && severe && !trendBreakSevere && close > stop.price) {
       reasons.push(...detailLines);
-      warnings.push(`12-1 faded; deferred to ${nextReviewLabel || 'the next review'} unless the stop is hit`);
+      warnings.push(`${momGate.label} faded; deferred to ${nextReviewLabel || 'the next review'} unless the stop is hit`);
       return done('HOLD', null, 0, `WAIT - Dual Momentum fading; decision at ${nextReviewLabel || 'next review'}`, { timing: 'WAIT' });
     }
     reasons.push(...detailLines);

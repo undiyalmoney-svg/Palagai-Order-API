@@ -10,6 +10,25 @@ const { clamp, round } = require('../utils/math');
 const RET_KEY_MAP = { ret1: 'd1', ret5: 'w1', ret21: 'm1', ret63: 'm3', ret126: 'm6', ret231: 'm12x1', ret252: 'm12' };
 const RET_LABEL = { d1: '1D', w1: '1W', m1: '1M', m3: '3M', m6: '6M', m12: '12M', m12x1: '12M-1M' };
 const RET_SCALE = { d1: 0.02, w1: 0.04, m1: 0.08, m3: 0.15, m6: 0.25, m12: 0.4, m12x1: 0.35 };
+const RS_KEY_MAP = { d1: 'vsIndex1m', w1: 'vsIndex1m', m1: 'vsIndex1m', m3: 'vsIndex3m', m6: 'vsIndex6m', m12: 'vsIndex12x1', m12x1: 'vsIndex12x1' };
+
+/** Highest-weight lookback on this strategy — entry/exit use this, not a hardcoded 12-1. */
+function primaryMomentum(f, params) {
+  const weights = params?.momentumWeights || {};
+  let retKey = 'ret231';
+  let bestW = -1;
+  for (const [k, w] of Object.entries(weights)) {
+    if (Number(w) > bestW && RET_KEY_MAP[k]) {
+      bestW = Number(w);
+      retKey = k;
+    }
+  }
+  const featKey = RET_KEY_MAP[retKey] || 'm12x1';
+  const ret = Number.isFinite(f?.ret?.[featKey]) ? f.ret[featKey] : f?.ret?.m3;
+  const rsKey = RS_KEY_MAP[featKey] || 'vsIndex3m';
+  const rs = Number.isFinite(f?.rs?.[rsKey]) ? f.rs[rsKey] : f?.rs?.vsIndex3m;
+  return { featKey, label: RET_LABEL[featKey] || featKey, ret, rs };
+}
 
 function pctText(x, dp = 1) {
   return Number.isFinite(x) ? `${x >= 0 ? '+' : ''}${(x * 100).toFixed(dp)}%` : 'n/a';
@@ -176,4 +195,4 @@ function eligibility(f, barsAvailable, params) {
   return { eligible: reasons.length === 0, reasons };
 }
 
-module.exports = { scoreFeatures, eligibility, pctText, lerp };
+module.exports = { scoreFeatures, eligibility, pctText, lerp, primaryMomentum, RET_LABEL };

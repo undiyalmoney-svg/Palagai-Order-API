@@ -165,7 +165,7 @@ test('risk limits clip an oversized BUY to what the portfolio can afford', async
   enableLive(ctx);
   const res = await exec(ctx, addSignal(ctx, { qty: 500 }));
   assert.ok(res.order.qty >= 1 && res.order.qty < 500, `clipped from 500 to ${res.order.qty}`);
-  assert.ok(res.order.qty * res.order.limitPrice <= 200_000 * 0.22 + res.order.limitPrice);
+  assert.ok(res.order.qty * res.order.limitPrice <= 200_000 * 0.36 + res.order.limitPrice);
   assert.ok(res.validation.find((s) => s.id === 'risk_limits').detail.includes('Clipped'));
   ctx.app.close();
 });

@@ -71,7 +71,7 @@ test('acceptance: "I have 1,00,000 - what should I buy?" returns sized, explaine
     for (const k of ['whyBuy', 'whyNow', 'whyThisStock', 'whyThisPrice', 'howMuch', 'howManyShares', 'risk']) assert.ok(b.explanation[k], `missing ${k}`);
     assert.ok(b.explanation.confirms.length && b.explanation.invalidates.length);
     assert.ok(b.risk.stopPrice < b.priceRef);
-    assert.ok(b.allocationPct <= 0.22 + 1e-9);
+    assert.ok(b.allocationPct <= 0.36 + 1e-9);
     assert.ok(['BUY', 'STRONG_BUY'].includes(b.entryStatus));
   }
   const waits = result.decisions.filter((d) => d.action === 'WAIT');
@@ -291,6 +291,18 @@ test('₹10k weekly paper: adding small-caps is measured, not assumed', () => {
   assert.ok(Number.isFinite(row.plusRealistic.profit));
   assert.ok(row.largeMid.universeSize >= 30);
   assert.ok(row.plusRealistic.universeSize > row.largeMid.universeSize);
+});
+
+test('default Dual Momentum is the 2–3 name 12-1 payday book', () => {
+  const p = paramsFromPreset('momentum-weekly');
+  assert.equal(p.maxPositions, 3);
+  assert.equal(p.maxPositionPct, 0.36);
+  assert.equal(p.maxDrawdownHaltPct, 0.4);
+  assert.equal(p.absoluteMomentum, true);
+  assert.ok(p.momentumWeights.ret231 >= 0.6);
+  const classic = paramsFromPreset('momentum-classic-5');
+  assert.equal(classic.maxPositions, 5);
+  assert.equal(classic.maxPositionPct, 0.22);
 });
 
 test('scaleParamsForCapital opens a 10k ticket that the old 10k floor blocked', () => {
