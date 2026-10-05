@@ -292,6 +292,47 @@ function withTimeout(promise, ms, label) {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
+async function readKiteFunds(momentum, userId) {
+  if (!momentum.sessions.authorization(userId)) {
+    return { ok: false, error: 'No Kite session', equityCash: null, equityNet: null, source: null };
+  }
+  try {
+    const funds = await withTimeout(momentum.readLiveFunds(userId), 8000, 'Kite funds');
+    const equityCash = Number(funds?.equityCash ?? funds?.capitalRs);
+    if (!Number.isFinite(equityCash) || equityCash < 0) {
+      return { ok: false, error: 'Kite did not return equity cash', equityCash: null, equityNet: null, source: 'kite' };
+    }
+    return {
+      ok: true,
+      error: null,
+      equityCash,
+      equityNet: Number.isFinite(Number(funds?.equityNet)) ? Number(funds.equityNet) : null,
+      capitalRs: Number.isFinite(Number(funds?.capitalRs)) ? Number(funds.capitalRs) : equityCash,
+      source: 'kite',
+    };
+  } catch (err) {
+    return { ok: false, error: err.message || 'Could not read Kite funds', equityCash: null, equityNet: null, source: 'kite' };
+  }
+}
+
+function applySizingCash(momentum, userId, { live, useMode, cap, reset }) {
+  if (useMode === 'LIVE' && live) {
+    momentum.store.updatePortfolio(live.id, { cash: cap, peakEquity: Math.max(Number(live.peakEquity) || 0, cap) });
+    return momentum.store.getPortfolioById(live.id);
+  }
+  const existing = momentum.store.getPortfolio(userId, 'PAPER');
+  const seed = Math.max(cap, 10_000);
+  if (!existing || reset) momentum.initPaper(userId, seed, { reset: !!existing });
+  const p = momentum.store.getPortfolio(userId, 'PAPER');
+  momentum.store.updatePortfolio(p.id, {
+    autoExecute: false,
+    cash: cap,
+    initialCapital: cap,
+    peakEquity: Math.max(Number(p.peakEquity) || 0, cap),
+  });
+  return momentum.store.getPortfolioById(p.id);
+}
+
 async function deskOverview(momentum, userId, now = new Date()) {
   const cfg = momentum.config(userId);
   const asOf = lastCompletedTradingDate(now);
@@ -302,10 +343,10 @@ async function deskOverview(momentum, userId, now = new Date()) {
   const rowExtra = { maxDeviationPct: cfg.params.maxPriceDeviationPct ?? 0.04, fillTime: FILL_CLOCK, lastOf };
   let lastScan = latestScanFromStore(momentum, userId, { cfg, lastOf });
   let holdingsSync = null;
+  let funds = { ok: false, error: null, equityCash: null, equityNet: null, source: null };
   if (momentum.sessions.authorization(userId)) {
-    try {
-      const preview = await withTimeout(momentum.previewCncHoldings(userId), 4000, 'Kite CNC');
-      holdingsSync = {
+    const previewP = withTimeout(momentum.previewCncHoldings(userId), 4000, 'Kite CNC')
+      .then((preview) => ({
         ok: true,
         error: null,
         preview: !live,
@@ -314,9 +355,8 @@ async function deskOverview(momentum, userId, now = new Date()) {
         removed: [],
         skipped: preview.skipped,
         universeHoldings: preview.universeHoldings,
-      };
-    } catch (err) {
-      holdingsSync = {
+      }))
+      .catch((err) => ({
         ok: false,
         error: err.message || 'Could not read Kite holdings',
         preview: !live,
@@ -325,14 +365,14 @@ async function deskOverview(momentum, userId, now = new Date()) {
         removed: [],
         skipped: [],
         universeHoldings: [],
-      };
-    }
+      }));
+    [holdingsSync, funds] = await Promise.all([previewP, readKiteFunds(momentum, userId)]);
     const overlay = applyCncOverlay(lastScan || { buy: [], hold: [], sell: [] }, holdingsSync, rowExtra);
     lastScan = {
       ...(lastScan || {
         mode: live ? 'LIVE' : 'PAPER',
         usedPaperFallback: !live,
-        capital: book?.initialCapital ?? 0,
+        capital: funds.ok ? funds.equityCash : book?.initialCapital ?? 0,
         asOf,
         runId: null,
         answer: '',
@@ -340,6 +380,7 @@ async function deskOverview(momentum, userId, now = new Date()) {
         lastWeek: lastWeekPicks(momentum.store, book, asOf),
       }),
       holdingsSync,
+      funds,
       ...overlay,
     };
   }
@@ -350,6 +391,7 @@ async function deskOverview(momentum, userId, now = new Date()) {
     liveEnabled: !!cfg.settings.live.enabled,
     hasLive: !!live,
     hasPaper: !!paper,
+    funds,
     lastScan,
   };
 }
@@ -556,19 +598,23 @@ function bookEtfHoldRows(skipped, extra = {}) {
 }
 
 async function scanDesk(momentum, userId, { capital, reset = false, mode = 'LIVE' } = {}) {
-  const cap = Number(capital);
-  if (!Number.isFinite(cap) || cap < 10_000) throw new ServiceError('BAD_REQUEST', 'Enter capital of at least ₹10,000');
+  const entered = Number(capital);
   const wantLive = String(mode).toUpperCase() === 'LIVE';
   const live = momentum.store.getPortfolio(userId, 'LIVE');
   const useMode = wantLive && live ? 'LIVE' : 'PAPER';
+  const funds = wantLive ? await readKiteFunds(momentum, userId) : { ok: false, error: null, equityCash: null, equityNet: null, source: null };
+  const kiteCash = funds.ok ? funds.equityCash : null;
+  const sizedFrom = kiteCash != null ? 'kite-funds' : 'entered';
+  const cap = sizedFrom === 'kite-funds' ? kiteCash : entered;
+  if (sizedFrom === 'entered' && (!Number.isFinite(cap) || cap < 10_000)) {
+    throw new ServiceError('BAD_REQUEST', 'Enter capital of at least ₹10,000');
+  }
+  if (sizedFrom === 'kite-funds' && (!Number.isFinite(cap) || cap < 0)) {
+    throw new ServiceError('BAD_REQUEST', 'Kite cash is not available — update the token and run again');
+  }
   let holdingsSync = null;
   if (wantLive) holdingsSync = await syncHoldingsForLiveScan(momentum, userId, live);
-  if (useMode === 'PAPER') {
-    const existing = momentum.store.getPortfolio(userId, 'PAPER');
-    if (!existing || reset) momentum.initPaper(userId, cap, { reset: !!existing });
-    const p = momentum.store.getPortfolio(userId, 'PAPER');
-    momentum.store.updatePortfolio(p.id, { autoExecute: false });
-  }
+  applySizingCash(momentum, userId, { live, useMode, cap, reset });
   const r = momentum.runDecision({ userId, mode: useMode, kind: 'MANUAL', forceReview: true });
   const signalByKey = new Map((r.signals || []).map((s) => [s.decisionKey, s.id]));
   const cfg = momentum.config(userId);
@@ -588,6 +634,8 @@ async function scanDesk(momentum, userId, { capital, reset = false, mode = 'LIVE
     mode: useMode,
     usedPaperFallback: wantLive && useMode === 'PAPER',
     capital: cap,
+    sizedFrom,
+    funds,
     asOf: r.result.asOf,
     runId: r.runId,
     answer: r.result.summary.answer,

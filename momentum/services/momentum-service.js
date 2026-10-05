@@ -333,6 +333,22 @@ class MomentumService {
     return { universeHoldings: [...classified.wanted.values()], skipped: classified.skipped };
   }
 
+  /** Equity cash available for new CNC buys. Does not enable live trading. */
+  async readLiveFunds(userId) {
+    if (!this.sessions.authorization(userId)) {
+      throw new ServiceError('NO_BROKER', 'No Kite session', 400);
+    }
+    const broker = this.brokerFor({ mode: 'LIVE' }, userId);
+    if (typeof broker.funds !== 'function') {
+      throw new ServiceError('NOT_SUPPORTED', 'This broker does not report funds', 400);
+    }
+    try {
+      return await broker.funds();
+    } catch (err) {
+      throw new ServiceError('BROKER_ERROR', `Could not read broker funds: ${err.message}`, 502);
+    }
+  }
+
   /**
    * Seed / refresh the live book from CNC holdings the broker reports.
    * Cash is set to available equity funds so holdings are not double-counted.

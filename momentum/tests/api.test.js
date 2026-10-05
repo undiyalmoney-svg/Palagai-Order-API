@@ -225,6 +225,25 @@ test('live scan and desk overview show CNC qty and sell price before live tradin
   await s.close();
 });
 
+test('live scan sizes buy qty from Kite equity cash, not the typed capital', async () => {
+  const broker = new MockBroker({ live: true });
+  broker.fundsData = { equityCash: 20000, equityNet: 20000, capitalRs: 20000 };
+  const s = await serve({ appOptions: { brokerOverride: () => broker } });
+  s.app.momentum.sessions.save('u1', 'kitekey', 'token');
+  const small = await s.call('POST', '/desk/scan', { capital: 150000, reset: true, mode: 'LIVE' });
+  assert.equal(small.status, 200);
+  assert.equal(small.body.sizedFrom, 'kite-funds');
+  assert.equal(small.body.capital, 20000);
+  assert.equal(small.body.funds.equityCash, 20000);
+  const smallSpend = (small.body.buy || []).reduce((a, r) => a + (Number(r.qty) || 0) * (Number(r.priceRef) || 0), 0);
+  broker.fundsData = { equityCash: 80000, equityNet: 80000, capitalRs: 80000 };
+  const large = await s.call('POST', '/desk/scan', { capital: 10000, reset: true, mode: 'LIVE' });
+  assert.equal(large.body.capital, 80000);
+  const largeSpend = (large.body.buy || []).reduce((a, r) => a + (Number(r.qty) || 0) * (Number(r.priceRef) || 0), 0);
+  assert.ok(largeSpend > smallSpend, `80k funds should buy more than 20k (got ${largeSpend} vs ${smallSpend})`);
+  await s.close();
+});
+
 test('AI narrator answers from stored decisions and cannot invent trades', async () => {
   const s = await serve();
   await s.call('POST', '/portfolio/paper', { capital: 300000 });
