@@ -18,6 +18,7 @@ const { isBookEtf, BOOK_ETF_BY_SYMBOL } = require('../data/universe');
 const { runBacktest } = require('../backtest/backtester');
 const { computeMetrics } = require('../backtest/metrics');
 const { paramsFromPreset, presetById, resolveParams } = require('../config/defaults');
+const { newPosition } = require('../execution/ledger');
 
 const SCAN_CLOCK = '16:00 IST';
 const FILL_CLOCK = '09:15 IST';
@@ -604,12 +605,33 @@ async function paperReplay(research, momentum, userId, { from, to, capital, peri
   const openPnl = open.reduce((a, t) => a + (Number(t.pnl) || 0), 0);
   const fromDate = windowed.from;
   const toDate = windowed.to;
-  const totalProfit = Math.round((Number(windowed.metrics?.endCapital) - Number(windowed.metrics?.startCapital || cap)) * 100) / 100;
+  const weekProfit = Math.round((Number(windowed.metrics?.endCapital) - Number(windowed.metrics?.startCapital || cap)) * 100) / 100;
   let lookback = null;
+  let weekWindow = null;
+  let heroMetrics = windowed.metrics;
+  let totalProfit = weekProfit;
+  let summaryClosed = closed;
+  let summaryOpen = open;
+  let summaryFrom = fromDate;
+  let summaryTo = toDate;
   if (range.period === 'last_week') {
     const m12 = resolvePaperPeriod(panel, { period: 'last_12m' });
     const long = windowBacktest(raw, m12.from, m12.to, cap, { warmupDays: 0 });
     const longProfit = Math.round((Number(long.metrics?.endCapital) - Number(long.metrics?.startCapital || cap)) * 100) / 100;
+    const lbClosed = pairClosedTrades(raw.fills).filter(
+      (t) => t.exitDate && t.exitDate >= (long.from || m12.from) && t.exitDate <= (long.to || m12.to),
+    );
+    const lbOpen = (long.openPositions || []).map((p) => ({
+      symbol: p.symbol,
+      qty: p.qty,
+      entryDate: p.entryDate,
+      entryTime: FILL_CLOCK,
+      entryPrice: p.avgPrice,
+      lastPrice: p.lastPrice,
+      holdingDays: p.entryDate && long.to ? daysBetween(p.entryDate, long.to) : null,
+      pnl: p.unrealizedPnl,
+      status: 'HOLDING',
+    }));
     lookback = {
       period: 'last_12m',
       periodLabel: m12.label,
@@ -620,6 +642,20 @@ async function paperReplay(research, momentum, userId, { from, to, capital, peri
       totalProfit: longProfit,
       returnPct: Number(long.metrics?.totalReturnPct),
     };
+    weekWindow = {
+      from: fromDate,
+      to: toDate,
+      startCapital: Number(windowed.metrics?.startCapital) || cap,
+      endCapital: Number(windowed.metrics?.endCapital),
+      totalProfit: weekProfit,
+      returnPct: Number(windowed.metrics?.totalReturnPct),
+    };
+    heroMetrics = long.metrics;
+    totalProfit = longProfit;
+    summaryClosed = lbClosed;
+    summaryOpen = lbOpen;
+    summaryFrom = long.from;
+    summaryTo = long.to;
   }
   const lastOf = (symbol) => momentum.marketData.priceFor(symbol)?.price ?? null;
   const rowExtra = { maxDeviationPct: cfg.params.maxPriceDeviationPct ?? 0.04, fillTime: FILL_CLOCK, lastOf };
@@ -628,11 +664,11 @@ async function paperReplay(research, momentum, userId, { from, to, capital, peri
   const lastWeek = lastWeekPicks(momentum.store, book, toDate);
   const summary = paperSummary({
     capital: cap,
-    closed,
-    open,
-    metrics: { ...windowed.metrics, totalPnl: totalProfit },
-    from: fromDate,
-    to: toDate,
+    closed: summaryClosed,
+    open: summaryOpen,
+    metrics: { ...heroMetrics, totalPnl: totalProfit },
+    from: summaryFrom,
+    to: summaryTo,
     priceSource,
   });
   return {
@@ -658,11 +694,12 @@ async function paperReplay(research, momentum, userId, { from, to, capital, peri
     totalProfit,
     closedProfit: Math.round(closedPnl * 100) / 100,
     openProfit: Math.round(openPnl * 100) / 100,
-    metrics: windowed.metrics,
+    metrics: heroMetrics,
     summary,
     thisWeek,
     lastWeek,
     lookback,
+    weekWindow,
     nextAction: nextActionLine(buildSchedule(cfg.params.horizon), thisWeek),
     closed,
     open,
@@ -908,13 +945,49 @@ function cncHoldRows(holdings, extra = {}) {
   });
 }
 
+function cncHeldMap(holdingsSync) {
+  const held = new Map();
+  if (!holdingsSync || holdingsSync.ok === false) return held;
+  for (const h of holdingsSync.universeHoldings || []) {
+    const symbol = String(h.symbol || '').toUpperCase();
+    if (symbol) held.set(symbol, h);
+  }
+  for (const s of holdingsSync.skipped || []) {
+    const symbol = String(s.symbol || '').toUpperCase();
+    if (isBookEtf(symbol) && !held.has(symbol)) held.set(symbol, s);
+  }
+  return held;
+}
+
 function applyCncOverlay(grouped, holdingsSync, extra = {}) {
   const alsoHeld = alsoHeldRows(holdingsSync?.skipped, extra);
   const etfHolds = bookEtfHoldRows(holdingsSync?.skipped, extra);
-  const taken = new Set([
-    ...(grouped.hold || []).map((h) => h.symbol),
-    ...(grouped.sell || []).map((h) => h.symbol),
-  ]);
+  const liveBook = holdingsSync != null;
+  const readOk = liveBook && holdingsSync.ok !== false;
+  const held = cncHeldMap(holdingsSync);
+  let sell = [...(grouped.sell || [])];
+  if (liveBook) {
+    if (!readOk) {
+      sell = [];
+    } else {
+      sell = sell
+        .filter((r) => held.has(String(r.symbol || '').toUpperCase()))
+        .map((r) => {
+          const h = held.get(String(r.symbol || '').toUpperCase());
+          const qty = Number(h?.qty);
+          if (!Number.isFinite(qty) || qty <= 0) return r;
+          return {
+            ...r,
+            qty,
+            fillHint: fillHint('SELL', r.suggestedSell ?? r.suggestedLimit, extra.fillTime || FILL_CLOCK, {
+              qty,
+              symbol: r.symbol,
+            }),
+          };
+        });
+    }
+  }
+  const taken = new Set([...(grouped.hold || []).map((h) => h.symbol), ...sell.map((h) => h.symbol)]);
   const hold = [...(grouped.hold || [])];
   const preview = !!holdingsSync?.preview;
   const cncRows = cncHoldRows(holdingsSync?.universeHoldings, {
@@ -930,7 +1003,35 @@ function applyCncOverlay(grouped, holdingsSync, extra = {}) {
     taken.add(row.symbol);
   }
   const buy = (grouped.buy || []).filter((b) => !taken.has(b.symbol));
-  return { buy, hold, sell: grouped.sell || [], alsoHeld };
+  return { buy, hold, sell, alsoHeld };
+}
+
+function seedPaperFromCnc(momentum, userId, { holdingsSync, cap, reset }) {
+  const existing = momentum.store.getPortfolio(userId, 'PAPER');
+  const seed = Math.max(Number(cap) || 0, 10_000);
+  if (!existing || reset) momentum.initPaper(userId, seed, { reset: !!existing });
+  const p = momentum.store.getPortfolio(userId, 'PAPER');
+  const today = momentum.today();
+  const held = cncHeldMap(holdingsSync);
+  momentum.store.tx(() => {
+    for (const pos of momentum.store.listPositions(p.id) || []) {
+      momentum.store.deletePosition(p.id, pos.symbol);
+    }
+    for (const h of held.values()) {
+      const symbol = String(h.symbol || '').toUpperCase();
+      const qty = Math.floor(Number(h.qty) || 0);
+      const px = Number(h.avgPrice || h.lastPrice) || 0;
+      if (!symbol || qty <= 0 || !px) continue;
+      momentum.store.savePosition(p.id, newPosition({ symbol, qty, price: px, cost: 0, date: today }));
+    }
+    momentum.store.updatePortfolio(p.id, {
+      autoExecute: false,
+      cash: Number.isFinite(Number(cap)) ? Number(cap) : seed,
+      initialCapital: seed,
+      peakEquity: Math.max(Number(p.peakEquity) || 0, seed),
+    });
+  });
+  return momentum.store.getPortfolioById(p.id);
 }
 
 function latestScanFromStore(momentum, userId, extra = {}) {
@@ -1024,7 +1125,11 @@ async function scanDesk(momentum, userId, { capital, reset = false, mode = 'LIVE
   }
   let holdingsSync = null;
   if (wantLive) holdingsSync = await syncHoldingsForLiveScan(momentum, userId, live);
-  applySizingCash(momentum, userId, { live, useMode, cap, reset });
+  if (wantLive && !live) {
+    seedPaperFromCnc(momentum, userId, { holdingsSync, cap, reset });
+  } else {
+    applySizingCash(momentum, userId, { live, useMode, cap, reset });
+  }
   const tape = await enginePanelForUser(momentum, userId);
   const r = momentum.runDecision({ userId, mode: useMode, kind: 'MANUAL', forceReview: true });
   const signalByKey = new Map((r.signals || []).map((s) => [s.decisionKey, s.id]));
@@ -1041,6 +1146,14 @@ async function scanDesk(momentum, userId, { capital, reset = false, mode = 'LIVE
   const schedule = buildSchedule(cfg.params.horizon);
   const rowExtra = { maxDeviationPct: cfg.params.maxPriceDeviationPct ?? 0.04, fillTime: FILL_CLOCK, lastOf };
   const overlay = applyCncOverlay(grouped, holdingsSync, rowExtra);
+  let answer = r.result.summary.answer;
+  let headline = r.result.summary.headline;
+  if (wantLive && (grouped.sell || []).length && overlay.sell.length === 0) {
+    answer = overlay.hold.length ? 'HOLD' : overlay.buy.length ? 'BUY' : 'WAIT';
+    if (overlay.hold.length && !overlay.buy.length) {
+      headline = 'Hold the names already in your Kite CNC book.';
+    }
+  }
   const tokenReady = !!momentum.sessions.authorization(userId);
   const product = {
     kind: wantLive ? 'LIVE' : 'PAPER',
@@ -1060,8 +1173,8 @@ async function scanDesk(momentum, userId, { capital, reset = false, mode = 'LIVE
     funds,
     asOf: r.result.asOf,
     runId: r.runId,
-    answer: r.result.summary.answer,
-    headline: r.result.summary.headline,
+    answer,
+    headline,
     schedule,
     lastWeek: lastWeekPicks(momentum.store, book, r.result.asOf),
     holdingsSync,

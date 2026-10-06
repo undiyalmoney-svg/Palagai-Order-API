@@ -80,3 +80,37 @@ test('CNC overlay adds universe holdings and BeES onto Hold with qty and sell LI
   assert.equal(out.alsoHeld.find((r) => r.symbol === 'NOTAINDEX').qty, 8);
   assert.equal(out.buy.length, 1);
 });
+
+test('CNC overlay drops Sell of names that are not in the Kite book', () => {
+  const { applyCncOverlay } = require('../services/desk');
+  const out = applyCncOverlay(
+    {
+      buy: [{ symbol: 'INFY', action: 'BUY', qty: 4 }],
+      hold: [],
+      sell: [
+        { symbol: 'RELIANCE', action: 'SELL', qty: 8, suggestedSell: 1390, reason: 'paper leftover' },
+        { symbol: 'TCS', action: 'SELL', qty: 99, suggestedSell: 3500, reason: 'engine exit' },
+      ],
+    },
+    {
+      ok: true,
+      preview: true,
+      universeHoldings: [{ symbol: 'TCS', qty: 10, avgPrice: 3500, lastPrice: 3520 }],
+      skipped: [],
+    },
+  );
+  assert.equal(out.sell.length, 1);
+  assert.equal(out.sell[0].symbol, 'TCS');
+  assert.equal(out.sell[0].qty, 10);
+  assert.ok(!out.sell.find((r) => r.symbol === 'RELIANCE'));
+  assert.ok(!out.hold.find((r) => r.symbol === 'RELIANCE'));
+});
+
+test('CNC overlay refuses Sell when the Kite book was not read', () => {
+  const { applyCncOverlay } = require('../services/desk');
+  const out = applyCncOverlay(
+    { buy: [], hold: [], sell: [{ symbol: 'INFY', action: 'SELL', qty: 5 }] },
+    { ok: false, preview: true, universeHoldings: [], skipped: [] },
+  );
+  assert.equal(out.sell.length, 0);
+});

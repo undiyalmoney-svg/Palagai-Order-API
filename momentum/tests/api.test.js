@@ -213,18 +213,45 @@ test('live scan and desk overview show CNC qty and sell price before live tradin
   assert.equal(scan.body.usedPaperFallback, true);
   assert.equal(scan.body.holdingsSync.ok, true);
   assert.equal(scan.body.holdingsSync.preview, true);
-  const tcs = scan.body.hold.find((r) => r.symbol === 'TCS');
+  const tcs = [...(scan.body.hold || []), ...(scan.body.sell || [])].find((r) => r.symbol === 'TCS');
   assert.ok(tcs);
   assert.equal(tcs.qty, 10);
-  assert.ok(tcs.suggestedSell > 0);
-  const gold = scan.body.hold.find((r) => r.symbol === 'GOLDBEES');
+  assert.ok((tcs.suggestedSell || tcs.suggestedLimit) > 0);
+  const gold = [...(scan.body.hold || []), ...(scan.body.sell || [])].find((r) => r.symbol === 'GOLDBEES');
   assert.ok(gold);
   assert.equal(gold.qty, 25);
+  for (const row of scan.body.sell || []) {
+    assert.ok(['TCS', 'GOLDBEES'].includes(row.symbol), `live must not Sell ${row.symbol} which is not in CNC`);
+  }
   const overview = await s.call('GET', '/desk');
   assert.equal(overview.status, 200);
-  const held = overview.body.lastScan?.hold || [];
-  assert.equal(held.find((r) => r.symbol === 'TCS')?.qty, 10);
-  assert.ok(held.find((r) => r.symbol === 'TCS')?.suggestedSell > 0);
+  const booked = [...(overview.body.lastScan?.hold || []), ...(overview.body.lastScan?.sell || [])];
+  assert.equal(booked.find((r) => r.symbol === 'TCS')?.qty, 10);
+  assert.ok((booked.find((r) => r.symbol === 'TCS')?.suggestedSell || booked.find((r) => r.symbol === 'TCS')?.suggestedLimit) > 0);
+  await s.close();
+});
+
+test('live scan does not Sell names that are not in the Kite CNC book', async () => {
+  const { newPosition } = require('../execution/ledger');
+  const broker = new MockBroker({ live: true });
+  broker.holdingsData = [{ symbol: 'TCS', qty: 10, avgPrice: 3500, lastPrice: 3520, exchange: 'NSE' }];
+  const s = await serve({ appOptions: { brokerOverride: () => broker } });
+  s.app.momentum.sessions.save('u1', 'kitekey', 'token');
+  await s.call('POST', '/portfolio/paper', { capital: 150000 });
+  const paper = s.app.momentum.store.getPortfolio('u1', 'PAPER');
+  s.app.momentum.store.savePosition(paper.id, newPosition({
+    symbol: 'RELIANCE',
+    qty: 8,
+    price: 1400,
+    cost: 0,
+    date: '2026-01-05',
+  }));
+  const scan = await s.call('POST', '/desk/scan', { capital: 150000, mode: 'LIVE' });
+  assert.equal(scan.status, 200);
+  assert.ok(!(scan.body.sell || []).some((r) => r.symbol === 'RELIANCE'));
+  const tcs = [...(scan.body.hold || []), ...(scan.body.sell || [])].find((r) => r.symbol === 'TCS');
+  assert.ok(tcs);
+  assert.equal(tcs.qty, 10);
   await s.close();
 });
 
@@ -309,6 +336,10 @@ test('paper replay without dates uses ~12 months, this week picks, and is not an
   assert.ok(week.body.lookback);
   assert.equal(week.body.lookback.period, 'last_12m');
   assert.ok(Number.isFinite(week.body.lookback.totalProfit));
+  assert.equal(week.body.totalProfit, week.body.lookback.totalProfit);
+  assert.equal(week.body.endCapital, week.body.lookback.endCapital);
+  assert.ok(week.body.weekWindow);
+  assert.ok(Number.isFinite(week.body.weekWindow.totalProfit));
   const { daysBetween } = require('../utils/dates');
   assert.ok(daysBetween(week.body.from, week.body.to) <= 10, `last week window ${week.body.from} → ${week.body.to}`);
   assert.ok(week.body.lastWeek);
