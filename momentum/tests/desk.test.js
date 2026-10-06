@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { buildSchedule, pairClosedTrades, previousIsoWeek, lastTradingDayOfIsoWeek, resolvePaperPeriod } = require('../services/desk');
+const { buildSchedule, pairClosedTrades, previousIsoWeek, lastTradingDayOfIsoWeek, resolvePaperPeriod, stampSuggestions } = require('../services/desk');
 
 test('weekly buy scan is the last trading day of the ISO week after 16:00 IST', () => {
   const wedMorning = new Date('2026-09-30T04:00:00Z'); // Wed 09:30 IST, before 16:00
@@ -20,6 +20,26 @@ test('after Friday 16:00 the next weekly buy scan is the following week', () => 
   const s = buildSchedule('WEEKLY', fridayEvening);
   assert.equal(s.buy.date, '2026-10-01');
   assert.equal(lastTradingDayOfIsoWeek('2026-10-05'), '2026-10-09');
+});
+
+test('suggestions are buy tomorrow, and sell today only while the cash session is open', () => {
+  const book = {
+    buy: [{ symbol: 'NIACL', qty: 3 }],
+    sell: [{ symbol: 'RECLTD', qty: 1 }],
+  };
+  const open = stampSuggestions(book, new Date('2026-10-06T05:30:00Z')); // Tue 11:00 IST
+  assert.equal(open.buyTomorrow[0].whenLabel, 'Buy tomorrow');
+  assert.equal(open.sellToday[0].symbol, 'RECLTD');
+  assert.equal(open.sellToday[0].whenLabel, 'Sell today');
+  assert.equal(open.sellTomorrow.length, 0);
+
+  const after = stampSuggestions(book, new Date('2026-10-06T11:00:00Z')); // Tue 16:30 IST
+  assert.equal(after.buyTomorrow.length, 1);
+  assert.equal(after.sellToday.length, 0);
+  assert.equal(after.sellTomorrow[0].whenLabel, 'Sell tomorrow');
+
+  const sunday = stampSuggestions(book, new Date('2026-10-04T04:30:00Z'));
+  assert.equal(sunday.sellTomorrow[0].whenLabel, 'Sell tomorrow');
 });
 
 test('daily horizon: buy and sell both next unused trading day after 16:00', () => {

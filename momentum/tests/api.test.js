@@ -183,6 +183,10 @@ test('desk paper replay and live scan return entries, exits and a scan clock', a
   assert.ok(Array.isArray(scan.body.buy));
   assert.ok(Array.isArray(scan.body.hold));
   assert.ok(Array.isArray(scan.body.sell));
+  assert.ok(Array.isArray(scan.body.buyTomorrow));
+  assert.ok(Array.isArray(scan.body.sellToday));
+  assert.ok(Array.isArray(scan.body.sellTomorrow));
+  for (const row of scan.body.buyTomorrow) assert.equal(row.whenLabel, 'Buy tomorrow');
   assert.ok(scan.body.holdingsSync);
   assert.ok(Array.isArray(scan.body.alsoHeld));
   for (const row of scan.body.buy) {

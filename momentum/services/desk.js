@@ -56,6 +56,35 @@ function pastTodayScan(now) {
   return p.hour * 60 + p.minute >= 16 * 60;
 }
 
+function sessionOpenNow(now = new Date()) {
+  const today = istDate(now);
+  if (!isTradingDay(today)) return false;
+  const p = toIstParts(now);
+  const mins = p.hour * 60 + p.minute;
+  return mins >= 9 * 60 + 15 && mins < 15 * 60 + 30;
+}
+
+function stampSuggestions(overlay, now = new Date()) {
+  const sellKind = sessionOpenNow(now) ? 'sell-today' : 'sell-tomorrow';
+  const sellLabel = sellKind === 'sell-today' ? 'Sell today' : 'Sell tomorrow';
+  const tag = (row, when, whenLabel) => ({ ...row, when, whenLabel });
+  const buyTomorrow = (overlay?.buy || []).map((row) => tag(row, 'buy-tomorrow', 'Buy tomorrow'));
+  const sells = (overlay?.sell || []).map((row) => tag(row, sellKind, sellLabel));
+  return {
+    buyTomorrow,
+    sellToday: sellKind === 'sell-today' ? sells : [],
+    sellTomorrow: sellKind === 'sell-tomorrow' ? sells : [],
+  };
+}
+
+const COMPOSITE_STRATEGY = 'momentum-aggressive';
+
+function useCompositeStrategy(momentum, userId) {
+  const current = momentum.store.getSettings(userId) || {};
+  if (current.strategyId === COMPOSITE_STRATEGY) return;
+  momentum.store.saveSettings(userId, { ...current, strategyId: COMPOSITE_STRATEGY });
+}
+
 function previousIsoWeek(ymd) {
   const current = isoWeekKey(ymd);
   let d = addDays(ymd, -1);
@@ -1109,6 +1138,7 @@ function bookEtfHoldRows(skipped, extra = {}) {
 }
 
 async function scanDesk(momentum, userId, { capital, reset = false, mode = 'LIVE' } = {}) {
+  useCompositeStrategy(momentum, userId);
   const entered = Number(capital);
   const wantLive = String(mode).toUpperCase() === 'LIVE';
   const live = momentum.store.getPortfolio(userId, 'LIVE');
@@ -1154,10 +1184,22 @@ async function scanDesk(momentum, userId, { capital, reset = false, mode = 'LIVE
       headline = 'Hold the names already in your Kite CNC book.';
     }
   }
+  const suggestions = stampSuggestions(overlay);
+  const lines = [];
+  if (suggestions.buyTomorrow.length) {
+    lines.push(`Buy tomorrow: ${suggestions.buyTomorrow.map((r) => r.symbol).join(', ')}`);
+  }
+  if (suggestions.sellToday.length) {
+    lines.push(`Sell today: ${suggestions.sellToday.map((r) => r.symbol).join(', ')}`);
+  }
+  if (suggestions.sellTomorrow.length) {
+    lines.push(`Sell tomorrow: ${suggestions.sellTomorrow.map((r) => r.symbol).join(', ')}`);
+  }
+  headline = lines.length ? lines.join('. ') : 'Nothing to buy or sell.';
   const tokenReady = !!momentum.sessions.authorization(userId);
   const product = {
     kind: wantLive ? 'LIVE' : 'PAPER',
-    strategy: 'Dual Momentum 12-1',
+    strategy: 'Momentum - 3M/6M composite',
     tokenReady,
     fundsReady: !!funds.ok,
     cash: cap,
@@ -1179,7 +1221,10 @@ async function scanDesk(momentum, userId, { capital, reset = false, mode = 'LIVE
     lastWeek: lastWeekPicks(momentum.store, book, r.result.asOf),
     holdingsSync,
     product,
-    nextAction: product.nextAction,
+    nextAction: headline,
+    buyTomorrow: suggestions.buyTomorrow,
+    sellToday: suggestions.sellToday,
+    sellTomorrow: suggestions.sellTomorrow,
     priceSource: tape.priceSource,
     simulated: tape.simulated,
     priceNote: tape.simulated
@@ -1193,6 +1238,8 @@ module.exports = {
   SCAN_CLOCK,
   FILL_CLOCK,
   buildSchedule,
+  stampSuggestions,
+  sessionOpenNow,
   pairClosedTrades,
   lastWeekPicks,
   previousIsoWeek,
