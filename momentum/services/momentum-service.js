@@ -458,9 +458,9 @@ class MomentumService {
   }
 
   /** Run + persist a decision for a real (paper/live) portfolio. */
-  runDecision({ userId, mode, kind = 'MANUAL', capitalEvent = null, forceReview = false }) {
+  runDecision({ userId, mode, kind = 'MANUAL', capitalEvent = null, forceReview = false, params = null }) {
     const portfolio = this.portfolioOrThrow(userId, mode);
-    const { result, paramsHash: hash } = this.decideNow({ userId, portfolio, capitalEvent, forceReview });
+    const { result, paramsHash: hash } = this.decideNow({ userId, portfolio, capitalEvent, forceReview, params });
     return this.persistDecision({ userId, portfolio, kind, result, hash });
   }
 

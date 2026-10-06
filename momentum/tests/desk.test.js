@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { buildSchedule, pairClosedTrades, previousIsoWeek, lastTradingDayOfIsoWeek, resolvePaperPeriod, stampSuggestions } = require('../services/desk');
+const { buildSchedule, pairClosedTrades, previousIsoWeek, lastTradingDayOfIsoWeek, resolvePaperPeriod, stampSuggestions, analysisFromRank, widenBook, DESK_BOOK } = require('../services/desk');
 
 test('weekly buy scan is the last trading day of the ISO week after 16:00 IST', () => {
   const wedMorning = new Date('2026-09-30T04:00:00Z'); // Wed 09:30 IST, before 16:00
@@ -40,6 +40,34 @@ test('suggestions are buy tomorrow, and sell today only while the cash session i
 
   const sunday = stampSuggestions(book, new Date('2026-10-04T04:30:00Z'));
   assert.equal(sunday.sellTomorrow[0].whenLabel, 'Sell tomorrow');
+});
+
+test('desk book adds a few more analyzed leaders and skips names that fail the 3M gate', () => {
+  assert.equal(DESK_BOOK, 5);
+  const ranking = [
+    { symbol: 'LGEINDIA', name: 'LG', price: 1770.9, score: 90.5, eligible: true, status: 'BUY', ret: { m1: 0.071, m3: 0.135, m6: 0.277 } },
+    { symbol: 'NYKAA', name: 'Nykaa', price: 339.55, score: 89.3, eligible: true, status: 'STRONG_BUY', ret: { m1: 0.006, m3: 0.083, m6: 0.415 } },
+    { symbol: 'LAURUSLABS', name: 'Laurus', price: 1971.4, score: 89, eligible: true, status: 'BUY', ret: { m1: 0.058, m3: 0.289, m6: 0.898 } },
+    { symbol: 'HELD', name: 'Held', price: 100, score: 88, eligible: true, status: 'BUY', ret: { m1: 0.01, m3: 0.1, m6: 0.2 } },
+    { symbol: 'BHEL', name: 'BHEL', price: 429, score: 86.6, eligible: true, status: 'BUY', ret: { m1: 0.004, m3: 0.107, m6: 0.703 } },
+    { symbol: 'KOTAKBANK', name: 'Kotak', price: 416, score: 84.8, eligible: true, status: 'BUY', ret: { m1: -0.018, m3: 0.091, m6: 0.168 } },
+    { symbol: 'NIACL', name: 'NIACL', price: 162, score: 70, eligible: true, status: 'WAIT', ret: { m1: -0.17, m3: -0.123, m6: 0.316 } },
+  ];
+  assert.match(analysisFromRank(ranking[1]), /3M \+8\.3%, 6M \+41\.5%, 1M \+0\.6% · score 89\.3/);
+  const out = widenBook(
+    {
+      buy: [{ symbol: 'LGEINDIA', qty: 1, reason: 'sized' }],
+      sell: [{ symbol: 'RECLTD', qty: 1, reason: 'SELL - 3M momentum failed' }],
+      hold: [{ symbol: 'HELD', qty: 2, reason: 'HOLD' }],
+    },
+    ranking,
+  );
+  assert.deepEqual(out.buy.map((r) => r.symbol), ['LGEINDIA', 'NYKAA', 'LAURUSLABS', 'BHEL', 'KOTAKBANK']);
+  assert.equal(out.buy[0].qty, 1);
+  assert.equal(out.buy[1].qty, 0);
+  assert.match(out.buy[1].analysis, /3M \+8\.3%/);
+  assert.match(out.sell[0].analysis, /3M momentum failed/);
+  assert.ok(!out.buy.some((r) => r.symbol === 'NIACL' || r.symbol === 'HELD'));
 });
 
 test('daily horizon: buy and sell both next unused trading day after 16:00', () => {

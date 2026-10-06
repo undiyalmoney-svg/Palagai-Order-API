@@ -78,6 +78,86 @@ function stampSuggestions(overlay, now = new Date()) {
 }
 
 const COMPOSITE_STRATEGY = 'momentum-aggressive';
+/** A few more than the 3-name risk default. Twenty names clear the 3M/6M gate; five is the book. */
+const DESK_BOOK = 5;
+
+function pctLabel(x) {
+  const n = Number(x);
+  if (!Number.isFinite(n)) return null;
+  return `${n >= 0 ? '+' : ''}${(n * 100).toFixed(1)}%`;
+}
+
+function analysisFromRank(row) {
+  if (!row) return '';
+  const ret = row.ret || {};
+  const parts = [];
+  const m3 = pctLabel(ret.m3);
+  const m6 = pctLabel(ret.m6);
+  const m1 = pctLabel(ret.m1);
+  if (m3) parts.push(`3M ${m3}`);
+  if (m6) parts.push(`6M ${m6}`);
+  if (m1) parts.push(`1M ${m1}`);
+  const score = Number.isFinite(Number(row.score)) ? `score ${Number(row.score)}` : '';
+  return [parts.join(', '), score].filter(Boolean).join(' · ');
+}
+
+function clipReason(reason) {
+  const text = String(reason || '').replace(/^(BUY|SELL|HOLD|WAIT)\s*-\s*/i, '').trim();
+  if (!text) return '';
+  return text.length > 160 ? `${text.slice(0, 157)}…` : text;
+}
+
+function leaderOk(row) {
+  if (!row || row.eligible === false) return false;
+  if (!(Number(row.ret?.m3) > 0)) return false;
+  if (row.status && !['BUY', 'STRONG_BUY'].includes(row.status)) return false;
+  if (!row.status && !(Number(row.score) >= 54)) return false;
+  return true;
+}
+
+function unsizedBuy(leader) {
+  const price = Number(leader.price);
+  const suggestedBuy = suggestedLimitPrice({ side: 'BUY', price, priceRef: price, maxDeviationPct: 0.04 });
+  const analysis = analysisFromRank(leader);
+  return {
+    symbol: leader.symbol,
+    name: leader.name || leader.symbol,
+    sector: leader.sector || '',
+    action: 'BUY',
+    qty: 0,
+    priceRef: price,
+    lastPrice: price,
+    avgPrice: null,
+    stopPrice: null,
+    suggestedLimit: suggestedBuy,
+    suggestedBuy,
+    suggestedSell: null,
+    fillHint: null,
+    whyThisPrice: null,
+    allocationValue: 0,
+    reason: analysis,
+    analysis,
+    score: leader.score ?? null,
+    signalId: null,
+    canExecute: false,
+  };
+}
+
+function widenBook(overlay, ranking, limit = DESK_BOOK) {
+  const bySymbol = new Map((ranking || []).map((r) => [r.symbol, r]));
+  const tag = (row) => ({ ...row, analysis: analysisFromRank(bySymbol.get(row.symbol)) || clipReason(row.reason) });
+  const buy = (overlay?.buy || []).map(tag);
+  const sell = (overlay?.sell || []).map(tag);
+  const hold = (overlay?.hold || []).map(tag);
+  const taken = new Set([...buy, ...sell, ...hold].map((r) => r.symbol));
+  for (const leader of ranking || []) {
+    if (buy.length >= limit) break;
+    if (!leaderOk(leader) || taken.has(leader.symbol)) continue;
+    buy.push(unsizedBuy(leader));
+    taken.add(leader.symbol);
+  }
+  return { ...(overlay || {}), buy, sell, hold };
+}
 
 function useCompositeStrategy(momentum, userId) {
   const current = momentum.store.getSettings(userId) || {};
@@ -1161,7 +1241,14 @@ async function scanDesk(momentum, userId, { capital, reset = false, mode = 'LIVE
     applySizingCash(momentum, userId, { live, useMode, cap, reset });
   }
   const tape = await enginePanelForUser(momentum, userId);
-  const r = momentum.runDecision({ userId, mode: useMode, kind: 'MANUAL', forceReview: true });
+  const deskParams = { ...momentum.config(userId).params, maxPositions: DESK_BOOK };
+  const r = momentum.runDecision({
+    userId,
+    mode: useMode,
+    kind: 'MANUAL',
+    forceReview: true,
+    params: deskParams,
+  });
   const signalByKey = new Map((r.signals || []).map((s) => [s.decisionKey, s.id]));
   const cfg = momentum.config(userId);
   const book = momentum.store.getPortfolio(userId, useMode);
@@ -1175,7 +1262,7 @@ async function scanDesk(momentum, userId, { capital, reset = false, mode = 'LIVE
   });
   const schedule = buildSchedule(cfg.params.horizon);
   const rowExtra = { maxDeviationPct: cfg.params.maxPriceDeviationPct ?? 0.04, fillTime: FILL_CLOCK, lastOf };
-  const overlay = applyCncOverlay(grouped, holdingsSync, rowExtra);
+  const overlay = widenBook(applyCncOverlay(grouped, holdingsSync, rowExtra), r.result.ranking, DESK_BOOK);
   let answer = r.result.summary.answer;
   let headline = r.result.summary.headline;
   if (wantLive && (grouped.sell || []).length && overlay.sell.length === 0) {
@@ -1196,6 +1283,10 @@ async function scanDesk(momentum, userId, { capital, reset = false, mode = 'LIVE
     lines.push(`Sell tomorrow: ${suggestions.sellTomorrow.map((r) => r.symbol).join(', ')}`);
   }
   headline = lines.length ? lines.join('. ') : 'Nothing to buy or sell.';
+  const cashNote =
+    suggestions.buyTomorrow.length > 0 && suggestions.buyTomorrow.every((row) => !(Number(row.qty) > 0))
+      ? 'Cash does not cover a full share. These are the symbols to buy when it does.'
+      : '';
   const tokenReady = !!momentum.sessions.authorization(userId);
   const product = {
     kind: wantLive ? 'LIVE' : 'PAPER',
@@ -1217,6 +1308,7 @@ async function scanDesk(momentum, userId, { capital, reset = false, mode = 'LIVE
     runId: r.runId,
     answer,
     headline,
+    cashNote,
     schedule,
     lastWeek: lastWeekPicks(momentum.store, book, r.result.asOf),
     holdingsSync,
@@ -1240,6 +1332,9 @@ module.exports = {
   buildSchedule,
   stampSuggestions,
   sessionOpenNow,
+  DESK_BOOK,
+  analysisFromRank,
+  widenBook,
   pairClosedTrades,
   lastWeekPicks,
   previousIsoWeek,
