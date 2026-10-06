@@ -77,10 +77,23 @@ test('buy qty is the share count the funds can pay for', () => {
     { symbol: 'CCC', priceRef: 1000, suggestedBuy: 1000 },
   ];
   const sized = sizeBuysFromFunds(rows, 1000);
-  assert.deepEqual(sized.map((r) => r.qty), [7, 1, 0]);
+  assert.deepEqual(sized.map((r) => r.qty), [5, 2, 0]);
   const spent = sized.reduce((sum, row) => sum + row.qty * row.priceRef, 0);
   assert.ok(spent <= 1000);
   assert.ok(spent + 100 > 1000);
+  const book = sizeBuysFromFunds(
+    [
+      { symbol: 'LGE', priceRef: 1771, suggestedBuy: 1771 },
+      { symbol: 'NYK', priceRef: 340, suggestedBuy: 340 },
+      { symbol: 'LAU', priceRef: 1971, suggestedBuy: 1971 },
+      { symbol: 'LAL', priceRef: 1971, suggestedBuy: 1971 },
+      { symbol: 'BHE', priceRef: 429, suggestedBuy: 429 },
+    ],
+    10_000,
+  );
+  assert.ok(book.every((row) => row.qty >= 1), `each leader needs a share, got ${book.map((r) => r.qty).join(',')}`);
+  const bookSpend = book.reduce((sum, row) => sum + row.qty * row.priceRef, 0);
+  assert.ok(bookSpend <= 10_000);
   const empty = sizeBuysFromFunds([{ symbol: 'AAA', qty: 9, priceRef: 500 }], 0);
   assert.equal(empty[0].qty, 0);
 });

@@ -121,33 +121,27 @@ function sharePrice(row) {
 }
 
 /**
- * Equal-weight the buy list against the funds the scan is using
- * (Kite equity cash when the token works, otherwise the typed capital).
- * Leftover rupees buy extra shares of the cheaper names.
+ * Share count from the funds on the scan (Kite equity cash, or the typed
+ * capital when the token is missing).
+ *
+ * One share goes to each leader in rank order before anyone gets a second.
+ * An equal split was leaving the dearer names at zero and stacking the cash
+ * on the two cheapest, so only those two showed a share count.
  */
 function sizeBuysFromFunds(rows, funds) {
-  const list = (rows || []).map((row) => ({ ...row }));
-  const cash = Math.max(0, Number(funds) || 0);
-  if (!list.length) return list;
-  const slice = cash / list.length;
-  let spent = 0;
-  for (const row of list) {
-    const px = sharePrice(row);
-    const room = Math.max(0, cash - spent);
-    const qty = px > 0 ? Math.floor(Math.min(slice, room) / px) : 0;
-    stampBuyQty(row, qty, px);
-    spent += qty * px;
-  }
-  let left = cash - spent;
-  const cheap = list
-    .map((row, index) => ({ row, index, px: sharePrice(row) }))
-    .filter((item) => item.px > 0)
-    .sort((a, b) => a.px - b.px || a.index - b.index);
-  for (const item of cheap) {
-    const extra = Math.floor(left / item.px);
-    if (extra <= 0) continue;
-    stampBuyQty(item.row, item.row.qty + extra, item.px);
-    left -= extra * item.px;
+  const list = (rows || []).map((row) => ({ ...row, qty: 0, allocationValue: 0 }));
+  let left = Math.max(0, Number(funds) || 0);
+  if (!list.length || left <= 0) return list;
+  let progressed = true;
+  while (progressed) {
+    progressed = false;
+    for (const row of list) {
+      const px = sharePrice(row);
+      if (!(px > 0) || left < px) continue;
+      stampBuyQty(row, (Number(row.qty) || 0) + 1, px);
+      left -= px;
+      progressed = true;
+    }
   }
   return list;
 }
