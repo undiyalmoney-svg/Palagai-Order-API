@@ -1,6 +1,6 @@
 'use strict';
 
-const { LARGE_CAP, BOOK_ETFS, BENCHMARK } = require('../data/universe');
+const { LARGE_CAP, MID_CAP, BOOK_ETFS, BENCHMARK } = require('../data/universe');
 const { lastCompletedTradingDate, marketStatus } = require('../utils/dates');
 
 /** NSE renamed a few book names; try these tradingsymbols when the primary is missing. */
@@ -45,7 +45,7 @@ class KiteProvider {
   async listInstruments() {
     const seen = new Set();
     const out = [];
-    for (const u of [...LARGE_CAP, ...BOOK_ETFS]) {
+    for (const u of [...LARGE_CAP, ...MID_CAP, ...BOOK_ETFS]) {
       if (seen.has(u.symbol)) continue;
       seen.add(u.symbol);
       out.push({ symbol: u.symbol, name: u.name, sector: u.sector });

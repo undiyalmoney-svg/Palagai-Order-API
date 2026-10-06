@@ -247,7 +247,7 @@ test('weekly book still buys mid-week after a review already ran this ISO week',
   app.close();
 });
 
-test('scan universe is every NSE large-cap and mid-cap', () => {
+test('scan universe is every NSE large-cap and mid-cap', async () => {
   const { UNIVERSE, CORE_UNIVERSE, LARGE_CAP, MID_CAP } = require('../data/universe');
   assert.ok(CORE_UNIVERSE.length >= 50);
   assert.ok(LARGE_CAP.length >= 95, `large caps ${LARGE_CAP.length}`);
@@ -256,9 +256,13 @@ test('scan universe is every NSE large-cap and mid-cap', () => {
   assert.ok(UNIVERSE.length <= 320, `universe leaked extras: ${UNIVERSE.length}`);
   assert.equal(new Set(UNIVERSE.map((u) => u.symbol)).size, UNIVERSE.length);
   assert.ok(!UNIVERSE.some((u) => /^(BNK|INF|FIN|ATO|PHM)\d+$/.test(u.symbol)));
-  for (const sym of ['NIFTYBEES', 'SILVERBEES', 'GOLDBEES']) {
+  for (const sym of ['NIFTYBEES', 'SILVERBEES', 'GOLDBEES', 'NIACL', 'RECLTD']) {
     assert.ok(UNIVERSE.some((u) => u.symbol === sym), `${sym} must be in the scan universe`);
   }
+  const { KiteProvider } = require('../providers/kite-provider');
+  const kiteNames = await new KiteProvider({ getAuthorization: async () => null }).listInstruments();
+  assert.ok(kiteNames.some((u) => u.symbol === 'NIACL'), 'live Kite scan must include mid-cap NIACL');
+  assert.ok(kiteNames.some((u) => u.symbol === 'RECLTD'), 'live Kite scan must include RECLTD');
   const reliance = UNIVERSE.find((u) => u.symbol === 'RELIANCE');
   const liveRel = LARGE_CAP.find((u) => u.symbol === 'RELIANCE');
   assert.equal(reliance.basePrice, liveRel.basePrice, 'scan prices must use the live listing, not the 2018 CORE seed');
@@ -303,6 +307,13 @@ test('default Dual Momentum is the 2–3 name 12-1 payday book', () => {
   const classic = paramsFromPreset('momentum-classic-5');
   assert.equal(classic.maxPositions, 5);
   assert.equal(classic.maxPositionPct, 0.22);
+  const composite = paramsFromPreset('momentum-aggressive');
+  assert.equal(composite.momentumWeights.ret63, 0.35);
+  assert.equal(composite.momentumWeights.ret126, 0.3);
+  assert.equal(composite.momentumWeights.ret21, 0.2);
+  assert.equal(composite.weights.technical, 0.15);
+  assert.equal(composite.absoluteMomentum, false);
+  assert.equal(composite.minScore, 54);
 });
 
 test('scaleParamsForCapital opens a 10k ticket that the old 10k floor blocked', () => {

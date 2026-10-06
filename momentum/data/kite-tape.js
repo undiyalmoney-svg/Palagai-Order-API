@@ -3,9 +3,9 @@
 const { openDatabase } = require('../db/database');
 const { Store } = require('../db/store');
 const { panelFromStore } = require('./panel');
-const { BENCHMARK, LARGE_CAP, BOOK_ETFS } = require('./universe');
+const { BENCHMARK, LARGE_CAP, MID_CAP, BOOK_ETFS } = require('./universe');
 
-const KITE_SCAN = new Set([...LARGE_CAP, ...BOOK_ETFS].map((u) => u.symbol));
+const KITE_SCAN = new Set([...LARGE_CAP, ...MID_CAP, ...BOOK_ETFS].map((u) => u.symbol));
 const { addDays } = require('../utils/dates');
 
 /**
