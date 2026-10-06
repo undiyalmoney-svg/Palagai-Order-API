@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { buildSchedule, pairClosedTrades, previousIsoWeek, lastTradingDayOfIsoWeek, resolvePaperPeriod, stampSuggestions, analysisFromRank, widenBook, DESK_BOOK } = require('../services/desk');
+const { buildSchedule, pairClosedTrades, previousIsoWeek, lastTradingDayOfIsoWeek, resolvePaperPeriod, stampSuggestions, analysisFromRank, widenBook, sizeBuysFromFunds, DESK_BOOK } = require('../services/desk');
 
 test('weekly buy scan is the last trading day of the ISO week after 16:00 IST', () => {
   const wedMorning = new Date('2026-09-30T04:00:00Z'); // Wed 09:30 IST, before 16:00
@@ -68,6 +68,21 @@ test('desk book adds a few more analyzed leaders and skips names that fail the 3
   assert.match(out.buy[1].analysis, /3M \+8\.3%/);
   assert.match(out.sell[0].analysis, /3M momentum failed/);
   assert.ok(!out.buy.some((r) => r.symbol === 'NIACL' || r.symbol === 'HELD'));
+});
+
+test('buy qty is the share count the funds can pay for', () => {
+  const rows = [
+    { symbol: 'AAA', priceRef: 100, suggestedBuy: 100 },
+    { symbol: 'BBB', priceRef: 250, suggestedBuy: 250 },
+    { symbol: 'CCC', priceRef: 1000, suggestedBuy: 1000 },
+  ];
+  const sized = sizeBuysFromFunds(rows, 1000);
+  assert.deepEqual(sized.map((r) => r.qty), [7, 1, 0]);
+  const spent = sized.reduce((sum, row) => sum + row.qty * row.priceRef, 0);
+  assert.ok(spent <= 1000);
+  assert.ok(spent + 100 > 1000);
+  const empty = sizeBuysFromFunds([{ symbol: 'AAA', qty: 9, priceRef: 500 }], 0);
+  assert.equal(empty[0].qty, 0);
 });
 
 test('daily horizon: buy and sell both next unused trading day after 16:00', () => {

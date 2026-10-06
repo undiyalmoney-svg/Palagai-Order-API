@@ -115,6 +115,52 @@ function leaderOk(row) {
   return true;
 }
 
+function sharePrice(row) {
+  const n = Number(row?.suggestedLimit ?? row?.suggestedBuy ?? row?.priceRef);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+/**
+ * Equal-weight the buy list against the funds the scan is using
+ * (Kite equity cash when the token works, otherwise the typed capital).
+ * Leftover rupees buy extra shares of the cheaper names.
+ */
+function sizeBuysFromFunds(rows, funds) {
+  const list = (rows || []).map((row) => ({ ...row }));
+  const cash = Math.max(0, Number(funds) || 0);
+  if (!list.length) return list;
+  const slice = cash / list.length;
+  let spent = 0;
+  for (const row of list) {
+    const px = sharePrice(row);
+    const room = Math.max(0, cash - spent);
+    const qty = px > 0 ? Math.floor(Math.min(slice, room) / px) : 0;
+    stampBuyQty(row, qty, px);
+    spent += qty * px;
+  }
+  let left = cash - spent;
+  const cheap = list
+    .map((row, index) => ({ row, index, px: sharePrice(row) }))
+    .filter((item) => item.px > 0)
+    .sort((a, b) => a.px - b.px || a.index - b.index);
+  for (const item of cheap) {
+    const extra = Math.floor(left / item.px);
+    if (extra <= 0) continue;
+    stampBuyQty(item.row, item.row.qty + extra, item.px);
+    left -= extra * item.px;
+  }
+  return list;
+}
+
+function stampBuyQty(row, qty, px) {
+  row.qty = qty;
+  row.allocationValue = round(qty * px, 2);
+  if (qty > 0 && px > 0) {
+    row.suggestedLimit = row.suggestedLimit || px;
+    row.fillHint = fillHint('BUY', row.suggestedLimit, FILL_CLOCK, { qty, symbol: row.symbol });
+  }
+}
+
 function unsizedBuy(leader) {
   const price = Number(leader.price);
   const suggestedBuy = suggestedLimitPrice({ side: 'BUY', price, priceRef: price, maxDeviationPct: 0.04 });
@@ -1263,6 +1309,7 @@ async function scanDesk(momentum, userId, { capital, reset = false, mode = 'LIVE
   const schedule = buildSchedule(cfg.params.horizon);
   const rowExtra = { maxDeviationPct: cfg.params.maxPriceDeviationPct ?? 0.04, fillTime: FILL_CLOCK, lastOf };
   const overlay = widenBook(applyCncOverlay(grouped, holdingsSync, rowExtra), r.result.ranking, DESK_BOOK);
+  overlay.buy = sizeBuysFromFunds(overlay.buy, cap);
   let answer = r.result.summary.answer;
   let headline = r.result.summary.headline;
   if (wantLive && (grouped.sell || []).length && overlay.sell.length === 0) {
@@ -1335,6 +1382,7 @@ module.exports = {
   DESK_BOOK,
   analysisFromRank,
   widenBook,
+  sizeBuysFromFunds,
   pairClosedTrades,
   lastWeekPicks,
   previousIsoWeek,
