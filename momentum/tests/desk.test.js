@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { buildSchedule, pairClosedTrades, previousIsoWeek, lastTradingDayOfIsoWeek, resolvePaperPeriod, stampSuggestions, analysisFromRank, widenBook, sizeBuysFromFunds, DESK_BOOK } = require('../services/desk');
+const { buildSchedule, pairClosedTrades, previousIsoWeek, lastTradingDayOfIsoWeek, resolvePaperPeriod, stampSuggestions, analysisFromRank, widenBook, carryScannerBook, sizeBuysFromFunds, DESK_BOOK } = require('../services/desk');
 
 test('weekly buy scan is the last trading day of the ISO week after 16:00 IST', () => {
   const wedMorning = new Date('2026-09-30T04:00:00Z'); // Wed 09:30 IST, before 16:00
@@ -68,6 +68,26 @@ test('desk book adds a few more analyzed leaders and skips names that fail the 3
   assert.match(out.buy[1].analysis, /3M \+8\.3%/);
   assert.match(out.sell[0].analysis, /3M momentum failed/);
   assert.ok(!out.buy.some((r) => r.symbol === 'NIACL' || r.symbol === 'HELD'));
+});
+
+test('the next scan holds yesterday’s names when they are still good and adds a new buy', () => {
+  const ranking = [
+    { symbol: 'TCS', name: 'TCS', price: 4000, score: 80, eligible: true, status: 'BUY', ret: { m1: 0.02, m3: 0.1, m6: 0.2 } },
+    { symbol: 'NYKAA', name: 'Nykaa', price: 340, score: 89, eligible: true, status: 'BUY', ret: { m1: 0.01, m3: 0.08, m6: 0.4 } },
+    { symbol: 'RECLTD', name: 'REC', price: 300, score: 40, eligible: true, status: 'WAIT', ret: { m1: -0.1, m3: -0.16, m6: -0.08 } },
+  ];
+  const out = carryScannerBook(
+    { buy: [{ symbol: 'NYKAA', qty: 0, reason: 'new' }], hold: [], sell: [] },
+    ranking,
+    ['TCS', 'RECLTD'],
+  );
+  assert.deepEqual(out.hold.map((r) => r.symbol), ['TCS']);
+  assert.equal(out.hold[0].action, 'HOLD');
+  assert.match(out.hold[0].analysis, /3M \+10\.0%/);
+  assert.deepEqual(out.buy.map((r) => r.symbol), ['NYKAA']);
+  assert.deepEqual(out.sell.map((r) => r.symbol), ['RECLTD']);
+  assert.equal(out.sell[0].action, 'SELL');
+  assert.deepEqual(out.book, ['TCS', 'NYKAA']);
 });
 
 test('buy qty is the share count the funds can pay for', () => {
