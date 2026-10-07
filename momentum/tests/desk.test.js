@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { buildSchedule, pairClosedTrades, previousIsoWeek, lastTradingDayOfIsoWeek, resolvePaperPeriod, stampSuggestions, analysisFromRank, widenBook, carryScannerBook, sizeBuysFromFunds, DESK_BOOK } = require('../services/desk');
+const { buildSchedule, pairClosedTrades, previousIsoWeek, lastTradingDayOfIsoWeek, resolvePaperPeriod, stampSuggestions, analysisFromRank, widenBook, carryScannerBook, sizeBuysFromFunds, applyFundQty, DESK_BOOK } = require('../services/desk');
 
 test('weekly buy scan is the last trading day of the ISO week after 16:00 IST', () => {
   const wedMorning = new Date('2026-09-30T04:00:00Z'); // Wed 09:30 IST, before 16:00
@@ -70,24 +70,62 @@ test('desk book adds a few more analyzed leaders and skips names that fail the 3
   assert.ok(!out.buy.some((r) => r.symbol === 'NIACL' || r.symbol === 'HELD'));
 });
 
-test('the next scan holds yesterday’s names when they are still good and adds a new buy', () => {
+test('the book keeps every buy and hold until the scanner says sell', () => {
   const ranking = [
-    { symbol: 'TCS', name: 'TCS', price: 4000, score: 80, eligible: true, status: 'BUY', ret: { m1: 0.02, m3: 0.1, m6: 0.2 } },
+    { symbol: 'TCS', name: 'TCS', price: 4000, score: 70, eligible: true, status: 'HOLD', ret: { m1: 0.02, m3: 0.1, m6: 0.2 } },
+    { symbol: 'INFY', name: 'Infy', price: 1500, score: 20, eligible: true, status: 'SELL', ret: { m1: -0.04, m3: -0.12, m6: -0.2 } },
+    { symbol: 'RELIANCE', name: 'Reliance', price: 1400, score: 40, eligible: true, status: 'WAIT', ret: { m1: -0.01, m3: -0.02, m6: 0.04 } },
     { symbol: 'NYKAA', name: 'Nykaa', price: 340, score: 89, eligible: true, status: 'BUY', ret: { m1: 0.01, m3: 0.08, m6: 0.4 } },
-    { symbol: 'RECLTD', name: 'REC', price: 300, score: 40, eligible: true, status: 'WAIT', ret: { m1: -0.1, m3: -0.16, m6: -0.08 } },
   ];
   const out = carryScannerBook(
-    { buy: [{ symbol: 'NYKAA', qty: 0, reason: 'new' }], hold: [], sell: [] },
+    {
+      buy: [{ symbol: 'NYKAA', qty: 0, priceRef: 340, suggestedBuy: 340 }],
+      hold: [{ symbol: 'TCS', action: 'HOLD', qty: 10, priceRef: 4000, heldQty: true, reason: 'CNC' }],
+      sell: [],
+    },
     ranking,
-    ['TCS', 'RECLTD'],
+    [
+      'TCS',
+      { symbol: 'WIPRO', name: 'Wipro', price: 250, analysis: '3M +5.0%' },
+      'RELIANCE',
+      'INFY',
+    ],
   );
-  assert.deepEqual(out.hold.map((r) => r.symbol), ['TCS']);
+  assert.deepEqual(out.hold.map((r) => r.symbol), ['TCS', 'WIPRO', 'RELIANCE']);
   assert.equal(out.hold[0].action, 'HOLD');
+  assert.equal(out.hold[0].qty, 10);
   assert.match(out.hold[0].analysis, /3M \+10\.0%/);
+  assert.equal(out.hold[1].action, 'HOLD');
+  assert.equal(out.hold[2].action, 'HOLD');
+  assert.deepEqual(out.sell.map((r) => r.symbol), ['INFY']);
   assert.deepEqual(out.buy.map((r) => r.symbol), ['NYKAA']);
-  assert.deepEqual(out.sell.map((r) => r.symbol), ['RECLTD']);
-  assert.equal(out.sell[0].action, 'SELL');
-  assert.deepEqual(out.book, ['TCS', 'NYKAA']);
+  assert.deepEqual(out.book.map((r) => r.symbol), ['TCS', 'WIPRO', 'RELIANCE', 'NYKAA']);
+
+  const next = carryScannerBook(
+    { buy: [], hold: [], sell: [] },
+    ranking.filter((row) => row.symbol !== 'INFY'),
+    out.book,
+  );
+  assert.deepEqual(next.hold.map((r) => r.symbol), ['TCS', 'WIPRO', 'RELIANCE', 'NYKAA']);
+  assert.deepEqual(next.sell.map((r) => r.symbol), []);
+  assert.deepEqual(next.buy.map((r) => r.symbol), []);
+  assert.ok(!next.book.some((r) => r.symbol === 'INFY'));
+
+  const sized = applyFundQty([...out.hold, ...out.sell, ...out.buy], 4500);
+  assert.equal(sized[0].symbol, 'TCS');
+  assert.equal(sized[0].qty, 10);
+  assert.equal(sized[0].action, 'HOLD');
+  const wipro = sized.find((row) => row.symbol === 'WIPRO');
+  assert.equal(wipro.action, 'HOLD');
+  assert.ok(wipro.qty >= 1);
+  assert.equal(wipro.fillHint, null);
+  const infy = sized.find((row) => row.symbol === 'INFY');
+  assert.equal(infy.action, 'SELL');
+  assert.ok(infy.qty >= 1);
+  assert.match(infy.fillHint, /Sell/);
+  const nykaa = sized.find((row) => row.symbol === 'NYKAA');
+  assert.ok(nykaa.qty >= 1);
+  assert.match(nykaa.fillHint, /LIMIT/);
 });
 
 test('buy qty is the share count the funds can pay for', () => {

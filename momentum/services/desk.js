@@ -221,60 +221,111 @@ function sellFromLeader(leader) {
   };
 }
 
+function saysSell(row) {
+  const status = String(row?.status || row?.action || '').toUpperCase();
+  return status === 'SELL' || status === 'EXIT' || status === 'REDUCE';
+}
+
+function bookEntries(previous) {
+  const out = [];
+  const seen = new Set();
+  for (const raw of previous || []) {
+    const symbol = String(typeof raw === 'string' ? raw : raw?.symbol || '').toUpperCase();
+    if (!symbol || seen.has(symbol)) continue;
+    seen.add(symbol);
+    out.push(typeof raw === 'string' ? { symbol } : { ...raw, symbol });
+  }
+  return out;
+}
+
+function holdFromSaved(entry) {
+  const price = Number(entry?.price);
+  const px = Number.isFinite(price) && price > 0 ? price : null;
+  return {
+    symbol: entry.symbol,
+    name: entry.name || entry.symbol,
+    sector: '',
+    action: 'HOLD',
+    qty: 0,
+    priceRef: px,
+    lastPrice: px,
+    avgPrice: null,
+    stopPrice: null,
+    suggestedLimit: px,
+    suggestedBuy: px,
+    suggestedSell: null,
+    fillHint: null,
+    whyThisPrice: null,
+    allocationValue: 0,
+    reason: entry.analysis || '',
+    analysis: entry.analysis || '',
+    score: null,
+    signalId: null,
+    canExecute: false,
+  };
+}
+
+function bookSnapshot(row) {
+  const price = sharePrice(row) || Number(row?.priceRef) || null;
+  return {
+    symbol: String(row.symbol || '').toUpperCase(),
+    name: row.name || row.symbol,
+    price: price || null,
+    analysis: row.analysis || '',
+  };
+}
+
 /**
- * The scanner is one book. Names from the last scan stay on the next one:
- * still clearing the gate is Hold, a broken name is Sell, and new leaders
- * are added as Buy. Sold names leave the book.
+ * The book is every name the scanner has said to buy or hold, for as long
+ * as that stays true. A sell is shown on the day it is sold and then dropped.
+ * Anything that is not a sell stays, including names from earlier days.
  */
 function carryScannerBook(overlay, ranking, previous, limit = DESK_BOOK) {
   const bySymbol = new Map((ranking || []).map((row) => [String(row.symbol || '').toUpperCase(), row]));
-  const prev = [];
-  const seenPrev = new Set();
-  for (const raw of previous || []) {
-    const symbol = String(raw || '').toUpperCase();
-    if (!symbol || seenPrev.has(symbol)) continue;
-    seenPrev.add(symbol);
-    prev.push(symbol);
-  }
+  const prev = bookEntries(previous);
 
   const sell = [...(overlay?.sell || [])];
   const sellSet = new Set(sell.map((row) => String(row.symbol || '').toUpperCase()));
   const hold = [];
   const holdSet = new Set();
-  for (const row of overlay?.hold || []) {
-    const symbol = String(row.symbol || '').toUpperCase();
-    if (!symbol || sellSet.has(symbol) || holdSet.has(symbol)) continue;
+  const rememberHold = (row) => {
+    const symbol = String(row?.symbol || '').toUpperCase();
+    if (!symbol || sellSet.has(symbol)) return;
+    if (holdSet.has(symbol)) {
+      const idx = hold.findIndex((item) => String(item.symbol || '').toUpperCase() === symbol);
+      const kept = idx >= 0 ? hold[idx] : null;
+      const incomingQty = Number(row?.qty) || 0;
+      if (kept && row?.heldQty && !(Number(kept.qty) > 0) && incomingQty > 0) {
+        hold[idx] = {
+          ...kept,
+          qty: incomingQty,
+          heldQty: true,
+          allocationValue: Number(row.allocationValue) || kept.allocationValue || 0,
+          priceRef: kept.priceRef || row.priceRef,
+          lastPrice: kept.lastPrice || row.lastPrice,
+          suggestedLimit: kept.suggestedLimit || row.suggestedLimit,
+        };
+      }
+      return;
+    }
     hold.push(row);
     holdSet.add(symbol);
-  }
+  };
 
-  for (const symbol of prev) {
-    if (sellSet.has(symbol)) continue;
-    const leader = bySymbol.get(symbol);
-    if (leader && leaderOk(leader)) {
-      if (!holdSet.has(symbol)) {
-        hold.push(holdFromLeader(leader));
-        holdSet.add(symbol);
-      }
+  for (const entry of prev) {
+    if (sellSet.has(entry.symbol)) continue;
+    const leader = bySymbol.get(entry.symbol);
+    if (leader && saysSell(leader)) {
+      const row = sellFromLeader(leader);
+      row.analysis = analysisFromRank(leader) || entry.analysis || '';
+      sell.push(row);
+      sellSet.add(entry.symbol);
       continue;
     }
-    if (!leader) continue;
-    const existingIdx = hold.findIndex((row) => String(row.symbol || '').toUpperCase() === symbol);
-    const existing = existingIdx >= 0 ? hold.splice(existingIdx, 1)[0] : null;
-    holdSet.delete(symbol);
-    const qty = Number(existing?.qty) || 0;
-    const row = {
-      ...(existing || sellFromLeader(leader)),
-      action: 'SELL',
-      qty,
-      analysis: analysisFromRank(leader) || existing?.analysis || '',
-    };
-    if (qty > 0) {
-      row.fillHint = fillHint('SELL', row.suggestedSell ?? row.suggestedLimit, FILL_CLOCK, { qty, symbol });
-    }
-    sell.push(row);
-    sellSet.add(symbol);
+    rememberHold(leader ? holdFromLeader(leader) : holdFromSaved(entry));
   }
+
+  for (const row of overlay?.hold || []) rememberHold(row);
 
   const buy = [];
   const taken = new Set([...holdSet, ...sellSet]);
@@ -284,41 +335,83 @@ function carryScannerBook(overlay, ranking, previous, limit = DESK_BOOK) {
     buy.push(row);
     taken.add(symbol);
   };
-  for (const row of overlay?.buy || []) pushBuy(row);
+  for (const row of overlay?.buy || []) {
+    if (saysSell(row)) continue;
+    pushBuy(row);
+  }
   for (const leader of ranking || []) {
     if (buy.length >= limit) break;
-    if (!leaderOk(leader)) continue;
+    if (!leaderOk(leader) || saysSell(leader)) continue;
     pushBuy(unsizedBuy(leader));
   }
 
   const book = [];
   const seenBook = new Set();
   for (const row of [...hold, ...buy]) {
-    const symbol = String(row.symbol || '').toUpperCase();
-    if (!symbol || seenBook.has(symbol)) continue;
-    seenBook.add(symbol);
-    book.push(symbol);
+    const snap = bookSnapshot(row);
+    if (!snap.symbol || seenBook.has(snap.symbol)) continue;
+    seenBook.add(snap.symbol);
+    book.push(snap);
   }
   return { buy, hold, sell, alsoHeld: overlay?.alsoHeld || [], book };
+}
+
+/**
+ * Share counts for names the scanner is still showing. A row that already
+ * has a quantity (a real CNC holding) keeps it. The rest are sized from the
+ * chosen fund, holds first, then today's sells, then new buys.
+ */
+function applyFundQty(rows, funds) {
+  const open = [];
+  const openAt = [];
+  (rows || []).forEach((row, i) => {
+    if (row?.heldQty && Number(row.qty) > 0) return;
+    open.push(row);
+    openAt.push(i);
+  });
+  const sized = sizeBuysFromFunds(open, funds);
+  const out = (rows || []).map((row) => ({ ...row }));
+  openAt.forEach((i, n) => {
+    const next = sized[n];
+    const action = String(out[i].action || '').toUpperCase();
+    if (action === 'HOLD') {
+      out[i] = { ...next, action: 'HOLD', fillHint: null, canExecute: false, suggestedSell: null };
+      return;
+    }
+    if (action === 'SELL' || action === 'EXIT' || action === 'REDUCE') {
+      const qty = Number(next.qty) || 0;
+      const limit = out[i].suggestedSell || out[i].suggestedLimit || sharePrice(next);
+      out[i] = {
+        ...out[i],
+        qty,
+        allocationValue: next.allocationValue,
+        suggestedLimit: limit || out[i].suggestedLimit,
+        suggestedSell: limit || out[i].suggestedSell,
+        fillHint: qty > 0 && limit
+          ? fillHint('SELL', limit, FILL_CLOCK, { qty, symbol: out[i].symbol })
+          : out[i].fillHint,
+      };
+      return;
+    }
+    out[i] = next;
+  });
+  return out;
 }
 
 function loadDeskBook(momentum, userId) {
   const settings = momentum.store.getSettings(userId) || {};
   const list = Array.isArray(settings.deskBook) ? settings.deskBook : [];
-  return list.map((symbol) => String(symbol || '').toUpperCase()).filter(Boolean);
+  return bookEntries(list);
 }
 
-function storeDeskBook(momentum, userId, symbols) {
+function storeDeskBook(momentum, userId, book) {
   const current = momentum.store.getSettings(userId) || {};
-  const deskBook = [];
-  const seen = new Set();
-  for (const raw of symbols || []) {
-    const symbol = String(raw || '').toUpperCase();
-    if (!symbol || seen.has(symbol)) continue;
-    seen.add(symbol);
-    deskBook.push(symbol);
-  }
-  momentum.store.saveSettings(userId, { ...current, deskBook });
+  momentum.store.saveSettings(userId, { ...current, deskBook: bookEntries(book).map((entry) => ({
+    symbol: entry.symbol,
+    name: entry.name || entry.symbol,
+    price: Number(entry.price) || null,
+    analysis: entry.analysis || '',
+  })) });
 }
 
 function useCompositeStrategy(momentum, userId) {
@@ -1209,6 +1302,7 @@ function cncHoldRows(holdings, extra = {}) {
       whyThisPrice: null,
       allocationValue: last && qty ? last * qty : 0,
       reason,
+      heldQty: qty > 0,
       score: null,
       signalId: null,
       canExecute: false,
@@ -1250,6 +1344,7 @@ function applyCncOverlay(grouped, holdingsSync, extra = {}) {
           return {
             ...r,
             qty,
+            heldQty: true,
             fillHint: fillHint('SELL', r.suggestedSell ?? r.suggestedLimit, extra.fillTime || FILL_CLOCK, {
               qty,
               symbol: r.symbol,
@@ -1269,6 +1364,15 @@ function applyCncOverlay(grouped, holdingsSync, extra = {}) {
         : `${h.symbol} is in your Kite CNC book (qty ${h.qty}).`,
   });
   for (const row of [...etfHolds, ...cncRows]) {
+    const existing = hold.find((item) => item.symbol === row.symbol);
+    if (existing) {
+      if (row.heldQty && Number(row.qty) > 0) {
+        existing.qty = Number(row.qty);
+        existing.heldQty = true;
+        existing.allocationValue = row.allocationValue || existing.allocationValue;
+      }
+      continue;
+    }
     if (taken.has(row.symbol)) continue;
     hold.push(row);
     taken.add(row.symbol);
@@ -1371,6 +1475,7 @@ function bookEtfHoldRows(skipped, extra = {}) {
       whyThisPrice: null,
       allocationValue: last && qty ? last * qty : 0,
       reason: `${meta?.name || symbol} is in your Kite book (qty ${qty}). Not a weekly momentum pick — keep unless you want the cash.`,
+      heldQty: qty > 0,
       score: null,
       signalId: null,
       canExecute: false,
@@ -1427,9 +1532,16 @@ async function scanDesk(momentum, userId, { capital, reset = false, mode = 'LIVE
   const rowExtra = { maxDeviationPct: cfg.params.maxPriceDeviationPct ?? 0.04, fillTime: FILL_CLOCK, lastOf };
   const widened = widenBook(applyCncOverlay(grouped, holdingsSync, rowExtra), r.result.ranking, DESK_BOOK);
   const carried = carryScannerBook(widened, r.result.ranking, loadDeskBook(momentum, userId), DESK_BOOK);
-  storeDeskBook(momentum, userId, carried.book);
-  const { book: _nextBook, ...overlay } = carried;
-  overlay.buy = sizeBuysFromFunds(overlay.buy, cap);
+  const sized = applyFundQty([...carried.hold, ...carried.sell, ...carried.buy], cap);
+  const holdCount = carried.hold.length;
+  const sellCount = carried.sell.length;
+  const overlay = {
+    hold: sized.slice(0, holdCount),
+    sell: sized.slice(holdCount, holdCount + sellCount),
+    buy: sized.slice(holdCount + sellCount),
+    alsoHeld: carried.alsoHeld,
+  };
+  storeDeskBook(momentum, userId, [...overlay.hold, ...overlay.buy].map(bookSnapshot));
   let answer = r.result.summary.answer;
   let headline = r.result.summary.headline;
   if (wantLive && (grouped.sell || []).length && overlay.sell.length === 0) {
@@ -1453,8 +1565,9 @@ async function scanDesk(momentum, userId, { capital, reset = false, mode = 'LIVE
     lines.push(`Sell tomorrow: ${suggestions.sellTomorrow.map((r) => r.symbol).join(', ')}`);
   }
   headline = lines.length ? lines.join('. ') : 'Nothing to buy or sell.';
+  const sizedShown = [...overlay.hold, ...suggestions.buyTomorrow];
   const cashNote =
-    suggestions.buyTomorrow.length > 0 && suggestions.buyTomorrow.every((row) => !(Number(row.qty) > 0))
+    sizedShown.length > 0 && sizedShown.every((row) => !(Number(row.qty) > 0))
       ? 'Cash does not cover a full share. These are the symbols to buy when it does.'
       : '';
   const tokenReady = !!momentum.sessions.authorization(userId);
@@ -1507,6 +1620,7 @@ module.exports = {
   widenBook,
   carryScannerBook,
   sizeBuysFromFunds,
+  applyFundQty,
   pairClosedTrades,
   lastWeekPicks,
   previousIsoWeek,

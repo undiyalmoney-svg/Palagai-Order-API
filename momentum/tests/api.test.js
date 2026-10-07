@@ -269,12 +269,18 @@ test('live scan sizes buy qty from Kite equity cash, not the typed capital', asy
   assert.equal(small.body.sizedFrom, 'kite-funds');
   assert.equal(small.body.capital, 20000);
   assert.equal(small.body.funds.equityCash, 20000);
-  const smallSpend = (small.body.buy || []).reduce((a, r) => a + (Number(r.qty) || 0) * (Number(r.priceRef) || 0), 0);
+  const bookSpend = (body) => [...(body.hold || []), ...(body.buy || [])].reduce(
+    (a, r) => a + (Number(r.qty) || 0) * (Number(r.priceRef) || Number(r.suggestedLimit) || 0),
+    0,
+  );
+  const smallSpend = bookSpend(small.body);
+  assert.ok(smallSpend > 0 && smallSpend <= 20000 + 1, `20k funds sized ${smallSpend}`);
   broker.fundsData = { equityCash: 80000, equityNet: 80000, capitalRs: 80000 };
   const large = await s.call('POST', '/desk/scan', { capital: 10000, reset: true, mode: 'LIVE' });
   assert.equal(large.body.capital, 80000);
-  const largeSpend = (large.body.buy || []).reduce((a, r) => a + (Number(r.qty) || 0) * (Number(r.priceRef) || 0), 0);
-  assert.ok(largeSpend > smallSpend, `80k funds should buy more than 20k (got ${largeSpend} vs ${smallSpend})`);
+  const largeSpend = bookSpend(large.body);
+  assert.ok(largeSpend <= 80000 + 1, `80k funds sized ${largeSpend}`);
+  assert.ok(largeSpend > smallSpend, `80k funds should cover more shares than 20k (got ${largeSpend} vs ${smallSpend})`);
   await s.close();
 });
 
