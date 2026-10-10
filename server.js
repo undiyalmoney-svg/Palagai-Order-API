@@ -3,6 +3,7 @@ const { config } = require('./config/env');
 const { connectMongo } = require('./lib/mongo');
 const usersStore = require('./auth/users.store');
 const { getMomentumApp, startMomentumScheduler } = require('./momentum/instance');
+const { startResearchSupervisor } = require('./research/instance');
 const { start: startChartsProtect } = require('./charts-protect/worker');
 
 async function boot() {
@@ -22,6 +23,7 @@ async function boot() {
     console.log(`[palagai-order-api] Kite base: ${config.kiteApiBaseUrl}`);
     console.log('[palagai-order-api] Auth/Admin/Vault/P&L · Momentum Portfolio Manager · /api/kite/* unchanged');
     startMomentumScheduler();
+    startResearchSupervisor();
     startChartsProtect({
       getAuthorization: async (userId) => {
         if (!userId) return null;
