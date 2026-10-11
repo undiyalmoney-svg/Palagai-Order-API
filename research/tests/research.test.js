@@ -298,6 +298,28 @@ test('date filters, csv, xlsx, profit factor and drawdown', async () => {
   assert.equal(maxDrawdown([100, 130, 90, 120]).maxDrawdown, 40);
 });
 
+test('start today carries the previous close forward and the workbook says so', async () => {
+  const { store, service } = await runningService();
+  const account = (await store.listAccounts()).find((a) => a.strategyId === 'vwap-trend');
+  account.currentEquity = 18000;
+  account.cashBalance = 18000;
+  account.tradingDate = '2024-01-02';
+  account.startOfDayEquity = 20000;
+  await store.saveAccount(account);
+  const out = await service.startDay('token key:secret', istDate('2024-01-03', 9, 0));
+  assert.equal(out.capitalPolicy, 'carry-forward');
+  assert.equal(out.paperOnly, true);
+  const kept = out.accounts.find((a) => a.strategyId === 'vwap-trend');
+  assert.equal(kept.openingEquity, 18000);
+  const fresh = (await store.listAccounts()).find((a) => a.accountId === account.accountId);
+  assert.equal(fresh.startOfDayEquity, 18000);
+  assert.notEqual(fresh.cashBalance, 20000);
+  const xlsx = await service.exportXlsx({});
+  const text = xlsx.toString('utf8');
+  assert.match(text, /previous close carried forward/);
+  assert.match(text, /does not switch/);
+});
+
 test('optimization keeps the baseline version', async () => {
   const { service } = await runningService();
   const out = await service.optimize('vwap-trend');
@@ -351,16 +373,20 @@ test('authentication, paper-only start, and no real order calls', async () => {
     try { parsed = JSON.parse(text); } catch { /* csv */ }
     return { status: res.status, body: parsed };
   };
-  assert.equal((await call('GET', '/health')).status, 200);
-  assert.equal((await call('GET', '/status', null, { 'x-test-anon': '1' })).status, 401);
-  assert.equal((await call('POST', '/start', { confirm: START_PHRASE }, { 'x-mods': 'momentum' })).status, 403);
-  const live = await call('POST', '/start', { confirm: START_PHRASE, mode: 'LIVE' });
-  assert.equal(live.status, 400);
-  assert.equal(live.body.code, 'PAPER_ONLY');
-  const blocked = await call('POST', '/start', { confirm: START_PHRASE });
-  assert.equal(blocked.status, 409);
-  assert.equal(blocked.body.code, 'NOT_READY');
-  await new Promise((r) => server.close(r));
+  try {
+    assert.equal((await call('GET', '/health')).status, 200);
+    assert.equal((await call('GET', '/status', null, { 'x-test-anon': '1' })).status, 401);
+    assert.equal((await call('POST', '/start', { confirm: START_PHRASE }, { 'x-mods': 'momentum' })).status, 403);
+    const live = await call('POST', '/start', { confirm: START_PHRASE, mode: 'LIVE' });
+    assert.equal(live.status, 400);
+    assert.equal(live.body.code, 'PAPER_ONLY');
+    await new Promise((r) => setTimeout(r, 600));
+    const blocked = await call('POST', '/start', { confirm: START_PHRASE });
+    assert.equal(blocked.status, 409);
+    assert.equal(blocked.body.code, 'NOT_READY');
+  } finally {
+    await new Promise((r) => server.close(r));
+  }
 
   const root = path.join(__dirname, '..');
   const src = [];

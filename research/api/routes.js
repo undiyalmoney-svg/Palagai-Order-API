@@ -64,6 +64,10 @@ function createResearchRouter(service, { auth = siteAuth } = {}) {
   router.get('/status', ...guard, wrap(async () => service.status()));
   router.get('/readiness', ...guard, wrap(async () => service.readiness()));
   router.post('/start', ...guard, limit, wrap(async (req) => ({ experiment: await service.start(req.body || {}) })));
+  router.post('/day/start', ...guard, limit, wrap(async (req) => {
+    const authorization = req.headers['x-kite-authorization'] || req.headers['x-kite-authorisation'] || '';
+    return service.startDay(authorization);
+  }));
   router.post('/stop', ...guard, limit, wrap(async () => ({ experiment: await service.stop() })));
   router.put('/config', ...guard, limit, wrap(async (req) => ({ experiment: await service.configure(req.body || {}) })));
   router.get('/strategies', ...guard, wrap(async () => ({ strategies: await service.strategies() })));

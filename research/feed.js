@@ -93,10 +93,31 @@ class KiteFeed {
     this.lastTickAt = null;
     this.lastError = null;
     this.backfilled = new Set();
+    this.session = null;
+  }
+
+  creds() {
+    if (this.session) return this.session;
+    return credentials();
+  }
+
+  /**
+   * Keep a browser Kite session for this process. The token is not logged.
+   * Header shape: `token apiKey:accessToken`.
+   */
+  adoptSession(authorization) {
+    const text = String(authorization || '').trim();
+    const match = text.match(/^token\s+([^:\s]+):(\S+)$/i);
+    if (!match) {
+      return { ok: false, message: 'Open Get Token first. Start today uses that Kite session and does not place a real order.' };
+    }
+    this.session = { apiKey: match[1], accessToken: match[2], authorization: `token ${match[1]}:${match[2]}` };
+    this.lastError = null;
+    return { ok: true };
   }
 
   status() {
-    const creds = credentials();
+    const creds = this.creds();
     return {
       configured: Boolean(creds),
       connected: this.connected,
@@ -104,13 +125,13 @@ class KiteFeed {
       lastTickAt: this.lastTickAt,
       mode: this.connected ? 'live' : 'waiting',
       message: creds
-        ? (this.connected ? 'Kite WebSocket is connected' : (this.lastError || 'Waiting for the Kite WebSocket'))
-        : 'Set KITE_API_KEY and KITE_ACCESS_TOKEN. No prices are being invented.',
+        ? (this.connected ? 'Kite WebSocket is connected' : (this.lastError || 'Kite session is loaded. Waiting for the WebSocket.'))
+        : 'Open Get Token, then press Start today. No prices are invented.',
     };
   }
 
   async pull(now = new Date()) {
-    const creds = credentials();
+    const creds = this.creds();
     if (!creds) return { ok: false, message: 'Kite credentials are not configured' };
     try {
       await this.ensureTokens(creds.authorization);
@@ -132,8 +153,52 @@ class KiteFeed {
     }
   }
 
-  async ensureTokens(authorization) {
-    if (this.instruments.some((i) => i.instrumentToken)) {
+  async prepare(now = new Date()) {
+    const creds = this.creds();
+    if (!creds) return { ok: false, message: 'Kite session is missing' };
+    await this.ensureTokens(creds.authorization, true);
+    const tokens = this.instruments.filter((i) => i.instrumentToken).length;
+    try {
+      await this.ensureSocket(creds);
+    } catch (err) {
+      this.lastError = err.message;
+    }
+    const warmed = [];
+    for (const inst of this.instruments.filter((i) => i.instrumentToken).slice(0, 5)) {
+      try {
+        const rows = await this.backfill(inst.symbol, inst.instrumentToken, new Date(now.getTime() - 5 * 24 * 3600 * 1000), now);
+        if (this.store) {
+          for (const bar of rows) await this.store.upsertCandle(bar);
+        }
+        warmed.push(inst.symbol);
+      } catch (err) {
+        this.lastError = err.message;
+      }
+    }
+    return {
+      ok: tokens > 0,
+      tokens,
+      universe: this.instruments.length,
+      warmed,
+      socket: this.connected ? 'connected' : 'connecting',
+      message: tokens ? 'Cash-equity tokens refreshed. The rest of the book warms up through the day.' : 'No NSE equity tokens matched the scan list.',
+    };
+  }
+
+  async backfillNext(now = new Date()) {
+    const creds = this.creds();
+    if (!creds) return [];
+    const inst = this.instruments.find((i) => i.instrumentToken && !this.backfilled.has(i.symbol));
+    if (!inst) return [];
+    const rows = await this.backfill(inst.symbol, inst.instrumentToken, new Date(now.getTime() - 5 * 24 * 3600 * 1000), now);
+    if (this.store) {
+      for (const bar of rows) await this.store.upsertCandle(bar);
+    }
+    return rows;
+  }
+
+  async ensureTokens(authorization, force = false) {
+    if (!force && this.instruments.some((i) => i.instrumentToken)) {
       this.indexTokens();
       return;
     }
@@ -199,7 +264,7 @@ class KiteFeed {
 
   /** One-shot historical backfill. Not a polling loop. */
   async backfill(symbol, token, from, to) {
-    const creds = credentials();
+    const creds = this.creds();
     if (!creds || this.backfilled.has(symbol)) return [];
     this.backfilled.add(symbol);
     const rows = await fetchHistoricalCandles(creds.authorization, token, from, to, 'minute');

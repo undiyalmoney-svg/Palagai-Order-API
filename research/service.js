@@ -8,7 +8,7 @@ const { assessEntry } = require('./risk');
 const { applySlippage, resolveExit, slippageRupees, closeEconomics, cashDelta, round2 } = require('./paper');
 const { summarizeTrades, maxDrawdown, equityFromClosedTrades } = require('./metrics');
 const { sessionDate, minutesOfDay } = require('./time');
-const { rowsToCsv, rowsToXlsx } = require('./export');
+const { rowsToCsv, workbookToXlsx } = require('./export');
 
 class ServiceError extends Error {
   constructor(code, message, status = 400) {
@@ -166,6 +166,15 @@ class ResearchService {
       },
       feed: this.feedStatus(),
       paperOnly: true,
+      capitalPolicy: 'carry-forward',
+      capitalNote: 'Each strategy keeps yesterday’s ending equity as today’s starting capital. A loss stays in that account. A gain stays in that account. Nothing is restored to ₹20,000.',
+      selection: {
+        kind: 'NSE cash equity',
+        universeDate: UNIVERSE_DATE,
+        count: 50,
+        expiry: 'Expiry day does not switch this desk to Nifty or Bank Nifty options. The same cash shares are scanned.',
+        rule: 'A share is eligible when its quote is fresh, enough completed candles exist, and one strategy’s stop, target, reward/risk, and that strategy’s own carried capital all pass. If none pass, the day records no qualifying trade.',
+      },
       dataMode: this.feedStatus().connected ? 'live' : 'waiting',
       disclaimer: 'Simulated results are not a guarantee of future real-money profitability.',
     };
@@ -237,6 +246,69 @@ class ResearchService {
     await this.store.saveExperiment(experiment);
     await this.store.addEvent({ timestamp: now.toISOString(), severity: 'info', eventType: 'START', message: 'Paper experiment started. No real orders will be placed.', metadata: {} });
     return experiment;
+  }
+
+  /**
+   * Operator button. Uses the browser Kite session, carries each account's
+   * equity into today, and leaves the worker running for the session.
+   * Does not reset capital and does not place a real order.
+   */
+  async startDay(authorization, now = new Date()) {
+    if (String(authorization || '').toUpperCase() === 'LIVE') {
+      throw new ServiceError('PAPER_ONLY', 'This module cannot place real orders.');
+    }
+    const experiment = await this.ensure();
+    if (this.feed && typeof this.feed.adoptSession === 'function') {
+      const adopted = this.feed.adoptSession(authorization);
+      if (!adopted.ok && !this.feedStatus().configured) {
+        throw new ServiceError('NO_TOKEN', adopted.message, 400);
+      }
+    } else if (!this.feedStatus().configured) {
+      throw new ServiceError('NO_TOKEN', 'Open Get Token first. Start today uses that Kite session.', 400);
+    }
+    if (experiment.status !== 'running') {
+      experiment.status = 'running';
+      experiment.startedAt = experiment.startedAt || now.toISOString();
+      const weeks = experiment.configuration.experimentWeeks || 10;
+      experiment.plannedEndAt = new Date(now.getTime() + weeks * 7 * 24 * 3600 * 1000).toISOString();
+    }
+    experiment.capitalPolicy = 'carry-forward';
+    experiment.updatedAt = now.toISOString();
+    await this.store.saveExperiment(experiment);
+
+    const day = sessionDate(now);
+    const accounts = await this.store.listAccounts(experiment.experimentId);
+    const carried = [];
+    for (const account of accounts) {
+      const kept = account.currentEquity;
+      if (account.tradingDate !== day) this.rollDay(account, day);
+      await this.store.saveAccount(account);
+      carried.push({
+        strategyId: account.strategyId,
+        openingEquity: account.startOfDayEquity,
+        keptFromPreviousClose: kept,
+      });
+    }
+    await this.snapshot(now);
+    let preparation = { ok: false, message: 'No market feed is attached' };
+    if (this.feed && typeof this.feed.prepare === 'function') {
+      preparation = await this.feed.prepare(now);
+    }
+    await this.store.addEvent({
+      timestamp: now.toISOString(),
+      severity: preparation.ok === false ? 'warn' : 'info',
+      eventType: 'DAY_START',
+      message: `Paper day ${day} started. Capital carries forward. No real order is sent.`,
+      metadata: { capitalPolicy: 'carry-forward', tokens: preparation.tokens || 0 },
+    });
+    return {
+      day,
+      capitalPolicy: 'carry-forward',
+      persisted: this.store.kind === 'mongo',
+      accounts: carried,
+      preparation,
+      paperOnly: true,
+    };
   }
 
   async stop() {
@@ -374,8 +446,67 @@ class ResearchService {
   }
 
   async exportXlsx(q) {
-    const table = await this.exportTable(q);
-    return rowsToXlsx(table.header, table.records);
+    const book = await this.dayBook(q);
+    return workbookToXlsx(book);
+  }
+
+  async dayBook(q = {}) {
+    const trades = await this.collectTrades(q);
+    const accounts = await this.store.listAccounts();
+    const byAccount = new Map(accounts.map((a) => [a.accountId, a]));
+    const trailHeader = ['tradingDate', 'strategyId', 'symbol', 'direction', 'quantity', 'entryTime', 'entryPrice', 'stopPrice', 'targetPrice', 'exitTime', 'exitPrice', 'exitReason', 'grossPnl', 'fees', 'slippage', 'netPnl', 'equityBefore', 'equityAfter', 'capitalChange', 'status'];
+    const grouped = new Map();
+    for (const trade of trades) {
+      if (!grouped.has(trade.accountId)) grouped.set(trade.accountId, []);
+      grouped.get(trade.accountId).push(trade);
+    }
+    const trail = [];
+    for (const [accountId, rows] of grouped) {
+      const account = byAccount.get(accountId);
+      let equity = account ? account.initialCapital : 20000;
+      const ordered = rows.slice().sort((a, b) => String(a.exitTime || a.entryTime).localeCompare(String(b.exitTime || b.entryTime)));
+      for (const t of ordered) {
+        const before = t.executionMetadata?.equityBefore ?? equity;
+        const change = t.status === 'CLOSED' ? Number(t.netPnl) || 0 : 0;
+        const after = t.executionMetadata?.equityAfter ?? (t.status === 'CLOSED' ? round2(before + change) : before);
+        if (t.status === 'CLOSED') equity = after;
+        trail.push([
+          t.tradingDate, t.strategyId, t.symbol, t.direction, t.quantity,
+          t.entryTime, t.actualSimulatedEntryPrice, t.stopPrice, t.targetPrice,
+          t.exitTime || '', t.actualSimulatedExitPrice ?? '', t.exitReason || '',
+          t.grossPnl ?? '', t.fees ?? '', t.slippage ?? '', t.netPnl ?? '',
+          before, after, t.status === 'CLOSED' ? change : '', t.status,
+        ]);
+      }
+    }
+    const summaries = await this.store.listSummaries(q);
+    const capitalHeader = ['tradingDate', 'strategyId', 'openingCapital', 'closingCapital', 'capitalChange', 'trades', 'wins', 'losses', 'fees', 'netPnl', 'note'];
+    const capitalNote = 'Opening capital is the previous close carried forward. It is not reset to 20000.';
+    const capital = summaries.map((row) => {
+      const account = accounts.find((a) => a.accountId === row.accountId);
+      const opening = account && account.tradingDate === row.tradingDate ? account.startOfDayEquity : '';
+      const closing = row.endingEquity;
+      const change = opening === '' ? row.netPnl : round2(closing - opening);
+      return [row.tradingDate, row.strategyId, opening, closing, change, row.trades, row.wins, row.losses, row.fees, row.netPnl, capitalNote];
+    });
+    if (!capital.length) capital.push(['', '', '', '', '', 0, 0, 0, 0, 0, capitalNote]);
+    const instruments = await this.store.listInstruments();
+    const names = instruments.map((i) => [i.symbol, i.name || '', i.sector || '', i.instrumentToken || '', i.universeDate, i.eligible ? 'yes' : 'no', 'NSE cash equity. Expiry day does not switch this list to options.']);
+    const notes = [
+      ['Capital policy', 'Each strategy keeps yesterday’s ending equity as today’s starting capital.'],
+      ['What grows', 'A strategy that makes net profit after costs starts the next day with more capital.'],
+      ['What shrinks', 'A strategy that loses starts the next day with less capital. One strategy cannot fund another.'],
+      ['Stops and entries', 'Stops and targets come from that strategy’s completed-candle rules and ATR distance. They are experimental, not a claim of a perfect entry.'],
+      ['Names', `Scan list is 50 NSE cash shares recorded ${UNIVERSE_DATE}. A name is taken only when the quote is fresh and the strategy, stop, and carried capital all agree.`],
+      ['Expiry', 'This desk does not select a weekly or monthly option. Expiry day scans the same cash shares.'],
+      ['Paper', 'Fills are simulated. This workbook is not a real-money account statement.'],
+    ];
+    return [
+      { name: 'Trades', header: trailHeader, records: trail },
+      { name: 'Capital', header: capitalHeader, records: capital },
+      { name: 'Names', header: ['symbol', 'name', 'sector', 'instrumentToken', 'universeDate', 'eligible', 'selection'], records: names },
+      { name: 'Notes', header: ['topic', 'detail'], records: notes },
+    ];
   }
 
   async events() {
@@ -473,6 +604,8 @@ class ResearchService {
       account.updatedAt = now.toISOString();
       const open = (await this.store.openTrades()).filter((t) => t.accountId === account.accountId);
       account.currentEquity = round2(account.cashBalance + this.positionEquity(open));
+      position.executionMetadata = { ...(position.executionMetadata || {}), equityAfter: account.currentEquity };
+      await this.store.saveTrade(position);
       await this.store.saveAccount(account);
     }
     return position;
@@ -537,6 +670,7 @@ class ResearchService {
 
   async openTrade({ experiment, account, strategy, signal, decision, now, day, source, signalId }) {
     const fill = round2(applySlippage(signal.referencePrice, signal.direction, experiment.configuration.slippageBps, 'entry'));
+    const equityBefore = account.currentEquity;
     const trade = {
       tradeId: id('tr'),
       idempotencyKey: signalId,
@@ -566,7 +700,12 @@ class ResearchService {
       netPnl: null,
       status: 'OPEN',
       lastPrice: fill,
-      executionMetadata: { source: source || 'live', assumptions: 'adverse slippage, MIS equity charges, gap-through fills at the open' },
+      executionMetadata: {
+        source: source || 'live',
+        assumptions: 'adverse slippage, MIS equity charges, gap-through fills at the open',
+        equityBefore,
+        capitalPolicy: 'carry-forward',
+      },
     };
     const inserted = await this.store.insertTrade(trade);
     if (inserted.duplicate) return inserted.trade;
@@ -667,6 +806,13 @@ class ResearchService {
     if (!this.feed || !this.feed.status().configured) {
       await this.store.addEvent({ timestamp: now.toISOString(), severity: 'warn', eventType: 'FEED', message: 'Worker is idle because Kite credentials are not configured.', metadata: {} });
       return { idle: 'no-feed' };
+    }
+    if (typeof this.feed.backfillNext === 'function') {
+      try {
+        await this.feed.backfillNext(now);
+      } catch (err) {
+        await this.store.addEvent({ timestamp: now.toISOString(), severity: 'warn', eventType: 'BACKFILL', message: err.message, metadata: {} });
+      }
     }
     const pulled = await this.feed.pull(now);
     if (!pulled.ok) {

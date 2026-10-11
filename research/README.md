@@ -18,6 +18,10 @@ This module scans the app's Nifty 50-style universe, runs five independent strat
 npm start
 ```
 
-The website Research tab calls `POST /research/start` with `{ "confirm": "START PAPER EXPERIMENT" }` after readiness passes. Readiness requires Mongo or an explicit in-memory warning, five strategies, the universe, risk settings, Kite credentials, and instrument tokens.
+The Research tab **Start today** button sends the browser’s saved Kite session (`X-Kite-Authorization` from Get Token). The server uses it for prices only, carries each strategy’s previous close into the new session, and keeps recording after the browser closes.
+
+`POST /research/start` with `{ "confirm": "START PAPER EXPERIMENT" }` remains available. It still refuses a live-order mode.
+
+Each strategy account keeps its ending equity. A loss stays in that account. A gain stays in that account. The next day does not restore ₹20,000. The Excel workbook has Trades, Capital, Names, and Notes sheets.
 
 There is no live-order switch in this module.
