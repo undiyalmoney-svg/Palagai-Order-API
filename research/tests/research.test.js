@@ -320,6 +320,62 @@ test('start today carries the previous close forward and the workbook says so', 
   assert.match(text, /does not switch/);
 });
 
+test('feed restoreSession adopts a saved broker header after RAM is cleared', async () => {
+  const feed = new KiteFeed({
+    instruments: [{ symbol: 'INFY' }],
+    getAuthorization: async () => 'token savedkey:savedtoken',
+  });
+  assert.equal(feed.status().configured, false);
+  await feed.restoreSession();
+  assert.equal(feed.status().configured, true);
+  assert.equal(feed.session.apiKey, 'savedkey');
+});
+
+test('workerTick reloads a saved Kite session instead of staying idle', async () => {
+  const store = new MemoryStore();
+  const feed = new KiteFeed({ getAuthorization: async () => 'token savedkey:savedtoken' });
+  feed.backfillNext = async () => [];
+  feed.pull = async () => ({ ok: false, message: 'no ticks in this test' });
+  const service = new ResearchService({ store, feed });
+  const experiment = await service.ensure();
+  experiment.status = 'running';
+  await store.saveExperiment(experiment);
+  const out = await service.workerTick(istDate('2024-01-02', 10, 0));
+  assert.notEqual(out.idle, 'no-feed');
+  assert.equal(feed.status().configured, true);
+  const events = await store.listEvents(20);
+  assert.equal(events.some((e) => /credentials are not configured/.test(e.message)), false);
+});
+
+test('idle feed warning is not written every tick', async () => {
+  const { store, service } = await runningService();
+  service.feed = { status() { return { configured: false }; } };
+  const now = istDate('2024-01-02', 10, 0);
+  await service.workerTick(now);
+  await service.workerTick(new Date(now.getTime() + 20_000));
+  const events = await store.listEvents(50);
+  const idle = events.filter((e) => /credentials are not configured/.test(e.message));
+  assert.equal(idle.length, 1);
+});
+
+test('start today stores the Kite session for the next restart', async () => {
+  const saved = [];
+  const feed = new KiteFeed({ instruments: [] });
+  feed.prepare = async () => ({ ok: true, tokens: 0, message: 'test' });
+  const store = new MemoryStore();
+  const service = new ResearchService({
+    store,
+    feed,
+    saveAuthorization: (userId, apiKey, accessToken) => {
+      saved.push({ userId, apiKey, accessToken });
+      return true;
+    },
+  });
+  await service.ensure();
+  await service.startDay('token key:secret', istDate('2024-01-03', 9, 0), { userId: 'u1' });
+  assert.deepEqual(saved[0], { userId: 'u1', apiKey: 'key', accessToken: 'secret' });
+});
+
 test('optimization keeps the baseline version', async () => {
   const { service } = await runningService();
   const out = await service.optimize('vwap-trend');

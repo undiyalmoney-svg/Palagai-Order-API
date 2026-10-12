@@ -103,9 +103,10 @@ class CandleAggregator {
 }
 
 class KiteFeed {
-  constructor({ instruments = [], store = null } = {}) {
+  constructor({ instruments = [], store = null, getAuthorization = null } = {}) {
     this.instruments = instruments;
     this.store = store;
+    this.getAuthorization = getAuthorization;
     this.aggregator = new CandleAggregator();
     this.byToken = new Map();
     this.quotes = new Map();
@@ -120,6 +121,22 @@ class KiteFeed {
   creds() {
     if (this.session) return this.session;
     return credentials();
+  }
+
+  /**
+   * Reload a saved broker token after a process restart. Start today used
+   * to keep the session only in RAM, so pm2 restart left the worker idle.
+   */
+  async restoreSession() {
+    if (this.creds()) return this.creds();
+    if (typeof this.getAuthorization !== 'function') return null;
+    try {
+      const header = await this.getAuthorization();
+      if (header) this.adoptSession(header);
+    } catch {
+      return this.creds();
+    }
+    return this.creds();
   }
 
   /**
@@ -147,7 +164,7 @@ class KiteFeed {
       mode: this.connected ? 'live' : 'waiting',
       message: creds
         ? (this.connected ? 'Kite WebSocket is connected' : (this.lastError || 'Kite session is loaded. Waiting for the WebSocket.'))
-        : 'Open Get Token, then press Start today. No prices are invented.',
+        : 'Open Get Token, then press Start today. The server keeps that session after a restart. No prices are invented.',
     };
   }
 

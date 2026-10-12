@@ -61,12 +61,24 @@ function createResearchRouter(service, { auth = siteAuth } = {}) {
     res.json({ status: 'ok', module: 'intraday-research', paperOnly: true });
   });
 
-  router.get('/status', ...guard, wrap(async () => service.status()));
-  router.get('/readiness', ...guard, wrap(async () => service.readiness()));
+  function kiteHeader(req) {
+    return req.headers['x-kite-authorization'] || req.headers['x-kite-authorisation'] || '';
+  }
+
+  router.get('/status', ...guard, wrap(async (req) => {
+    const header = kiteHeader(req);
+    if (header) service.captureAuthorization(req.user?.id, header);
+    if (service.feed && typeof service.feed.restoreSession === 'function') await service.feed.restoreSession();
+    return service.status();
+  }));
+  router.get('/readiness', ...guard, wrap(async () => {
+    if (service.feed && typeof service.feed.restoreSession === 'function') await service.feed.restoreSession();
+    return service.readiness();
+  }));
   router.post('/start', ...guard, limit, wrap(async (req) => ({ experiment: await service.start(req.body || {}) })));
   router.post('/day/start', ...guard, limit, wrap(async (req) => {
-    const authorization = req.headers['x-kite-authorization'] || req.headers['x-kite-authorisation'] || '';
-    return service.startDay(authorization);
+    const authorization = kiteHeader(req);
+    return service.startDay(authorization, new Date(), { userId: req.user?.id });
   }));
   router.post('/stop', ...guard, limit, wrap(async () => ({ experiment: await service.stop() })));
   router.put('/config', ...guard, limit, wrap(async (req) => ({ experiment: await service.configure(req.body || {}) })));

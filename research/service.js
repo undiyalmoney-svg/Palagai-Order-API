@@ -23,12 +23,33 @@ function id(prefix) {
 }
 
 class ResearchService {
-  constructor({ store, feed = null, log = () => {} } = {}) {
+  constructor({ store, feed = null, log = () => {}, saveAuthorization = null } = {}) {
     this.store = store;
     this.feed = feed;
     this.log = log;
+    this.saveAuthorization = saveAuthorization;
     this.readyOnce = null;
     this.workerOwner = `pid-${process.pid}`;
+    this.lastFeedNote = null;
+    this.lastFeedNoteAt = 0;
+  }
+
+  captureAuthorization(userId, header) {
+    if (!this.feed || typeof this.feed.adoptSession !== 'function') return { ok: false };
+    const adopted = this.feed.adoptSession(header);
+    if (adopted.ok && userId && typeof this.saveAuthorization === 'function' && this.feed.session) {
+      this.saveAuthorization(userId, this.feed.session.apiKey, this.feed.session.accessToken);
+    }
+    return adopted;
+  }
+
+  async noteFeed(now, severity, message) {
+    const key = `${severity}:${message}`;
+    const ts = now instanceof Date ? now.getTime() : Date.now();
+    if (this.lastFeedNote === key && ts - this.lastFeedNoteAt < 10 * 60_000) return;
+    this.lastFeedNote = key;
+    this.lastFeedNoteAt = ts;
+    await this.store.addEvent({ timestamp: (now instanceof Date ? now : new Date()).toISOString(), severity, eventType: 'FEED', message, metadata: {} });
   }
 
   async ensure() {
@@ -119,7 +140,7 @@ class ResearchService {
       { id: 'universe', ok: instruments.filter((i) => i.eligible).length >= 50, message: `${instruments.length} instruments dated ${UNIVERSE_DATE}` },
       { id: 'strategies', ok: strategies.filter((s) => s.version === 1).length === 5, message: 'Five baseline strategies are stored' },
       { id: 'risk', ok: experiment.configuration.riskPerTrade > 0 && experiment.configuration.maxDailyLoss > 0, message: 'Risk configuration is present' },
-      { id: 'kite', ok: feed.configured, message: feed.configured ? 'Kite credentials are configured' : 'Set KITE_API_KEY and KITE_ACCESS_TOKEN. No prices are invented.' },
+      { id: 'kite', ok: feed.configured, message: feed.configured ? 'Kite credentials are configured' : 'Open Get Token, then press Start today. The server keeps that session after a restart.' },
       { id: 'tokens', ok: instruments.some((i) => i.instrumentToken), message: instruments.some((i) => i.instrumentToken) ? 'Instrument tokens are loaded' : 'Tokens load after a Kite instrument refresh' },
     ];
     return {
@@ -253,15 +274,18 @@ class ResearchService {
    * equity into today, and leaves the worker running for the session.
    * Does not reset capital and does not place a real order.
    */
-  async startDay(authorization, now = new Date()) {
+  async startDay(authorization, now = new Date(), { userId } = {}) {
     if (String(authorization || '').toUpperCase() === 'LIVE') {
       throw new ServiceError('PAPER_ONLY', 'This module cannot place real orders.');
     }
     const experiment = await this.ensure();
     if (this.feed && typeof this.feed.adoptSession === 'function') {
-      const adopted = this.feed.adoptSession(authorization);
+      const adopted = this.captureAuthorization(userId, authorization);
       if (!adopted.ok && !this.feedStatus().configured) {
-        throw new ServiceError('NO_TOKEN', adopted.message, 400);
+        if (typeof this.feed.restoreSession === 'function') await this.feed.restoreSession();
+      }
+      if (!this.feedStatus().configured) {
+        throw new ServiceError('NO_TOKEN', adopted.message || 'Open Get Token first. Start today uses that Kite session.', 400);
       }
     } else if (!this.feedStatus().configured) {
       throw new ServiceError('NO_TOKEN', 'Open Get Token first. Start today uses that Kite session.', 400);
@@ -803,8 +827,11 @@ class ResearchService {
   async workerTick(now = new Date()) {
     const experiment = await this.ensure();
     if (experiment.status !== 'running') return { idle: true };
+    if (this.feed && typeof this.feed.restoreSession === 'function') {
+      await this.feed.restoreSession();
+    }
     if (!this.feed || !this.feed.status().configured) {
-      await this.store.addEvent({ timestamp: now.toISOString(), severity: 'warn', eventType: 'FEED', message: 'Worker is idle because Kite credentials are not configured.', metadata: {} });
+      await this.noteFeed(now, 'warn', 'Worker is idle because Kite credentials are not configured.');
       return { idle: 'no-feed' };
     }
     if (typeof this.feed.backfillNext === 'function') {
@@ -816,7 +843,7 @@ class ResearchService {
     }
     const pulled = await this.feed.pull(now);
     if (!pulled.ok) {
-      await this.store.addEvent({ timestamp: now.toISOString(), severity: 'error', eventType: 'FEED', message: pulled.message || 'Feed unhealthy. New entries are blocked.', metadata: {} });
+      await this.noteFeed(now, 'error', pulled.message || 'Feed unhealthy. New entries are blocked.');
       return { blocked: true };
     }
     for (const row of pulled.symbols || []) {

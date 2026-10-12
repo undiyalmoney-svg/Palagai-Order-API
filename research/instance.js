@@ -22,10 +22,22 @@ function getResearchService() {
   return service;
 }
 
-function startResearchSupervisor() {
+function applyResearchAuth(svc, opts = {}) {
+  if (opts.getAuthorization && svc.feed) svc.feed.getAuthorization = opts.getAuthorization;
+  if (opts.saveAuthorization) svc.saveAuthorization = opts.saveAuthorization;
+}
+
+function startResearchSupervisor(opts = {}) {
+  const svc = getResearchService();
+  applyResearchAuth(svc, opts);
   if (worker) return worker;
-  worker = startResearchWorker(getResearchService());
+  worker = startResearchWorker(svc);
+  if (svc.feed && typeof svc.feed.restoreSession === 'function') {
+    void svc.feed.restoreSession().then((creds) => {
+      if (creds) console.log('[research] restored Kite session from the saved broker token');
+    });
+  }
   return worker;
 }
 
-module.exports = { getResearchService, startResearchSupervisor, buildService };
+module.exports = { getResearchService, startResearchSupervisor, buildService, applyResearchAuth };

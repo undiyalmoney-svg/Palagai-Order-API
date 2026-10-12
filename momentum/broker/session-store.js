@@ -43,6 +43,17 @@ class BrokerSessions {
     }
   }
 
+  /** Newest saved Kite header. Research restores this after a pm2 restart. */
+  latestAuthorization() {
+    const row = typeof this.store.latestBrokerSession === 'function' ? this.store.latestBrokerSession() : null;
+    if (!row) return null;
+    try {
+      return `token ${row.apiKey}:${decrypt(row.tokenEnc)}`;
+    } catch {
+      return null;
+    }
+  }
+
   info(userId) {
     const row = this.store.getBrokerSession(userId);
     if (!row) return { configured: false };

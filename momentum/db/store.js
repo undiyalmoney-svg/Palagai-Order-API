@@ -689,6 +689,10 @@ class Store {
     return this.db.prepare('SELECT api_key AS apiKey, token_enc AS tokenEnc, updated_at AS updatedAt FROM broker_sessions WHERE user_id=?').get(String(userId)) || null;
   }
 
+  latestBrokerSession() {
+    return this.db.prepare('SELECT user_id AS userId, api_key AS apiKey, token_enc AS tokenEnc, updated_at AS updatedAt FROM broker_sessions ORDER BY updated_at DESC LIMIT 1').get() || null;
+  }
+
   deleteBrokerSession(userId) {
     this.db.prepare('DELETE FROM broker_sessions WHERE user_id=?').run(String(userId));
   }

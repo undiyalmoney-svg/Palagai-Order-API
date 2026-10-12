@@ -24,7 +24,39 @@ async function boot() {
     console.log(`[palagai-order-api] Kite base: ${config.kiteApiBaseUrl}`);
     console.log('[palagai-order-api] Auth/Admin/Vault/P&L · Momentum Portfolio Manager · /api/kite/* unchanged');
     startMomentumScheduler();
-    startResearchSupervisor();
+    startResearchSupervisor({
+      getAuthorization: async () => {
+        const sessions = getMomentumApp().momentum.sessions;
+        try {
+          const sl = require('./sl-buddy/store').load();
+          if (sl.userId) {
+            const header = sessions.authorization(sl.userId);
+            if (header) return header;
+          }
+        } catch {
+          // SL Buddy state is optional
+        }
+        try {
+          const protect = require('./charts-protect/store').load();
+          if (protect.userId) {
+            const header = sessions.authorization(protect.userId);
+            if (header) return header;
+          }
+        } catch {
+          // Protect state is optional
+        }
+        return typeof sessions.latestAuthorization === 'function' ? sessions.latestAuthorization() : null;
+      },
+      saveAuthorization: (userId, apiKey, accessToken) => {
+        if (!userId || !apiKey || !accessToken) return false;
+        try {
+          getMomentumApp().momentum.sessions.save(userId, apiKey, accessToken);
+          return true;
+        } catch {
+          return false;
+        }
+      },
+    });
     startChartsProtect({
       getAuthorization: async (userId) => {
         if (!userId) return null;
