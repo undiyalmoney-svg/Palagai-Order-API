@@ -19,6 +19,27 @@ function credentials() {
   return { apiKey, accessToken, authorization: `token ${apiKey}:${accessToken}` };
 }
 
+/**
+ * Droplet Node is 18/20 — `global.WebSocket` only exists on Node 22+.
+ * Fall back to the `ws` package so the Kite ticker can open.
+ */
+function resolveWebSocket() {
+  if (typeof globalThis.WebSocket === 'function') return globalThis.WebSocket;
+  try {
+    return require('ws');
+  } catch {
+    throw new Error('This Node runtime has no WebSocket client');
+  }
+}
+
+function listen(ws, type, fn) {
+  if (typeof ws.addEventListener === 'function') {
+    ws.addEventListener(type, (ev) => fn(type === 'message' ? ev.data : ev));
+    return;
+  }
+  ws.on(type, (data) => fn(data));
+}
+
 function parseTicks(buffer) {
   if (!buffer || buffer.length < 2) return [];
   const buf = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer);
@@ -221,22 +242,21 @@ class KiteFeed {
   async ensureSocket(creds) {
     if (this.ws && this.connected) return;
     if (this.ws) return;
+    this.indexTokens();
     const tokens = this.instruments.map((i) => Number(i.instrumentToken)).filter(Boolean);
     if (!tokens.length) throw new Error('Instrument tokens are not loaded');
-    const WebSocketImpl = global.WebSocket;
-    if (!WebSocketImpl) throw new Error('This Node runtime has no WebSocket client');
+    const WebSocketImpl = this.WebSocket || resolveWebSocket();
     const url = `wss://ws.kite.trade?api_key=${encodeURIComponent(creds.apiKey)}&access_token=${encodeURIComponent(creds.accessToken)}`;
     const ws = new WebSocketImpl(url);
     this.ws = ws;
-    ws.binaryType = 'arraybuffer';
-    ws.addEventListener('open', () => {
+    if ('binaryType' in ws) ws.binaryType = 'arraybuffer';
+    listen(ws, 'open', () => {
       this.connected = true;
       this.lastError = null;
       ws.send(JSON.stringify({ a: 'subscribe', v: tokens }));
       ws.send(JSON.stringify({ a: 'mode', v: ['quote', tokens] }));
     });
-    ws.addEventListener('message', (ev) => {
-      const data = ev.data;
+    listen(ws, 'message', (data) => {
       if (typeof data === 'string') return;
       const ticks = parseTicks(Buffer.from(data));
       const now = new Date();
@@ -251,13 +271,14 @@ class KiteFeed {
         }
       }
     });
-    ws.addEventListener('close', () => {
+    listen(ws, 'close', () => {
       this.connected = false;
       this.ws = null;
       this.lastError = 'Kite WebSocket closed';
     });
-    ws.addEventListener('error', () => {
+    listen(ws, 'error', () => {
       this.connected = false;
+      this.ws = null;
       this.lastError = 'Kite WebSocket error';
     });
   }
@@ -282,4 +303,4 @@ class KiteFeed {
   }
 }
 
-module.exports = { KiteFeed, parseTicks, CandleAggregator, credentials };
+module.exports = { KiteFeed, parseTicks, CandleAggregator, credentials, resolveWebSocket };

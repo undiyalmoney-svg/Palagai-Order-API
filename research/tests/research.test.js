@@ -10,7 +10,7 @@ const { ema, rsi, atr, adx, vwap } = require('../indicators');
 const { resolveExit } = require('../paper');
 const { sizePosition, assessEntry } = require('../risk');
 const { summarizeTrades, maxDrawdown } = require('../metrics');
-const { parseTicks } = require('../feed');
+const { parseTicks, KiteFeed, resolveWebSocket } = require('../feed');
 const { MemoryStore } = require('../store');
 const { ResearchService, START_PHRASE } = require('../service');
 const { createResearchRouter } = require('../api/routes');
@@ -329,6 +329,54 @@ test('optimization keeps the baseline version', async () => {
   assert.ok(out.candidate.version > 1);
   const rows = await service.strategies();
   assert.ok(rows.some((s) => s.strategyId === 'vwap-trend' && s.version === 1 && s.enabled));
+});
+
+test('resolveWebSocket falls back to the ws package when global.WebSocket is missing', () => {
+  const previous = globalThis.WebSocket;
+  try {
+    delete globalThis.WebSocket;
+    const Impl = resolveWebSocket();
+    assert.equal(typeof Impl, 'function');
+    assert.equal(Impl, require('ws'));
+  } finally {
+    if (previous) globalThis.WebSocket = previous;
+  }
+});
+
+test('feed opens the Kite ticker and records a quote tick', async () => {
+  const sockets = [];
+  class FakeWs {
+    constructor(url) {
+      this.url = url;
+      this.sent = [];
+      sockets.push(this);
+    }
+    addEventListener(type, fn) {
+      this[`on${type}`] = fn;
+    }
+    send(raw) {
+      this.sent.push(JSON.parse(raw));
+    }
+  }
+  const feed = new KiteFeed({ instruments: [{ symbol: 'INFY', instrumentToken: 738561 }] });
+  feed.session = { apiKey: 'k', accessToken: 't', authorization: 'token k:t' };
+  feed.WebSocket = FakeWs;
+  await feed.ensureSocket(feed.session);
+  assert.equal(sockets.length, 1);
+  assert.match(sockets[0].url, /ws\.kite\.trade/);
+  sockets[0].onopen();
+  assert.equal(feed.connected, true);
+  assert.deepEqual(sockets[0].sent[0], { a: 'subscribe', v: [738561] });
+  const buf = Buffer.alloc(2 + 2 + 8);
+  buf.writeInt16BE(1, 0);
+  buf.writeInt16BE(8, 2);
+  buf.writeInt32BE(738561, 4);
+  buf.writeInt32BE(150050, 8);
+  sockets[0].onmessage({ data: buf });
+  assert.equal(feed.quotes.get('INFY').price, 1500.5);
+  sockets[0].onerror();
+  assert.equal(feed.ws, null);
+  assert.equal(feed.connected, false);
 });
 
 test('worker lock and ticker parser', async () => {
