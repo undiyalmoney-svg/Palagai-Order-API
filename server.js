@@ -5,6 +5,7 @@ const usersStore = require('./auth/users.store');
 const { getMomentumApp, startMomentumScheduler } = require('./momentum/instance');
 const { startResearchSupervisor } = require('./research/instance');
 const { start: startChartsProtect } = require('./charts-protect/worker');
+const { start: startSlBuddy } = require('./sl-buddy/worker');
 
 async function boot() {
   try {
@@ -28,6 +29,21 @@ async function boot() {
       getAuthorization: async (userId) => {
         if (!userId) return null;
         return getMomentumApp().momentum.sessions.authorization(userId);
+      },
+    });
+    startSlBuddy({
+      getAuthorization: async (userId) => {
+        if (!userId) return null;
+        return getMomentumApp().momentum.sessions.authorization(userId);
+      },
+      saveAuthorization: (userId, apiKey, accessToken) => {
+        if (!userId || !apiKey || !accessToken) return false;
+        try {
+          getMomentumApp().momentum.sessions.save(userId, apiKey, accessToken);
+          return true;
+        } catch {
+          return false;
+        }
       },
     });
   });

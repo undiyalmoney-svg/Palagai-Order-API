@@ -27,3 +27,6 @@ data/momentum/
 
 # Charts Protect day lock / open fills (runtime)
 data/charts-protect/
+
+# SL Buddy watch flag (runtime)
+data/sl-buddy/

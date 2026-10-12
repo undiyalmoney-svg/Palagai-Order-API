@@ -6,6 +6,7 @@ const authRoutes = require('../auth/auth.routes');
 const { getMomentumRouter } = require('../momentum/instance');
 const { getResearchService } = require('../research/instance');
 const { createResearchRouter } = require('../research/api/routes');
+const { createSlBuddyRouter } = require('../sl-buddy/routes');
 
 const router = express.Router();
 
@@ -38,5 +39,12 @@ function researchHandler(req, res, next) {
   return researchRouter(req, res, next);
 }
 router.use('/research', researchHandler);
+
+let slBuddyRouter = null;
+function slBuddyHandler(req, res, next) {
+  if (!slBuddyRouter) slBuddyRouter = createSlBuddyRouter();
+  return slBuddyRouter(req, res, next);
+}
+router.use('/sl-buddy', slBuddyHandler);
 
 module.exports = router;
