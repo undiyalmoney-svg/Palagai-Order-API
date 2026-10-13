@@ -1,31 +1,144 @@
 'use strict';
 
-const { UNIVERSE } = require('../momentum/data/universe');
-
 /**
- * Dated membership of the scan universe.
- * Symbols are the application's existing liquid large-cap list (Nifty 50 style),
- * not a fabricated price series. Live runs replace instrument tokens from the
- * Kite instruments file when credentials are configured.
- *
- * Membership date is the date this list was recorded in the repo. It is not a
- * claim that the official index was unchanged after that date — refresh from
- * Kite when a session is available.
+ * Research paper books — the same four the Charts desk watches.
+ * These are index / futures prices, not the 50 cash shares.
  */
-const UNIVERSE_DATE = '2026-03-31';
+const UNIVERSE_DATE = '2026-10-13';
 
-function nifty50(date = UNIVERSE_DATE) {
-  return UNIVERSE.slice(0, 50).map((row) => ({
+const INDEX_BOOKS = [
+  {
     exchange: 'NSE',
-    symbol: row.symbol,
-    name: row.name,
-    sector: row.sector,
-    instrumentToken: null,
+    symbol: 'NIFTY 50',
+    name: 'Nifty 50',
+    sector: 'nifty',
+    instrumentToken: 256265,
     tickSize: 0.05,
     lotSize: 1,
+    book: true,
+  },
+  {
+    exchange: 'NSE',
+    symbol: 'NIFTY BANK',
+    name: 'Bank Nifty',
+    sector: 'bank',
+    instrumentToken: 260105,
+    tickSize: 0.05,
+    lotSize: 1,
+    book: true,
+  },
+  {
+    exchange: 'BSE',
+    symbol: 'SENSEX',
+    name: 'Sensex',
+    sector: 'sensex',
+    instrumentToken: 265,
+    tickSize: 0.05,
+    lotSize: 1,
+    book: true,
+  },
+  {
+    exchange: 'MCX',
+    symbol: 'CRUDEOILM',
+    name: 'Crude oil',
+    sector: 'crude',
+    instrumentToken: 0,
+    tickSize: 0.1,
+    lotSize: 1,
+    book: true,
+  },
+];
+
+function indexBooks(date = UNIVERSE_DATE) {
+  return INDEX_BOOKS.map((row) => ({
+    ...row,
     universeDate: date,
     eligible: true,
   }));
 }
 
-module.exports = { UNIVERSE_DATE, nifty50 };
+function isIndexBook(symbol) {
+  const s = String(symbol || '').toUpperCase();
+  return s === 'NIFTY 50' || s === 'NIFTY BANK' || s === 'SENSEX' || s.includes('CRUDE');
+}
+
+function sessionWindow(symbol) {
+  if (/CRUDE/i.test(String(symbol || ''))) {
+    return { open: 9 * 60, cutoff: 23 * 60, square: 23 * 60 + 25 };
+  }
+  return { open: 9 * 60 + 15, cutoff: 15 * 60, square: 15 * 60 + 15 };
+}
+
+function latestSquareMin() {
+  return INDEX_BOOKS.reduce((max, row) => Math.max(max, sessionWindow(row.symbol).square), 0);
+}
+
+function splitCsvLine(line) {
+  if (!String(line).includes('"')) return String(line).split(',');
+  const out = [];
+  let cur = '';
+  let quoted = false;
+  const text = String(line);
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (ch === '"') {
+      if (quoted && text[i + 1] === '"') {
+        cur += '"';
+        i += 1;
+      } else {
+        quoted = !quoted;
+      }
+      continue;
+    }
+    if (ch === ',' && !quoted) {
+      out.push(cur);
+      cur = '';
+      continue;
+    }
+    cur += ch;
+  }
+  out.push(cur);
+  return out;
+}
+
+/** Front-month MCX Crude oil mini future from a Kite instruments dump. */
+function resolveCrudeContract(csv, asOf = new Date()) {
+  const today = new Date(asOf);
+  today.setHours(0, 0, 0, 0);
+  const rows = [];
+  for (const line of String(csv || '').split(/\r?\n/).slice(1)) {
+    if (!line) continue;
+    const cols = splitCsvLine(line);
+    if (cols.length < 12) continue;
+    const symbol = String(cols[2] || '').toUpperCase();
+    const type = String(cols[9] || '').toUpperCase();
+    const exchange = String(cols[11] || '').toUpperCase();
+    if (exchange !== 'MCX' || type !== 'FUT' || !symbol.startsWith('CRUDEOILM')) continue;
+    rows.push({
+      instrumentToken: Number(cols[0]) || 0,
+      tradingSymbol: String(cols[2] || '').trim(),
+      expiry: String(cols[5] || '').trim(),
+      tickSize: Number(cols[7]) || 0.1,
+      lotSize: Number(cols[8]) || 1,
+    });
+  }
+  rows.sort((a, b) => new Date(a.expiry || 0) - new Date(b.expiry || 0));
+  const next = rows.find((row) => !row.expiry || new Date(row.expiry) > today);
+  return next || rows[0] || null;
+}
+
+/** @deprecated stock scan list — kept so old tests/import paths do not break. */
+function nifty50(date = UNIVERSE_DATE) {
+  return indexBooks(date);
+}
+
+module.exports = {
+  UNIVERSE_DATE,
+  INDEX_BOOKS,
+  indexBooks,
+  isIndexBook,
+  sessionWindow,
+  latestSquareMin,
+  resolveCrudeContract,
+  nifty50,
+};

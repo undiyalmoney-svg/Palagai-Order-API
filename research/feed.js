@@ -1,7 +1,8 @@
 'use strict';
 
 const { floorMinute } = require('./time');
-const { fetchInstrumentsCsv, findInstrumentInCsv, fetchHistoricalCandles } = require('../services/kite-market');
+const { fetchInstrumentsCsv, fetchHistoricalCandles } = require('../services/kite-market');
+const { resolveCrudeContract } = require('./universe');
 
 /**
  * Live market adapter. Reads Kite quotes and one-minute history only.
@@ -219,7 +220,7 @@ class KiteFeed {
       universe: this.instruments.length,
       warmed,
       socket: this.connected ? 'connected' : 'connecting',
-      message: tokens ? 'Cash-equity tokens refreshed. The rest of the book warms up through the day.' : 'No NSE equity tokens matched the scan list.',
+      message: tokens ? 'Index-book tokens are ready. Crude oil uses the front-month mini future.' : 'No index-book tokens matched the scan list.',
     };
   }
 
@@ -236,20 +237,24 @@ class KiteFeed {
   }
 
   async ensureTokens(authorization, force = false) {
-    if (!force && this.instruments.some((i) => i.instrumentToken)) {
-      this.indexTokens();
-      return;
-    }
-    const csv = await fetchInstrumentsCsv(authorization, 'NSE');
     for (const inst of this.instruments) {
-      const row = findInstrumentInCsv(csv, { tradingSymbol: inst.symbol });
-      if (!row || row.exchange !== 'NSE' || row.instrumentType !== 'EQ') continue;
-      inst.instrumentToken = row.instrumentToken;
-      inst.tickSize = Number(row.tickSize) || inst.tickSize;
-      inst.lotSize = Number(row.lotSize) || 1;
+      const hasToken = Number(inst.instrumentToken) > 0;
+      const crude = inst.exchange === 'MCX' || /CRUDE/i.test(inst.symbol);
+      if (hasToken && !(crude && force)) continue;
+      if (!crude) continue;
+      const csv = await this.loadCsv(authorization, 'MCX');
+      const hit = resolveCrudeContract(csv);
+      if (!hit || !hit.instrumentToken) continue;
+      inst.instrumentToken = hit.instrumentToken;
+      inst.contractSymbol = hit.tradingSymbol;
+      inst.tickSize = Number(hit.tickSize) || inst.tickSize;
       if (this.store) await this.store.upsertInstrument(inst);
     }
     this.indexTokens();
+  }
+
+  async loadCsv(authorization, exchange) {
+    return fetchInstrumentsCsv(authorization, exchange);
   }
 
   indexTokens() {

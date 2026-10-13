@@ -3,7 +3,7 @@
 const crypto = require('crypto');
 const { DEFAULTS, STRATEGY_DEFS, START_PHRASE } = require('./config');
 const { STRATEGIES, byId } = require('./strategies');
-const { nifty50, UNIVERSE_DATE } = require('./universe');
+const { indexBooks, isIndexBook, sessionWindow, latestSquareMin, UNIVERSE_DATE } = require('./universe');
 const { assessEntry } = require('./risk');
 const { applySlippage, resolveExit, slippageRupees, closeEconomics, cashDelta, round2 } = require('./paper');
 const { summarizeTrades, maxDrawdown, equityFromClosedTrades } = require('./metrics');
@@ -20,6 +20,27 @@ class ServiceError extends Error {
 
 function id(prefix) {
   return `${prefix}_${crypto.randomBytes(8).toString('hex')}`;
+}
+
+/** Lift the old 50-share study caps once so stored experiments can trade the four books. */
+function liftStockCaps(cfg = {}) {
+  const next = { ...DEFAULTS, ...cfg };
+  let changed = false;
+  const swaps = [
+    ['riskPerTrade', 0.005],
+    ['maxOpenPositions', 3],
+    ['maxTradesPerDay', 5],
+    ['maxDailyLoss', 0.02],
+    ['maxAggregateRiskPct', 0.02],
+    ['minRewardRisk', 1.5],
+  ];
+  for (const [key, old] of swaps) {
+    if (cfg[key] === old) {
+      next[key] = DEFAULTS[key];
+      changed = true;
+    }
+  }
+  return { next, changed };
 }
 
 class ResearchService {
@@ -96,9 +117,19 @@ class ResearchService {
         await this.store.saveAccount(this.freshAccount(experiment, s));
       }
     }
-    const instruments = await this.store.listInstruments(UNIVERSE_DATE);
-    if (!instruments.length) {
-      for (const row of nifty50()) await this.store.upsertInstrument(row);
+    const lifted = liftStockCaps(experiment.configuration || {});
+    if (lifted.changed) {
+      experiment.configuration = lifted.next;
+      experiment.updatedAt = new Date().toISOString();
+      await this.store.saveExperiment(experiment);
+    }
+    for (const row of indexBooks()) await this.store.upsertInstrument(row);
+    const stored = await this.store.listInstruments();
+    for (const row of stored) {
+      if (isIndexBook(row.symbol)) continue;
+      if (row.eligible === false) continue;
+      row.eligible = false;
+      await this.store.upsertInstrument(row);
     }
     await this.reconcile();
     return experiment;
@@ -137,7 +168,7 @@ class ResearchService {
     const checks = [
       { id: 'database', ok: this.store.kind === 'mongo', message: this.store.kind === 'mongo' ? 'MongoDB store is attached' : 'In-memory store. Set MONGODB_URI before starting the experiment.' },
       { id: 'paper-only', ok: true, message: 'Execution path is paper-only and cannot place real orders' },
-      { id: 'universe', ok: instruments.filter((i) => i.eligible).length >= 50, message: `${instruments.length} instruments dated ${UNIVERSE_DATE}` },
+      { id: 'universe', ok: instruments.filter((i) => i.eligible).length >= 4, message: `${instruments.filter((i) => i.eligible).length} index books dated ${UNIVERSE_DATE}` },
       { id: 'strategies', ok: strategies.filter((s) => s.version === 1).length === 5, message: 'Five baseline strategies are stored' },
       { id: 'risk', ok: experiment.configuration.riskPerTrade > 0 && experiment.configuration.maxDailyLoss > 0, message: 'Risk configuration is present' },
       { id: 'kite', ok: feed.configured, message: feed.configured ? 'Kite credentials are configured' : 'Open Get Token, then press Start today. The server keeps that session after a restart.' },
@@ -190,11 +221,11 @@ class ResearchService {
       capitalPolicy: 'carry-forward',
       capitalNote: 'Each strategy keeps yesterday’s ending equity as today’s starting capital. A loss stays in that account. A gain stays in that account. Nothing is restored to ₹20,000.',
       selection: {
-        kind: 'NSE cash equity',
+        kind: 'index books',
         universeDate: UNIVERSE_DATE,
-        count: 50,
-        expiry: 'Expiry day does not switch this desk to Nifty or Bank Nifty options. The same cash shares are scanned.',
-        rule: 'A share is eligible when its quote is fresh, enough completed candles exist, and one strategy’s stop, target, reward/risk, and that strategy’s own carried capital all pass. If none pass, the day records no qualifying trade.',
+        count: 4,
+        expiry: 'Nifty 50, Bank Nifty, Sensex, and Crude oil mini. Not the 50 cash shares.',
+        rule: 'Each book trades one paper lot when the quote is fresh and a strategy’s stop and target pass. The old share-count, daily-loss, and sector caps do not block these books.',
       },
       dataMode: this.feedStatus().connected ? 'live' : 'waiting',
       disclaimer: 'Simulated results are not a guarantee of future real-money profitability.',
@@ -515,14 +546,14 @@ class ResearchService {
     });
     if (!capital.length) capital.push(['', '', '', '', '', 0, 0, 0, 0, 0, capitalNote]);
     const instruments = await this.store.listInstruments();
-    const names = instruments.map((i) => [i.symbol, i.name || '', i.sector || '', i.instrumentToken || '', i.universeDate, i.eligible ? 'yes' : 'no', 'NSE cash equity. Expiry day does not switch this list to options.']);
+    const names = instruments.map((i) => [i.symbol, i.name || '', i.sector || '', i.instrumentToken || '', i.universeDate, i.eligible ? 'yes' : 'no', isIndexBook(i.symbol) ? 'Index / crude book. One paper lot.' : 'Old cash-share row. No longer scanned.']);
     const notes = [
       ['Capital policy', 'Each strategy keeps yesterday’s ending equity as today’s starting capital.'],
       ['What grows', 'A strategy that makes net profit after costs starts the next day with more capital.'],
       ['What shrinks', 'A strategy that loses starts the next day with less capital. One strategy cannot fund another.'],
       ['Stops and entries', 'Stops and targets come from that strategy’s completed-candle rules and ATR distance. They are experimental, not a claim of a perfect entry.'],
-      ['Names', `Scan list is 50 NSE cash shares recorded ${UNIVERSE_DATE}. A name is taken only when the quote is fresh and the strategy, stop, and carried capital all agree.`],
-      ['Expiry', 'This desk does not select a weekly or monthly option. Expiry day scans the same cash shares.'],
+      ['Names', `Scan list is Nifty 50, Bank Nifty, Sensex, and Crude oil recorded ${UNIVERSE_DATE}. Each book uses one paper lot.`],
+      ['Limits', 'The old 50-share risk caps do not block these four books. Cash shares are no longer scanned.'],
       ['Paper', 'Fills are simulated. This workbook is not a real-money account statement.'],
     ];
     return [
@@ -588,7 +619,7 @@ class ResearchService {
     const open = (await this.store.openTrades()).filter((t) => t.symbol === symbol);
     const completed = (candles || []).filter((c) => c.complete !== false);
     const bar = completed.length ? completed[completed.length - 1] : null;
-    const squareOff = minutesOfDay(now) >= config.squareOffMin;
+    const squareOff = minutesOfDay(now) >= sessionWindow(symbol).square;
     for (const position of open) {
       if (lastPrice) position.lastPrice = lastPrice;
       let exit = null;
@@ -859,7 +890,7 @@ class ResearchService {
         source: 'live',
       });
     }
-    if (minutesOfDay(now) >= experiment.configuration.squareOffMin) {
+    if (minutesOfDay(now) >= latestSquareMin()) {
       const existing = await this.store.listSummaries({ from: sessionDate(now), to: sessionDate(now) });
       if (!existing.length) await this.endOfDay(now);
     }

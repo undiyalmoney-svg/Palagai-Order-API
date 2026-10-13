@@ -9,6 +9,7 @@ const express = require('express');
 const { ema, rsi, atr, adx, vwap } = require('../indicators');
 const { resolveExit } = require('../paper');
 const { sizePosition, assessEntry } = require('../risk');
+const { indexBooks, isIndexBook, resolveCrudeContract, sessionWindow } = require('../universe');
 const { summarizeTrades, maxDrawdown } = require('../metrics');
 const { parseTicks, KiteFeed, resolveWebSocket } = require('../feed');
 const { MemoryStore } = require('../store');
@@ -157,19 +158,80 @@ test('position size uses the tighter of risk, notional and cash', () => {
   assert.match(poor.reason, /Insufficient/);
 });
 
+test('index books size one paper lot even when the index is above cash', () => {
+  const sized = sizePosition({
+    equity: 20000,
+    cash: 20000,
+    entry: 25000,
+    stop: 24900,
+    direction: 'LONG',
+    riskPerTrade: 0.005,
+    maxNotionalPct: 0.95,
+    symbol: 'NIFTY 50',
+  });
+  assert.equal(sized.qty, 1);
+  assert.equal(sized.rupeeRisk, 100);
+  assert.equal(isIndexBook('NIFTY BANK'), true);
+  assert.equal(isIndexBook('SENSEX'), true);
+  assert.equal(isIndexBook('CRUDEOILM26NOVFUT'), true);
+  assert.equal(isIndexBook('INFY'), false);
+});
+
 test('risk checks reject daily-loss, trade-count and stale or dead feeds', () => {
   const account = { accountId: 'a', currentEquity: 20000, cashBalance: 20000, startOfDayEquity: 20000, initialCapital: 20000 };
   const signal = { symbol: 'INFY', sector: 'IT', direction: 'LONG', referencePrice: 100, stopPrice: 99, targetPrice: 102 };
   const config = { ...DEFAULTS };
   const now = istDate('2024-01-02', 10, 0);
   const base = { account, signal, positions: [], tradesToday: 0, config, now, quoteFresh: true, feedOk: true };
-  assert.match(assessEntry({ ...base, account: { ...account, currentEquity: 19500, startOfDayEquity: 20000 } }).reason, /Daily loss/);
-  assert.match(assessEntry({ ...base, tradesToday: 5 }).reason, /Maximum new trades/);
+  assert.match(assessEntry({ ...base, account: { ...account, currentEquity: 16000, startOfDayEquity: 20000 } }).reason, /Daily loss/);
+  assert.match(assessEntry({ ...base, tradesToday: config.maxTradesPerDay }).reason, /Maximum new trades/);
   assert.match(assessEntry({ ...base, quoteFresh: false }).reason, /stale/);
   assert.match(assessEntry({ ...base, feedOk: false }).reason, /feed/i);
   const ok = assessEntry(base);
   assert.equal(ok.ok, true);
   assert.ok(ok.quantity > 0);
+});
+
+test('index books ignore the old share-count and daily-loss caps', () => {
+  const account = { accountId: 'a', currentEquity: 16000, cashBalance: 16000, startOfDayEquity: 20000, initialCapital: 20000 };
+  const signal = { symbol: 'NIFTY 50', sector: 'nifty', direction: 'LONG', referencePrice: 25000, stopPrice: 24900, targetPrice: 25200 };
+  const config = { ...DEFAULTS };
+  const now = istDate('2024-01-02', 10, 0);
+  const ok = assessEntry({
+    account,
+    signal,
+    positions: [],
+    tradesToday: 20,
+    config,
+    now,
+    quoteFresh: true,
+    feedOk: true,
+  });
+  assert.equal(ok.ok, true);
+  assert.equal(ok.quantity, 1);
+  const late = assessEntry({
+    account,
+    signal,
+    positions: [],
+    tradesToday: 0,
+    config,
+    now: istDate('2024-01-02', 15, 10),
+    quoteFresh: true,
+    feedOk: true,
+  });
+  assert.match(late.reason, /entry window/);
+  const crude = assessEntry({
+    account,
+    signal: { ...signal, symbol: 'CRUDEOILM' },
+    positions: [],
+    tradesToday: 0,
+    config,
+    now: istDate('2024-01-02', 20, 0),
+    quoteFresh: true,
+    feedOk: true,
+  });
+  assert.equal(crude.ok, true);
+  assert.equal(sessionWindow('CRUDEOILM').square, 23 * 60 + 25);
 });
 
 test('paper flow: entry, duplicate suppression, stop, restart recovery, end of day', async () => {
@@ -317,7 +379,67 @@ test('start today carries the previous close forward and the workbook says so', 
   const xlsx = await service.exportXlsx({});
   const text = xlsx.toString('utf8');
   assert.match(text, /previous close carried forward/);
-  assert.match(text, /does not switch/);
+  assert.match(text, /old 50-share/);
+});
+
+test('ensure stores the four Charts books and marks leftover cash shares ineligible', async () => {
+  const store = new MemoryStore();
+  await store.upsertInstrument({
+    exchange: 'NSE',
+    symbol: 'INFY',
+    name: 'Infosys',
+    sector: 'IT',
+    instrumentToken: 1,
+    universeDate: '2026-03-31',
+    eligible: true,
+  });
+  await store.saveExperiment({
+    experimentId: 'exp-intraday-10w',
+    name: '10-week intraday paper experiment',
+    status: 'draft',
+    configuration: {
+      startingCapital: 20000,
+      riskPerTrade: 0.005,
+      maxOpenPositions: 3,
+      maxTradesPerDay: 5,
+      maxDailyLoss: 0.02,
+      maxAggregateRiskPct: 0.02,
+      minRewardRisk: 1.5,
+    },
+    paperOnly: true,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
+  const service = new ResearchService({ store, feed: { status() { return { configured: true, connected: true, stale: false, lastTickAt: null, mode: 'live', message: 'test' }; } } });
+  await service.ensure();
+  const books = (await store.listInstruments()).filter((i) => i.eligible);
+  assert.equal(books.length, 4);
+  assert.deepEqual(books.map((i) => i.symbol).sort(), indexBooks().map((i) => i.symbol).sort());
+  const leftover = (await store.listInstruments()).find((i) => i.symbol === 'INFY');
+  assert.equal(leftover.eligible, false);
+  const experiment = await store.getExperiment();
+  assert.equal(experiment.configuration.riskPerTrade, DEFAULTS.riskPerTrade);
+  assert.equal(experiment.configuration.maxTradesPerDay, DEFAULTS.maxTradesPerDay);
+  assert.equal(experiment.configuration.minRewardRisk, DEFAULTS.minRewardRisk);
+  const status = await service.status();
+  assert.equal(status.selection.count, 4);
+  assert.match(status.selection.kind, /index/i);
+});
+
+test('crude oil token comes from the front-month MCX future', async () => {
+  const csv = [
+    'instrument_token,exchange_token,tradingsymbol,name,last_price,expiry,strike,tick_size,lot_size,instrument_type,segment,exchange',
+    '111,0,CRUDEOILM26OCTFUT,CRUDEOILM,0,2026-10-16,0,1,1,FUT,MCX-FUT,MCX',
+    '222,0,CRUDEOILM26NOVFUT,CRUDEOILM,0,2026-11-17,0,1,1,FUT,MCX-FUT,MCX',
+  ].join('\n');
+  const hit = resolveCrudeContract(csv, new Date('2026-10-17T00:00:00+05:30'));
+  assert.equal(hit.tradingSymbol, 'CRUDEOILM26NOVFUT');
+  assert.equal(hit.instrumentToken, 222);
+  const feed = new KiteFeed({ instruments: [{ symbol: 'CRUDEOILM', exchange: 'MCX', instrumentToken: 0 }] });
+  feed.loadCsv = async () => csv;
+  await feed.ensureTokens('token k:t');
+  assert.equal(feed.instruments[0].instrumentToken, 111);
+  assert.equal(feed.instruments[0].contractSymbol, 'CRUDEOILM26OCTFUT');
 });
 
 test('feed restoreSession adopts a saved broker header after RAM is cleared', async () => {
