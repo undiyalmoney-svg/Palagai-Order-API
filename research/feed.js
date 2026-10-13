@@ -1,7 +1,7 @@
 'use strict';
 
 const { floorMinute } = require('./time');
-const { fetchInstrumentsCsv, fetchHistoricalCandles } = require('../services/kite-market');
+const { fetchInstrumentsCsv, fetchHistoricalCandles, fetchQuoteLtp } = require('../services/kite-market');
 const { resolveCrudeContract } = require('./universe');
 
 /**
@@ -34,11 +34,13 @@ function resolveWebSocket() {
 }
 
 function listen(ws, type, fn) {
-  if (typeof ws.addEventListener === 'function') {
-    ws.addEventListener(type, (ev) => fn(type === 'message' ? ev.data : ev));
+  if (typeof ws.on === 'function') {
+    ws.on(type, (data) => fn(data));
     return;
   }
-  ws.on(type, (data) => fn(data));
+  if (typeof ws.addEventListener === 'function') {
+    ws.addEventListener(type, (ev) => fn(type === 'message' ? ev.data : ev));
+  }
 }
 
 function parseTicks(buffer) {
@@ -177,12 +179,10 @@ class KiteFeed {
       await this.ensureTokens(creds.authorization);
       await this.ensureSocket(creds);
       if (!this.connected) return { ok: false, message: this.lastError || 'Kite WebSocket is not connected' };
-      const symbols = [];
-      for (const inst of this.instruments) {
-        if (!inst.instrumentToken) continue;
-        const quote = this.quotes.get(inst.symbol);
-        if (!quote) continue;
-        symbols.push({ symbol: inst.symbol, sector: inst.sector, quote, candles: [] });
+      let symbols = this.quotedSymbols();
+      if (!symbols.length) {
+        await this.pullRestQuotes(creds, now);
+        symbols = this.quotedSymbols();
       }
       if (!symbols.length) return { ok: false, message: 'No fresh ticks yet. New entries stay blocked.' };
       return { ok: true, symbols, at: now.toISOString() };
@@ -256,6 +256,43 @@ class KiteFeed {
 
   async loadCsv(authorization, exchange) {
     return fetchInstrumentsCsv(authorization, exchange);
+  }
+
+  quotedSymbols() {
+    const symbols = [];
+    for (const inst of this.instruments) {
+      if (!inst.instrumentToken) continue;
+      const quote = this.quotes.get(inst.symbol);
+      if (!quote) continue;
+      symbols.push({ symbol: inst.symbol, sector: inst.sector, quote, candles: [] });
+    }
+    return symbols;
+  }
+
+  quoteKey(inst) {
+    return `${inst.exchange || 'NSE'}:${inst.contractSymbol || inst.symbol}`;
+  }
+
+  async pullRestQuotes(creds, now = new Date()) {
+    const keys = this.instruments.filter((i) => i.instrumentToken).map((i) => this.quoteKey(i));
+    if (!keys.length) return;
+    try {
+      const data = await this.loadQuotes(creds.authorization, keys);
+      const at = now.toISOString();
+      for (const inst of this.instruments) {
+        const row = data[this.quoteKey(inst)] || data[inst.symbol];
+        const price = Number(row && row.last_price);
+        if (!(price > 0)) continue;
+        this.lastTickAt = at;
+        this.quotes.set(inst.symbol, { price, at, volume: Number(row.volume) || null });
+      }
+    } catch (err) {
+      this.lastError = err.message;
+    }
+  }
+
+  async loadQuotes(authorization, keys) {
+    return fetchQuoteLtp(authorization, keys);
   }
 
   indexTokens() {

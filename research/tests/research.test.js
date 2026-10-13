@@ -443,6 +443,22 @@ test('crude oil token comes from the front-month MCX future', async () => {
   assert.equal(feed.instruments[0].contractSymbol, 'CRUDEOILM26OCTFUT');
 });
 
+test('pull uses REST last price when the ticker has no ticks yet', async () => {
+  const feed = new KiteFeed({
+    instruments: [{ symbol: 'NIFTY 50', exchange: 'NSE', instrumentToken: 256265, sector: 'nifty' }],
+  });
+  feed.session = { apiKey: 'k', accessToken: 't', authorization: 'token k:t' };
+  feed.connected = true;
+  feed.ws = { dummy: true };
+  feed.ensureSocket = async () => {};
+  feed.ensureTokens = async () => {};
+  feed.loadQuotes = async () => ({ 'NSE:NIFTY 50': { last_price: 25123.4 } });
+  const out = await feed.pull(new Date());
+  assert.equal(out.ok, true);
+  assert.equal(out.symbols[0].symbol, 'NIFTY 50');
+  assert.equal(out.symbols[0].quote.price, 25123.4);
+});
+
 test('feed restoreSession adopts a saved broker header after RAM is cleared', async () => {
   const feed = new KiteFeed({
     instruments: [{ symbol: 'INFY' }],
