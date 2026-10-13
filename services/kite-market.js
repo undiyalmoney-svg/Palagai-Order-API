@@ -163,9 +163,39 @@ async function fetchInstruments(authorization) {
   return parseInstrumentsCsv(res.data);
 }
 
+/**
+ * Kite history accepts `YYYY-MM-DD` or `YYYY-MM-DD HH:MM:SS`.
+ * A Date / ISO instant (`...T...Z`) is rejected as "invalid from date".
+ */
+function kiteDateParam(value) {
+  if (value == null || value === '') return value;
+  const text = value instanceof Date ? value.toISOString() : String(value).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(text)) return text;
+  const date = value instanceof Date ? value : new Date(text);
+  if (Number.isNaN(date.getTime())) return text.slice(0, 10);
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).formatToParts(date);
+  const get = (type) => parts.find((p) => p.type === type)?.value ?? '00';
+  const hour = get('hour') === '24' ? '00' : get('hour');
+  return `${get('year')}-${get('month')}-${get('day')} ${hour}:${get('minute')}:${get('second')}`;
+}
+
+function kiteDay(value) {
+  return String(kiteDateParam(value) || '').slice(0, 10);
+}
+
 /** interval: 'minute' | '5minute' | '60minute' | 'day' etc (Kite Connect intervals). */
 async function fetchHistoricalCandles(authorization, instrumentToken, fromDate, toDate, interval = '5minute', opts = {}) {
-  const params = { from: fromDate, to: toDate };
+  const params = { from: kiteDateParam(fromDate), to: kiteDateParam(toDate) };
   if (opts.oi) params.oi = 1;
   const res = await getWithRetry(
     `/instruments/historical/${instrumentToken}/${interval}`,
@@ -198,8 +228,8 @@ async function fetchHistoricalCandles(authorization, instrumentToken, fromDate, 
 /** Kite 5-minute history allows at most 100 days per call. */
 function historicalChunks(fromDate, toDate, maxDays = 90) {
   const out = [];
-  let start = String(fromDate).slice(0, 10);
-  const endCap = String(toDate).slice(0, 10);
+  let start = kiteDay(fromDate);
+  const endCap = kiteDay(toDate);
   if (!start || !endCap || start > endCap) return out;
   while (start <= endCap) {
     const d = new Date(start + 'T00:00:00Z');
@@ -437,4 +467,6 @@ module.exports = {
   inferInstrumentExchanges,
   parseKiteFunds,
   fetchUserMargins,
+  kiteDateParam,
+  kiteDay,
 };

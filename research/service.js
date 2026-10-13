@@ -64,13 +64,13 @@ class ResearchService {
     return adopted;
   }
 
-  async noteFeed(now, severity, message) {
-    const key = `${severity}:${message}`;
+  async noteFeed(now, severity, message, eventType = 'FEED') {
+    const key = `${eventType}:${severity}:${message}`;
     const ts = now instanceof Date ? now.getTime() : Date.now();
     if (this.lastFeedNote === key && ts - this.lastFeedNoteAt < 10 * 60_000) return;
     this.lastFeedNote = key;
     this.lastFeedNoteAt = ts;
-    await this.store.addEvent({ timestamp: (now instanceof Date ? now : new Date()).toISOString(), severity, eventType: 'FEED', message, metadata: {} });
+    await this.store.addEvent({ timestamp: (now instanceof Date ? now : new Date()).toISOString(), severity, eventType, message, metadata: {} });
   }
 
   async ensure() {
@@ -869,7 +869,7 @@ class ResearchService {
       try {
         await this.feed.backfillNext(now);
       } catch (err) {
-        await this.store.addEvent({ timestamp: now.toISOString(), severity: 'warn', eventType: 'BACKFILL', message: err.message, metadata: {} });
+        await this.noteFeed(now, 'warn', err.message, 'BACKFILL');
       }
     }
     const pulled = await this.feed.pull(now);

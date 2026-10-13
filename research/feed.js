@@ -117,6 +117,7 @@ class KiteFeed {
     this.lastError = null;
     this.backfilled = new Set();
     this.session = null;
+    this.opening = null;
   }
 
   creds() {
@@ -263,46 +264,87 @@ class KiteFeed {
 
   async ensureSocket(creds) {
     if (this.ws && this.connected) return;
-    if (this.ws) return;
+    if (this.opening) return this.opening;
+    if (this.ws && !this.connected) this.dropSocket('Kite WebSocket did not open');
     this.indexTokens();
     const tokens = this.instruments.map((i) => Number(i.instrumentToken)).filter(Boolean);
     if (!tokens.length) throw new Error('Instrument tokens are not loaded');
     const WebSocketImpl = this.WebSocket || resolveWebSocket();
     const url = `wss://ws.kite.trade?api_key=${encodeURIComponent(creds.apiKey)}&access_token=${encodeURIComponent(creds.accessToken)}`;
-    const ws = new WebSocketImpl(url);
+    let ws;
+    try {
+      ws = new WebSocketImpl(url, { family: 4 });
+    } catch {
+      ws = new WebSocketImpl(url);
+    }
     this.ws = ws;
     if ('binaryType' in ws) ws.binaryType = 'arraybuffer';
-    listen(ws, 'open', () => {
-      this.connected = true;
-      this.lastError = null;
-      ws.send(JSON.stringify({ a: 'subscribe', v: tokens }));
-      ws.send(JSON.stringify({ a: 'mode', v: ['quote', tokens] }));
-    });
-    listen(ws, 'message', (data) => {
-      if (typeof data === 'string') return;
-      const ticks = parseTicks(Buffer.from(data));
-      const now = new Date();
-      for (const tick of ticks) {
-        const inst = this.byToken.get(tick.instrumentToken);
-        if (!inst) continue;
-        this.lastTickAt = now.toISOString();
-        this.quotes.set(inst.symbol, { price: tick.price, at: this.lastTickAt, volume: tick.volume });
-        const done = this.aggregator.onTick({ symbol: inst.symbol, price: tick.price, volume: tick.volume, time: now });
-        if (this.store) {
-          for (const bar of done) this.store.upsertCandle(bar).catch(() => {});
+    this.opening = new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        if (this.connected) return;
+        this.dropSocket('Kite WebSocket did not open');
+        resolve();
+      }, 8000);
+      if (typeof timer.unref === 'function') timer.unref();
+      listen(ws, 'open', () => {
+        if (this.ws !== ws) return;
+        clearTimeout(timer);
+        this.connected = true;
+        this.lastError = null;
+        this.opening = null;
+        try {
+          ws.send(JSON.stringify({ a: 'subscribe', v: tokens }));
+          ws.send(JSON.stringify({ a: 'mode', v: ['quote', tokens] }));
+        } catch {
+          this.dropSocket('Kite WebSocket error');
         }
-      }
+        resolve();
+      });
+      listen(ws, 'message', (data) => {
+        if (typeof data === 'string') return;
+        const ticks = parseTicks(Buffer.from(data));
+        const now = new Date();
+        for (const tick of ticks) {
+          const inst = this.byToken.get(tick.instrumentToken);
+          if (!inst) continue;
+          this.lastTickAt = now.toISOString();
+          this.quotes.set(inst.symbol, { price: tick.price, at: this.lastTickAt, volume: tick.volume });
+          const done = this.aggregator.onTick({ symbol: inst.symbol, price: tick.price, volume: tick.volume, time: now });
+          if (this.store) {
+            for (const bar of done) this.store.upsertCandle(bar).catch(() => {});
+          }
+        }
+      });
+      listen(ws, 'close', () => {
+        clearTimeout(timer);
+        this.connected = false;
+        if (this.ws === ws) this.ws = null;
+        this.lastError = 'Kite WebSocket closed';
+        this.opening = null;
+        resolve();
+      });
+      listen(ws, 'error', () => {
+        clearTimeout(timer);
+        this.dropSocket('Kite WebSocket error');
+        resolve();
+      });
     });
-    listen(ws, 'close', () => {
-      this.connected = false;
-      this.ws = null;
-      this.lastError = 'Kite WebSocket closed';
-    });
-    listen(ws, 'error', () => {
-      this.connected = false;
-      this.ws = null;
-      this.lastError = 'Kite WebSocket error';
-    });
+    return this.opening;
+  }
+
+  dropSocket(message) {
+    const ws = this.ws;
+    this.connected = false;
+    this.ws = null;
+    this.opening = null;
+    if (message) this.lastError = message;
+    if (!ws) return;
+    try {
+      if (typeof ws.terminate === 'function') ws.terminate();
+      else if (typeof ws.close === 'function') ws.close();
+    } catch {
+      // already closed
+    }
   }
 
   /** One-shot historical backfill. Not a polling loop. */

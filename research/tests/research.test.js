@@ -12,6 +12,7 @@ const { sizePosition, assessEntry } = require('../risk');
 const { indexBooks, isIndexBook, resolveCrudeContract, sessionWindow } = require('../universe');
 const { summarizeTrades, maxDrawdown } = require('../metrics');
 const { parseTicks, KiteFeed, resolveWebSocket } = require('../feed');
+const { kiteDateParam, kiteDay, historicalChunks } = require('../../services/kite-market');
 const { MemoryStore } = require('../store');
 const { ResearchService, START_PHRASE } = require('../service');
 const { createResearchRouter } = require('../api/routes');
@@ -521,11 +522,25 @@ test('resolveWebSocket falls back to the ws package when global.WebSocket is mis
   }
 });
 
+test('Kite history dates are calendar stamps, not ISO instants', () => {
+  const stamp = kiteDateParam(new Date('2026-10-08T04:45:40.777Z'));
+  assert.match(stamp, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+  assert.equal(stamp.includes('T'), false);
+  assert.equal(stamp.includes('Z'), false);
+  assert.equal(kiteDateParam('2026-10-08'), '2026-10-08');
+  assert.equal(kiteDateParam('2026-10-08 09:15:00'), '2026-10-08 09:15:00');
+  assert.equal(kiteDay(new Date('2026-10-08T04:45:40.777Z')), '2026-10-08');
+  const chunks = historicalChunks(new Date('2026-10-08T04:45:40.777Z'), new Date('2026-10-13T04:45:40.777Z'), 50);
+  assert.equal(chunks.length, 1);
+  assert.equal(chunks[0][0], '2026-10-08');
+});
+
 test('feed opens the Kite ticker and records a quote tick', async () => {
   const sockets = [];
   class FakeWs {
-    constructor(url) {
+    constructor(url, options) {
       this.url = url;
+      this.options = options;
       this.sent = [];
       sockets.push(this);
     }
@@ -539,10 +554,12 @@ test('feed opens the Kite ticker and records a quote tick', async () => {
   const feed = new KiteFeed({ instruments: [{ symbol: 'INFY', instrumentToken: 738561 }] });
   feed.session = { apiKey: 'k', accessToken: 't', authorization: 'token k:t' };
   feed.WebSocket = FakeWs;
-  await feed.ensureSocket(feed.session);
+  const pending = feed.ensureSocket(feed.session);
   assert.equal(sockets.length, 1);
   assert.match(sockets[0].url, /ws\.kite\.trade/);
+  assert.equal(sockets[0].options.family, 4);
   sockets[0].onopen();
+  await pending;
   assert.equal(feed.connected, true);
   assert.deepEqual(sockets[0].sent[0], { a: 'subscribe', v: [738561] });
   const buf = Buffer.alloc(2 + 2 + 8);
