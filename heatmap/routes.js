@@ -29,7 +29,7 @@ function createHeatmapRouter(service) {
 
   router.get('/', limit, async (req, res, next) => {
     try {
-      const out = await service.snapshot();
+      const out = await service.snapshot(req.query.index);
       res.setHeader('Cache-Control', 'public, max-age=15');
       res.json({ status: 'ok', ...out });
     } catch (err) {
