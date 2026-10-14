@@ -169,39 +169,25 @@ test('public Yahoo/Groww quotes work with no Kite session', async () => {
   assert.ok(second.companies.every((c) => c.trend === 'strong-up' || c.trend === 'up'));
 });
 
-test('Kite is a rate-limited fallback when the public feed fails', async () => {
-  const quotes = {
-    'NSE:NIFTY 50': { last_price: 22634.5, net_change: -87.45, ohlc: { close: 22721.95 }, instrument_token: 256265 },
-  };
-  for (const u of listNifty50()) {
-    quotes[u.kiteKey] = {
-      last_price: 180,
-      net_change: 2,
-      ohlc: { close: 178 },
-      instrument_token: 1000 + u.mcapRank,
-    };
-  }
+test('public heatmap never calls Kite when the public feed fails', async () => {
   let kiteCalls = 0;
   const service = new HeatmapService({
     getAuthorization: async () => 'token test:key',
     fetchPublicQuotes: async () => {
       throw new Error('yahoo down');
     },
-    fetchPublicDailies: async () => ({ candles: climb(80, 90, 0.4) }),
     fetchQuotes: async () => {
       kiteCalls += 1;
-      return quotes;
+      return {};
     },
     now: () => Date.parse('2026-10-14T07:32:00Z'),
     warmGapMs: 0,
   });
   const snap = await service.snapshot();
-  assert.equal(snap.session.source, 'kite');
-  assert.equal(kiteCalls, 1);
+  assert.notEqual(snap.session.source, 'kite');
+  assert.equal(kiteCalls, 0);
   assert.equal(snap.companies.length, 50);
-  const again = await service.snapshot();
-  assert.equal(kiteCalls, 1, 'cached quotes must not hit Kite again inside TTL');
-  assert.equal(again.index.ltp, 22634.5);
+  assert.equal(snap.session.ok, false);
 });
 
 test('GET /heatmap?index=BANKNIFTY is public', async () => {
@@ -235,7 +221,7 @@ test('GET /heatmap?index=BANKNIFTY is public', async () => {
   server.close();
 });
 
-test('empty board when public feed and Kite are both down', async () => {
+test('empty board when the public feed is down', async () => {
   const service = new HeatmapService({
     getAuthorization: async () => null,
     fetchPublicQuotes: async () => {

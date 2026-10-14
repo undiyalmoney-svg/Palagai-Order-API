@@ -1,14 +1,11 @@
 'use strict';
 
-const kiteMarket = require('../services/kite-market');
 const { getIndex, listMembers, listIndices, BUCKETS, TRENDS } = require('./universe');
 const { round, bucketForChange, trendFromDailies, breadth, trendCounts } = require('./trend');
 const { PublicFeed } = require('./public-feed');
 
 const QUOTES_TTL_MS = 25_000;
 const DAILIES_TTL_MS = 30 * 60 * 1000;
-const KITE_QUOTE_GAP_MS = 1100;
-const KITE_HIST_GAP_MS = 400;
 
 function delay(ms) {
   return new Promise((r) => setTimeout(r, ms));
@@ -45,9 +42,6 @@ function quoteChange(q) {
 
 class HeatmapService {
   constructor(opts = {}) {
-    this.getAuthorization = opts.getAuthorization || (async () => null);
-    this.fetchQuotes = opts.fetchQuotes || kiteMarket.fetchQuotes;
-    this.fetchHistoricalCandles = opts.fetchHistoricalCandles || kiteMarket.fetchHistoricalCandles;
     this.publicFeed = opts.publicFeed || new PublicFeed({ chartGapMs: opts.warmGapMs });
     this.fetchPublicQuotes = opts.fetchPublicQuotes || ((index, members) => this.publicFeed.fetchQuotes(index, members));
     this.fetchPublicDailies = opts.fetchPublicDailies || ((yahoo) => this.publicFeed.fetchDailies(yahoo));
@@ -58,8 +52,6 @@ class HeatmapService {
     this.warming = new Map();
     this.lastError = null;
     this.lastSource = 'public';
-    this._nextKiteQuote = 0;
-    this._nextKiteHist = 0;
   }
 
   async snapshot(indexId) {
@@ -126,35 +118,11 @@ class HeatmapService {
       this.lastError = err.message || String(err);
     }
 
-    const kite = await this.loadKiteQuotes(index, members);
-    if (kite) return kite;
-
     if (cached?.data) {
       this.lastSource = cached.source || 'cache';
       return { quotes: cached.data, message: this.lastError };
     }
     return { quotes: {}, message: this.lastError || 'No public quotes yet' };
-  }
-
-  async loadKiteQuotes(index, members) {
-    const authorization = await this.getAuthorization();
-    if (!authorization) return null;
-    const wait = Math.max(0, this._nextKiteQuote - this.now());
-    this._nextKiteQuote = Math.max(this.now(), this._nextKiteQuote) + KITE_QUOTE_GAP_MS;
-    if (wait) await delay(wait);
-    try {
-      const keys = [index.kiteKey, ...members.map((m) => m.kiteKey)];
-      const quotes = await this.fetchQuotes(authorization, keys);
-      this.quotesCache.set(index.id, { at: this.now(), data: quotes || {}, source: 'kite' });
-      this.lastSource = 'kite';
-      this.lastError = this.lastError
-        ? `${this.lastError} · using Kite (1 quote call / ${KITE_QUOTE_GAP_MS}ms)`
-        : null;
-      return { quotes: quotes || {} };
-    } catch (err) {
-      this.lastError = this.lastError || err.message || String(err);
-      return null;
-    }
   }
 
   rowFor(member, quotes) {
@@ -205,7 +173,6 @@ class HeatmapService {
   }
 
   async warmDailies(index, members, quotes) {
-    const authorization = await this.getAuthorization();
     for (const m of members) {
       const cached = this.dailies.get(m.symbol);
       if (cached && this.now() - cached.at < DAILIES_TTL_MS && cached.candles?.length >= 50) continue;
@@ -223,31 +190,8 @@ class HeatmapService {
       } catch {
         candles = null;
       }
-      if ((!candles || candles.length < 50) && authorization) {
-        const q = quoteChange(pickQuote(quotes, m.kiteKey, m.symbol));
-        const token = q.instrumentToken || 0;
-        if (token) {
-          const wait = Math.max(0, this._nextKiteHist - this.now());
-          this._nextKiteHist = Math.max(this.now(), this._nextKiteHist) + KITE_HIST_GAP_MS;
-          if (wait) await delay(wait);
-          try {
-            const to = new Date(this.now());
-            const from = new Date(this.now());
-            from.setUTCDate(from.getUTCDate() - 400);
-            candles = await this.fetchHistoricalCandles(
-              authorization,
-              token,
-              from.toISOString().slice(0, 10),
-              to.toISOString().slice(0, 10),
-              'day',
-            );
-          } catch {
-            candles = candles || [];
-          }
-        }
-      }
       this.dailies.set(m.symbol, { at: this.now(), candles: candles || [] });
-      if (this.warmGapMs && !authorization) await delay(0);
+      if (this.warmGapMs) await delay(0);
     }
   }
 }
@@ -258,6 +202,4 @@ module.exports = {
   quoteChange,
   QUOTES_TTL_MS,
   DAILIES_TTL_MS,
-  KITE_QUOTE_GAP_MS,
-  KITE_HIST_GAP_MS,
 };

@@ -8,6 +8,7 @@ const { getResearchService } = require('../research/instance');
 const { createResearchRouter } = require('../research/api/routes');
 const { createSlBuddyRouter } = require('../sl-buddy/routes');
 const { getHeatmapRouter } = require('../heatmap/instance');
+const { getMarketDeskRouter } = require('../market-desk/instance');
 
 const router = express.Router();
 
@@ -54,5 +55,12 @@ function heatmapHandler(req, res, next) {
   return heatmapRouter(req, res, next);
 }
 router.use('/heatmap', heatmapHandler);
+
+let marketDeskRouter = null;
+function marketDeskHandler(req, res, next) {
+  if (!marketDeskRouter) marketDeskRouter = getMarketDeskRouter();
+  return marketDeskRouter(req, res, next);
+}
+router.use('/market-desk', marketDeskHandler);
 
 module.exports = router;

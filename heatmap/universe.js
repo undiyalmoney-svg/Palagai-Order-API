@@ -2,7 +2,8 @@
 
 /**
  * Public Index Heatmap universes: Nifty 50, Bank Nifty, Sensex.
- * Quotes come from public Yahoo/Groww feeds (any IP). Kite is a rate-limited fallback.
+ * Quotes come from public Yahoo/Groww feeds (any IP). The owner's Kite
+ * session is never used here — that feed stays on the private Charts desk.
  */
 
 const { CORE_UNIVERSE, BENCHMARK } = require('../momentum/data/universe');

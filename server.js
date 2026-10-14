@@ -6,7 +6,7 @@ const { getMomentumApp, startMomentumScheduler } = require('./momentum/instance'
 const { startResearchSupervisor } = require('./research/instance');
 const { start: startChartsProtect } = require('./charts-protect/worker');
 const { start: startSlBuddy } = require('./sl-buddy/worker');
-const { applyHeatmapAuth } = require('./heatmap/instance');
+const { applyMarketDeskAuth } = require('./market-desk/instance');
 
 async function boot() {
   try {
@@ -79,10 +79,10 @@ async function boot() {
         }
       },
     });
-    applyHeatmapAuth({
-      getAuthorization: async () => {
-        const sessions = getMomentumApp().momentum.sessions;
-        return typeof sessions.latestAuthorization === 'function' ? sessions.latestAuthorization() : null;
+    applyMarketDeskAuth({
+      getAuthorization: async (userId) => {
+        if (!userId) return null;
+        return getMomentumApp().momentum.sessions.authorization(userId);
       },
     });
   });
