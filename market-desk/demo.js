@@ -1,8 +1,9 @@
 'use strict';
 
-const { listNifty50, INDICES } = require('../heatmap/universe');
+const { listNifty50 } = require('../heatmap/universe');
+const { deskIndices } = require('./universe');
 const { DEFAULTS } = require('./settings');
-const { sessionStatus, formatIst } = require('./engine');
+const { deskSessionStatus, formatIst } = require('./engine');
 
 function hash(s) {
   let h = 0;
@@ -37,7 +38,7 @@ function breakoutFor(symbol, iv) {
 }
 
 function demoSnapshot(now = new Date(), settings = DEFAULTS) {
-  const sess = sessionStatus(now);
+  const sess = deskSessionStatus(now);
   const stocks = listNifty50().map((m) => {
     const changePct = pctFor(m.symbol);
     const pack = ['HDFCBANK', 'RELIANCE', 'TCS', 'INFY', 'ICICIBANK'].includes(m.symbol)
@@ -68,18 +69,19 @@ function demoSnapshot(now = new Date(), settings = DEFAULTS) {
     };
   });
 
-  const indices = INDICES.map((idx, i) => {
-    const changePct = [-0.42, 0.31, -0.18][i];
+  const indices = deskIndices().map((idx, i) => {
+    const changePct = [-0.42, 0.31, -0.18, 0.55][i];
     const pack = [
       { bias: 'mild-bear', label: 'Mild bearish bias', score: -2, strength: 'moderate', agreement: 'mixed' },
       { bias: 'mild-bull', label: 'Mild bullish bias', score: 2, strength: 'moderate', agreement: 'mixed' },
       { bias: 'mixed', label: 'Mixed', score: 0, strength: 'weak', agreement: 'mixed' },
+      { bias: 'mild-bull', label: 'Mild bullish bias', score: 2, strength: 'moderate', agreement: 'mixed' },
     ][i];
     return {
       id: idx.id,
       name: idx.name,
-      ltp: [22640, 55120, 74210][i],
-      change: [-95.2, 168.4, -132.1][i],
+      ltp: [22640, 55120, 74210, 5452][i],
+      change: [-95.2, 168.4, -132.1, 30][i],
       changePct,
       bias: pack.bias,
       biasLabel: pack.label,
@@ -92,7 +94,7 @@ function demoSnapshot(now = new Date(), settings = DEFAULTS) {
       agreement: pack.agreement,
       m15Trend: 'mixed',
       h1Trend: 'mixed',
-      dayTrend: 'mixed',
+      dayTrend: idx.id === 'CRUDEOILM' ? 'bullish' : 'mixed',
     };
   });
 

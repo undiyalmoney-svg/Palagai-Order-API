@@ -1,6 +1,8 @@
 'use strict';
 
-const { listNifty50, INDICES } = require('../heatmap/universe');
+const { listNifty50 } = require('../heatmap/universe');
+const { CRUDE, deskIndices } = require('./universe');
+const { resolveCrudeContract } = require('../research/universe');
 const { round } = require('../research/indicators');
 const { DEFAULTS, normalizeSettings } = require('./settings');
 const { KiteMarketProvider } = require('./provider');
@@ -8,7 +10,7 @@ const { DeskTicker } = require('./ticker');
 const { demoSnapshot } = require('./demo');
 const { evaluate } = require('./backtest');
 const {
-  sessionStatus,
+  deskSessionStatus,
   formatIst,
   analyzeTimeframe,
   combineScore,
@@ -17,6 +19,8 @@ const {
   isAuthError,
   splitForming,
 } = require('./engine');
+
+const CRUDE_TTL_MS = 6 * 60 * 60 * 1000;
 
 const HIST_TTL = {
   '5minute': 4 * 60_000,
@@ -40,7 +44,14 @@ function delay(ms) {
 
 function pickQuote(map, kiteKey, symbol) {
   if (!map || typeof map !== 'object') return null;
-  return map[kiteKey] || map[`NSE:${symbol}`] || map[`BSE:${symbol}`] || map[symbol] || null;
+  return (
+    map[kiteKey] ||
+    map[`NSE:${symbol}`] ||
+    map[`BSE:${symbol}`] ||
+    map[`MCX:${symbol}`] ||
+    map[symbol] ||
+    null
+  );
 }
 
 function quoteChange(q) {
@@ -89,6 +100,8 @@ class MarketDeskService {
     this.warming = new Map();
     this.alertSeen = new Map();
     this._histChain = Promise.resolve();
+    this.crudeInst = { ...CRUDE };
+    this.crudeAt = 0;
   }
 
   async resolveAuth(userId, header) {
@@ -103,8 +116,32 @@ class MarketDeskService {
   }
 
   universe() {
-    const stocks = listNifty50();
-    return { indices: INDICES.map((i) => ({ ...i })), stocks };
+    return { indices: deskIndices(this.crudeInst), stocks: listNifty50() };
+  }
+
+  bookKind(row) {
+    return row?.exchange === 'MCX' || row?.id === 'CRUDEOILM' ? 'crude' : 'cash';
+  }
+
+  async refreshCrude(authorization) {
+    const nowMs = this.now();
+    if (this.crudeInst.kiteToken && nowMs - this.crudeAt < CRUDE_TTL_MS) return this.crudeInst;
+    try {
+      const csv = await this.provider.instrumentsCsv(authorization, 'MCX');
+      const hit = resolveCrudeContract(csv, new Date(nowMs));
+      if (hit?.instrumentToken && hit.tradingSymbol) {
+        this.crudeInst = {
+          ...CRUDE,
+          kiteKey: `MCX:${hit.tradingSymbol}`,
+          kiteToken: Number(hit.instrumentToken) || 0,
+          contract: hit.tradingSymbol,
+        };
+        this.crudeAt = nowMs;
+      }
+    } catch {
+      // Card still renders; quotes/history stay WAIT until the dump lands.
+    }
+    return this.crudeInst;
   }
 
   async snapshot({ userId, authorization, settings: raw } = {}) {
@@ -115,6 +152,8 @@ class MarketDeskService {
     if (!auth) {
       return demoSnapshot(now, settings);
     }
+
+    await this.refreshCrude(auth);
 
     let quotes;
     let quoteError = null;
@@ -128,7 +167,7 @@ class MarketDeskService {
           needsReauth: true,
           warning: 'Kite session expired. Open Get Token to reconnect.',
           session: {
-            ...sessionStatus(now),
+            ...deskSessionStatus(now),
             istNow: formatIst(now),
             lastUpdateAt: now.toISOString(),
             lastTickAt: null,
@@ -171,7 +210,7 @@ class MarketDeskService {
       .sort()
       .at(-1);
     const lastTickAt = tickStatus.lastTickAt || this.quoteCache.get(userId)?.atIso || null;
-    const sess = sessionStatus(now);
+    const sess = deskSessionStatus(now);
     const tickAge = lastTickAt ? nowMs - new Date(lastTickAt).getTime() : Infinity;
     const freshness = !lastTickAt && !indexCards.some((c) => Number.isFinite(c.ltp))
       ? 'missing'
@@ -228,6 +267,7 @@ class MarketDeskService {
       return { demo: true, candles: [], message: 'DEMO MODE — connect Kite for historical candles.' };
     }
     const iv = ['5minute', '15minute', '60minute', 'day'].includes(interval) ? interval : '15minute';
+    await this.refreshCrude(auth);
     const inst = this.findInstrument(symbol);
     if (!inst) return { candles: [], message: 'Unknown symbol' };
     const quotes = this.quoteCache.get(userId)?.data || {};
@@ -237,8 +277,9 @@ class MarketDeskService {
       const rows = await this.history(auth, token, iv);
       const settings = normalizeSettings(DEFAULTS);
       const now = new Date(this.now());
-      const tf = analyzeTimeframe(rows, iv, settings, now);
-      const br = detectBreakout(rows, iv, settings, now);
+      const kind = this.bookKind(inst);
+      const tf = analyzeTimeframe(rows, iv, settings, now, kind);
+      const br = detectBreakout(rows, iv, settings, now, kind);
       return {
         demo: false,
         symbol: inst.symbol || inst.id,
@@ -275,12 +316,24 @@ class MarketDeskService {
 
   findInstrument(symbol) {
     const want = String(symbol || '').toUpperCase().replace(/[\s-]/g, '');
-    const idx = INDICES.find((i) => i.id === want || i.name.replace(/\s/g, '').toUpperCase() === want);
+    const desks = this.universe().indices;
+    const idx = desks.find(
+      (i) => i.id === want || String(i.name || '').replace(/\s/g, '').toUpperCase() === want || String(i.contract || '').replace(/[\s-]/g, '').toUpperCase() === want,
+    );
     if (idx) return { ...idx, symbol: idx.id, kind: 'index' };
-    const aliases = { NIFTY: 'NIFTY50', NIFTY50: 'NIFTY50', BANKNIFTY: 'BANKNIFTY', SENSEX: 'SENSEX' };
+    const aliases = {
+      NIFTY: 'NIFTY50',
+      NIFTY50: 'NIFTY50',
+      BANKNIFTY: 'BANKNIFTY',
+      SENSEX: 'SENSEX',
+      CRUDE: 'CRUDEOILM',
+      CRUDEOIL: 'CRUDEOILM',
+      CRUDEOILM: 'CRUDEOILM',
+      CRUDEOILMINI: 'CRUDEOILM',
+    };
     const mapped = aliases[want];
     if (mapped) {
-      const hit = INDICES.find((i) => i.id === mapped);
+      const hit = desks.find((i) => i.id === mapped);
       if (hit) return { ...hit, symbol: hit.id, kind: 'index' };
     }
     return listNifty50().find((s) => s.symbol === String(symbol || '').toUpperCase()) || null;
@@ -293,18 +346,20 @@ class MarketDeskService {
   }
 
   buildIndex(idx, quotes, settings, now) {
-    const q = quoteChange(pickQuote(quotes, idx.kiteKey, idx.name));
+    const q = quoteChange(pickQuote(quotes, idx.kiteKey, idx.id) || pickQuote(quotes, idx.kiteKey, idx.name));
     return this.decorate(
       {
         id: idx.id,
         name: idx.name,
         symbol: idx.id,
         kiteKey: idx.kiteKey,
-        sector: 'INDEX',
-        ltp: round(q.ltp, 2),
-        change: round(q.change, 2),
+        exchange: idx.exchange || (idx.id === 'CRUDEOILM' ? 'MCX' : 'NSE'),
+        sector: idx.id === 'CRUDEOILM' ? 'CRUDE' : 'INDEX',
+        ltp: round(q.ltp, idx.id === 'CRUDEOILM' ? 1 : 2),
+        change: round(q.change, idx.id === 'CRUDEOILM' ? 1 : 2),
         changePct: round(q.changePct, 2),
         instrumentToken: q.instrumentToken || idx.kiteToken,
+        contract: idx.contract || null,
       },
       settings,
       now,
@@ -341,18 +396,19 @@ class MarketDeskService {
 
   decorate(row, settings, now) {
     const token = row.instrumentToken;
+    const kind = this.bookKind(row);
     const c15 = this.candlesFor(token, '15minute');
     const c60 = this.candlesFor(token, '60minute');
     const cDay = this.candlesFor(token, 'day');
-    const tf15 = c15.length ? analyzeTimeframe(c15, '15minute', settings, now) : { missing: true, trend: 'insufficient' };
-    const tf60 = c60.length ? analyzeTimeframe(c60, '60minute', settings, now) : { missing: true, trend: 'insufficient' };
-    const tfDay = cDay.length ? analyzeTimeframe(cDay, 'day', settings, now) : { missing: true, trend: 'insufficient' };
+    const tf15 = c15.length ? analyzeTimeframe(c15, '15minute', settings, now, kind) : { missing: true, trend: 'insufficient' };
+    const tf60 = c60.length ? analyzeTimeframe(c60, '60minute', settings, now, kind) : { missing: true, trend: 'insufficient' };
+    const tfDay = cDay.length ? analyzeTimeframe(cDay, 'day', settings, now, kind) : { missing: true, trend: 'insufficient' };
     const combined = combineScore(tf15, tf60, tfDay, settings);
     const br15 = c15.length
-      ? detectBreakout(c15, '15minute', settings, now)
+      ? detectBreakout(c15, '15minute', settings, now, kind)
       : { status: 'insufficient', direction: null, interval: '15minute' };
     const br60 = c60.length
-      ? detectBreakout(c60, '60minute', settings, now)
+      ? detectBreakout(c60, '60minute', settings, now, kind)
       : { status: 'insufficient', direction: null, interval: '60minute' };
     const agree =
       br15.direction &&
@@ -361,7 +417,7 @@ class MarketDeskService {
       (br60.status === 'confirmed' || br60.status === 'potential');
     const conflict =
       br15.direction && br60.direction && br15.direction !== br60.direction && br15.status !== 'none' && br60.status !== 'none';
-    const last15 = splitForming(c15, '15minute', now);
+    const last15 = splitForming(c15, '15minute', now, kind);
     const ema20 = tfDay.emaFast ?? tf15.emaFast;
     const ema50 = tfDay.emaSlow ?? tf15.emaSlow;
     const close = row.ltp ?? tf15.close;
@@ -491,7 +547,7 @@ class MarketDeskService {
       if (token) rows.push({ symbol: s.symbol, kiteKey: s.kiteKey, instrumentToken: token });
     }
     ticker.setInstruments(rows);
-    const sess = sessionStatus(new Date(this.now()));
+    const sess = deskSessionStatus(new Date(this.now()));
     if (sess.open) ticker.ensure().catch(() => {});
     else ticker.stop();
   }

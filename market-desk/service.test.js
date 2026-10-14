@@ -51,7 +51,8 @@ test('demo snapshot is labelled when Kite is missing', async () => {
   const snap = await service.snapshot({ userId: 'owner-1' });
   assert.equal(snap.demo, true);
   assert.match(snap.warning, /DEMO/);
-  assert.equal(snap.indices.length, 3);
+  assert.equal(snap.indices.length, 4);
+  assert.equal(snap.indices.some((i) => i.id === 'CRUDEOILM'), true);
   assert.equal(snap.stocks.length, 50);
   assert.equal(snap.private, true);
 });
@@ -260,6 +261,37 @@ test('parseTicks reads quote-mode packets', () => {
   const ticks = parseTicks(buf);
   assert.equal(ticks[0].instrumentToken, 256265);
   assert.equal(ticks[0].price, 22640);
+});
+
+test('desk snapshot includes Crude Oil Mini from the MCX front-month future', async () => {
+  const quotes = quotesMap();
+  quotes['MCX:CRUDEOILM26NOVFUT'] = {
+    last_price: 5452,
+    net_change: 30,
+    ohlc: { close: 5422 },
+    instrument_token: 111,
+  };
+  const service = new MarketDeskService({
+    getSessionAuthorization: async () => 'token key:secret',
+    fetchQuotes: async (_auth, keys) => {
+      assert.ok(keys.some((k) => String(k).startsWith('MCX:')));
+      return quotes;
+    },
+    fetchHistoricalCandles: async () => [],
+    fetchInstrumentsCsv: async () =>
+      [
+        'instrument_token,exchange_token,tradingsymbol,name,last_price,expiry,strike,tick_size,lot_size,instrument_type,segment,exchange',
+        '111,0,CRUDEOILM26NOVFUT,CRUDEOILM,0,2026-11-17,0,1,1,FUT,MCX-FUT,MCX',
+      ].join('\n'),
+    now: () => Date.parse('2026-10-14T05:00:00Z'),
+    quoteTtlMs: 60_000,
+    histGapMs: 0,
+  });
+  const snap = await service.snapshot({ userId: 'owner-1', authorization: 'token key:secret' });
+  const crude = snap.indices.find((i) => i.id === 'CRUDEOILM');
+  assert.ok(crude);
+  assert.equal(crude.name, 'Crude Oil Mini');
+  assert.equal(crude.ltp, 5452);
 });
 
 test('index universes stay separate', () => {

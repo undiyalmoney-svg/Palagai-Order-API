@@ -10,6 +10,7 @@ class KiteMarketProvider {
   constructor(opts = {}) {
     this.fetchQuotes = opts.fetchQuotes || kiteMarket.fetchQuotes;
     this.fetchHistoricalCandles = opts.fetchHistoricalCandles || kiteMarket.fetchHistoricalCandles;
+    this.fetchInstrumentsCsv = opts.fetchInstrumentsCsv || kiteMarket.fetchInstrumentsCsv;
     this.name = 'kite';
   }
 
@@ -19,6 +20,11 @@ class KiteMarketProvider {
 
   async history(authorization, instrumentToken, fromDate, toDate, interval) {
     return this.fetchHistoricalCandles(authorization, instrumentToken, fromDate, toDate, interval);
+  }
+
+  async instrumentsCsv(authorization, exchange) {
+    if (typeof this.fetchInstrumentsCsv !== 'function') return '';
+    return this.fetchInstrumentsCsv(authorization, exchange);
   }
 }
 

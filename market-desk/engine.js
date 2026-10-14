@@ -3,6 +3,9 @@
 const { ema, adx, vwap, round } = require('../research/indicators');
 const { parts, minutesOfDay, OPEN_MIN, CLOSE_MIN, inSession, sessionDate, istDate } = require('../research/time');
 
+const CRUDE_OPEN_MIN = 9 * 60;
+const CRUDE_CLOSE_MIN = 23 * 60 + 30;
+
 const INTERVAL_MIN = {
   '5minute': 5,
   '15minute': 15,
@@ -18,18 +21,33 @@ function lastFinite(arr) {
   return null;
 }
 
-function sessionStatus(now = new Date()) {
+function sessionBounds(kind = 'cash') {
+  if (kind === 'crude') return { openMin: CRUDE_OPEN_MIN, closeMin: CRUDE_CLOSE_MIN };
+  return { openMin: OPEN_MIN, closeMin: CLOSE_MIN };
+}
+
+function sessionStatus(now = new Date(), kind = 'cash') {
   const p = parts(now);
   const day = `${p.year}-${p.month}-${p.day}`;
   // Noon IST → UTC day-of-week, so the droplet's UTC clock cannot flip Saturday/Sunday.
   const weekday = new Date(`${day}T12:00:00+05:30`).getUTCDay();
   const mins = minutesOfDay(now);
+  const { openMin, closeMin } = sessionBounds(kind);
   if (weekday === 0 || weekday === 6) {
     return { status: 'closed', label: 'Weekend', day, open: false };
   }
-  if (mins < OPEN_MIN) return { status: 'pre', label: 'Pre-open', day, open: false };
-  if (mins >= CLOSE_MIN) return { status: 'closed', label: 'Closed', day, open: false };
-  return { status: 'open', label: 'Session open', day, open: true };
+  if (mins < openMin) return { status: 'pre', label: kind === 'crude' ? 'Crude pre-open' : 'Pre-open', day, open: false };
+  if (mins >= closeMin) return { status: 'closed', label: kind === 'crude' ? 'Crude closed' : 'Closed', day, open: false };
+  return { status: 'open', label: kind === 'crude' ? 'Crude session' : 'Session open', day, open: true };
+}
+
+/** Cash or crude — the desk stays live while either book can still print. */
+function deskSessionStatus(now = new Date()) {
+  const cash = sessionStatus(now, 'cash');
+  const crude = sessionStatus(now, 'crude');
+  if (cash.open) return { ...cash, crudeOpen: crude.open };
+  if (crude.open) return { ...crude, crudeOpen: true };
+  return { ...cash, crudeOpen: false };
 }
 
 function candleEnd(candle, interval) {
@@ -77,14 +95,14 @@ function aggregateSession(candles, intervalMin) {
   return [...buckets.values()].sort((a, b) => new Date(a.date) - new Date(b.date));
 }
 
-function splitForming(candles, interval, now = new Date()) {
+function splitForming(candles, interval, now = new Date(), kind = 'cash') {
   const rows = Array.isArray(candles) ? candles.filter((c) => Number.isFinite(c?.close)) : [];
   if (!rows.length) return { completed: [], forming: null };
   const last = rows[rows.length - 1];
   if (interval === 'day') {
     const lastDay = sessionDate(last.date);
     const today = sessionDate(now);
-    const sess = sessionStatus(now);
+    const sess = sessionStatus(now, kind);
     if (lastDay === today && sess.open) {
       return { completed: rows.slice(0, -1), forming: last };
     }
@@ -97,9 +115,10 @@ function splitForming(candles, interval, now = new Date()) {
   return { completed: rows, forming: null };
 }
 
-function sessionVwap(candles, now = new Date()) {
+function sessionVwap(candles, now = new Date(), kind = 'cash') {
   const day = sessionDate(now);
-  const today = (candles || []).filter((c) => sessionDate(c.date) === day && inSession(c.date));
+  const { openMin, closeMin } = sessionBounds(kind);
+  const today = (candles || []).filter((c) => sessionDate(c.date) === day && inSession(c.date, openMin, closeMin));
   return vwap(today);
 }
 
@@ -214,8 +233,8 @@ function detectSideways({ structure, emaPack, strength, close, emaFast, emaSlow,
   return range && weak && flatMa && vwapCrosses >= 2;
 }
 
-function analyzeTimeframe(candles, interval, settings, now = new Date()) {
-  const { completed, forming } = splitForming(candles, interval, now);
+function analyzeTimeframe(candles, interval, settings, now = new Date(), kind = 'cash') {
+  const { completed, forming } = splitForming(candles, interval, now, kind);
   if (completed.length < settings.emaSlow + 2) {
     return {
       interval,
@@ -237,7 +256,7 @@ function analyzeTimeframe(candles, interval, settings, now = new Date()) {
   const pivots = swingPivots(completed, settings.pivotStrength);
   const structure = structureScore(pivots);
   const emaPack = emaStackScore(close, eFast, eSlow);
-  const sessionVw = interval === 'day' ? null : sessionVwap(completed, now);
+  const sessionVw = interval === 'day' ? null : sessionVwap(completed, now, kind);
   const vw = vwapScore(close, sessionVw);
   const strength = adxStrength(adxVal, settings);
   const trend = localTrend(emaPack, structure);
@@ -319,8 +338,8 @@ function levelsFromLookback(completed, lookback) {
   };
 }
 
-function detectBreakout(candles, interval, settings, now = new Date()) {
-  const { completed, forming } = splitForming(candles, interval, now);
+function detectBreakout(candles, interval, settings, now = new Date(), kind = 'cash') {
+  const { completed, forming } = splitForming(candles, interval, now, kind);
   if (completed.length < Math.max(8, Math.floor(settings.srLookback / 2))) {
     return {
       status: 'insufficient',
@@ -441,6 +460,10 @@ function isAuthError(err) {
 
 module.exports = {
   sessionStatus,
+  deskSessionStatus,
+  sessionBounds,
+  CRUDE_OPEN_MIN,
+  CRUDE_CLOSE_MIN,
   splitForming,
   swingPivots,
   structureScore,

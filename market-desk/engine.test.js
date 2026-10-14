@@ -6,6 +6,7 @@ const { ema, vwap, adx } = require('../research/indicators');
 const { DEFAULTS, normalizeSettings } = require('./settings');
 const {
   sessionStatus,
+  deskSessionStatus,
   splitForming,
   swingPivots,
   structureScore,
@@ -239,6 +240,16 @@ test('weekend session is closed', () => {
   assert.equal(sat.status, 'closed');
   const open = sessionStatus(new Date('2026-10-13T05:00:00Z'));
   assert.equal(open.status, 'open');
+});
+
+test('crude session stays open after the cash close', () => {
+  const evening = new Date('2026-10-13T12:00:00Z');
+  assert.equal(sessionStatus(evening, 'cash').open, false);
+  assert.equal(sessionStatus(evening, 'crude').open, true);
+  const desk = deskSessionStatus(evening);
+  assert.equal(desk.open, true);
+  assert.equal(desk.label, 'Crude session');
+  assert.equal(desk.crudeOpen, true);
 });
 
 test('daily splitForming treats today as forming only while the cash session is open', () => {
