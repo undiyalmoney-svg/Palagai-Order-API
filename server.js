@@ -6,6 +6,7 @@ const { getMomentumApp, startMomentumScheduler } = require('./momentum/instance'
 const { startResearchSupervisor } = require('./research/instance');
 const { start: startChartsProtect } = require('./charts-protect/worker');
 const { start: startSlBuddy } = require('./sl-buddy/worker');
+const { applyHeatmapAuth } = require('./heatmap/instance');
 
 async function boot() {
   try {
@@ -76,6 +77,12 @@ async function boot() {
         } catch {
           return false;
         }
+      },
+    });
+    applyHeatmapAuth({
+      getAuthorization: async () => {
+        const sessions = getMomentumApp().momentum.sessions;
+        return typeof sessions.latestAuthorization === 'function' ? sessions.latestAuthorization() : null;
       },
     });
   });

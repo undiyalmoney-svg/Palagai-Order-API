@@ -7,6 +7,7 @@ const { getMomentumRouter } = require('../momentum/instance');
 const { getResearchService } = require('../research/instance');
 const { createResearchRouter } = require('../research/api/routes');
 const { createSlBuddyRouter } = require('../sl-buddy/routes');
+const { getHeatmapRouter } = require('../heatmap/instance');
 
 const router = express.Router();
 
@@ -46,5 +47,12 @@ function slBuddyHandler(req, res, next) {
   return slBuddyRouter(req, res, next);
 }
 router.use('/sl-buddy', slBuddyHandler);
+
+let heatmapRouter = null;
+function heatmapHandler(req, res, next) {
+  if (!heatmapRouter) heatmapRouter = getHeatmapRouter();
+  return heatmapRouter(req, res, next);
+}
+router.use('/heatmap', heatmapHandler);
 
 module.exports = router;
