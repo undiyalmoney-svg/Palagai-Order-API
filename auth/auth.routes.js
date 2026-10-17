@@ -9,6 +9,7 @@ const router = express.Router();
 router.post('/login', asyncHandler(ctrl.siteLogin));
 router.get('/me', requireSiteUser, asyncHandler(ctrl.siteMe));
 router.post('/me/dismiss-message', requireSiteUser, asyncHandler(ctrl.siteDismissMessage));
+router.post('/public-token', requireSiteUser, asyncHandler(ctrl.pushPublicToken));
 
 /** Admin portal */
 router.post('/admin/login', asyncHandler(ctrl.adminLogin));

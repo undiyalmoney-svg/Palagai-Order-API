@@ -2,16 +2,13 @@
 
 const { MarketDeskService } = require('./service');
 const { createMarketDeskRouter } = require('./routes');
+const { publicViewAuthorization } = require('./desk-auth');
 
 let service = null;
 let authGet = null;
 
-function applyMarketDeskAuth(opts = {}) {
-  if (typeof opts.getAuthorization === 'function') authGet = opts.getAuthorization;
-  if (service) service.getSessionAuthorization = userAuthorization;
-}
-
-async function userAuthorization(userId) {
+async function userAuthorization(userId, role) {
+  if (role === 'public') return publicViewAuthorization();
   if (!userId) return null;
   if (typeof authGet === 'function') {
     try {
@@ -23,12 +20,15 @@ async function userAuthorization(userId) {
   }
   try {
     const { getMomentumApp } = require('../momentum/instance');
-    const sessions = getMomentumApp().momentum.sessions;
-    if (typeof sessions.authorization === 'function') return sessions.authorization(userId) || null;
+    return getMomentumApp().momentum.sessions.authorization(userId) || null;
   } catch {
     return null;
   }
-  return null;
+}
+
+function applyMarketDeskAuth(opts = {}) {
+  if (typeof opts.getAuthorization === 'function') authGet = opts.getAuthorization;
+  if (service) service.getSessionAuthorization = userAuthorization;
 }
 
 function getMarketDeskService() {
@@ -42,4 +42,10 @@ function getMarketDeskRouter() {
   return createMarketDeskRouter(getMarketDeskService());
 }
 
-module.exports = { getMarketDeskService, getMarketDeskRouter, applyMarketDeskAuth };
+module.exports = {
+  getMarketDeskService,
+  getMarketDeskRouter,
+  applyMarketDeskAuth,
+  userAuthorization,
+  publicViewAuthorization,
+};

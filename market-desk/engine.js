@@ -45,9 +45,9 @@ function sessionStatus(now = new Date(), kind = 'cash') {
 function deskSessionStatus(now = new Date()) {
   const cash = sessionStatus(now, 'cash');
   const crude = sessionStatus(now, 'crude');
-  if (cash.open) return { ...cash, crudeOpen: crude.open };
-  if (crude.open) return { ...crude, crudeOpen: true };
-  return { ...cash, crudeOpen: false };
+  if (cash.open) return { ...cash, cashOpen: true, crudeOpen: crude.open };
+  if (crude.open) return { ...crude, cashOpen: false, crudeOpen: true };
+  return { ...cash, cashOpen: false, crudeOpen: false };
 }
 
 function candleEnd(candle, interval) {

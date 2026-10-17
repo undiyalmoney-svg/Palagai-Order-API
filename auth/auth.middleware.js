@@ -108,6 +108,10 @@ function requireAdmin(req, res, next) {
 
 function requireModule(moduleId) {
   return (req, res, next) => {
+    if (req.user?.role === 'public') {
+      res.status(403).json({ status: 'error', message: 'Public viewers can only use Charts.' });
+      return;
+    }
     const mods = req.user?.modules || [];
     if (req.user?.role === 'owner' || mods.includes(moduleId)) {
       next();
@@ -115,6 +119,20 @@ function requireModule(moduleId) {
     }
     res.status(403).json({ status: 'error', message: `No access to ${moduleId}` });
   };
+}
+
+/** Charts / market-desk — the only live surface Public may call. */
+function requireCharts(req, res, next) {
+  if (req.user?.role === 'public' || req.user?.role === 'owner') {
+    next();
+    return;
+  }
+  const mods = req.user?.modules || [];
+  if (mods.includes('auto')) {
+    next();
+    return;
+  }
+  res.status(403).json({ status: 'error', message: 'No access to Charts' });
 }
 
 /** Optional site user — attaches req.user when Bearer present. */
@@ -148,6 +166,7 @@ module.exports = {
   requireSiteUser,
   requireAdmin,
   requireModule,
+  requireCharts,
   optionalSiteUser,
   bearer,
 };

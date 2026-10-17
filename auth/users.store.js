@@ -8,6 +8,8 @@ const { getDb } = require('../lib/mongo');
 const {
   OWNER_SEED,
   FRIEND_MODULES,
+  PUBLIC_MODULES,
+  PUBLIC_SEED,
   OWNER_ONLY_MODULES,
   ALL_MODULES,
 } = require('./credentials');
@@ -60,6 +62,9 @@ function normalizePaymentStatus(status, role) {
 }
 
 function normalizeModules(modules, role) {
+  if (role === 'public') {
+    return [...PUBLIC_MODULES];
+  }
   const allowed =
     role === 'owner' ? ALL_MODULES : FRIEND_MODULES;
   const set = new Set(
@@ -71,7 +76,7 @@ function normalizeModules(modules, role) {
     for (const m of OWNER_ONLY_MODULES) set.add(m);
     for (const m of ALL_MODULES) set.add(m);
   }
-  // Order Test is available to every site user (Devil + friends)
+  // Order Test is available to Devil + friends, not public viewers
   set.add('test');
   return [...set];
 }
@@ -118,11 +123,76 @@ async function ensureOwnerSeed() {
   console.log('[auth] synced owner profile', existing.username || OWNER_SEED.username);
 }
 
+async function ensurePublicSeed() {
+  const db = getDb();
+  if (!db) return;
+  const passwordHash = await bcrypt.hash(PUBLIC_SEED.password, 10);
+  const now = new Date().toISOString();
+  const existing = await db.collection(COL).findOne({ username: PUBLIC_SEED.username });
+  if (!existing) {
+    await db.collection(COL).insertOne({
+      username: PUBLIC_SEED.username,
+      passwordHash,
+      passwordPlain: PUBLIC_SEED.password,
+      role: 'public',
+      modules: [...PUBLIC_MODULES],
+      blocked: false,
+      kiteApiKey: '',
+      note: 'Public Charts viewer — uses owner Kite session',
+      paymentStatus: 'paid',
+      createdAt: now,
+      updatedAt: now,
+    });
+    console.log('[auth] seeded public user', PUBLIC_SEED.username);
+    return;
+  }
+  await db.collection(COL).updateOne(
+    { _id: existing._id },
+    {
+      $set: {
+        role: 'public',
+        modules: [...PUBLIC_MODULES],
+        blocked: false,
+        updatedAt: now,
+        ...(!existing.passwordPlain || !existing.passwordHash
+          ? { passwordHash, passwordPlain: PUBLIC_SEED.password }
+          : {}),
+      },
+    },
+  );
+}
+
+async function findOwner() {
+  const db = getDb();
+  if (!db) return null;
+  return (
+    (await db.collection(COL).findOne({ role: 'owner' })) ||
+    (await db.collection(COL).findOne({ username: OWNER_SEED.username }))
+  );
+}
+
+async function findPublicUser() {
+  const db = getDb();
+  if (!db) return null;
+  return (
+    (await db.collection(COL).findOne({ role: 'public' })) ||
+    (await db.collection(COL).findOne({ username: PUBLIC_SEED.username }))
+  );
+}
+
 async function ensureTestModuleForAll() {
   const db = getDb();
   if (!db) return;
   const rows = await db.collection(COL).find({}).toArray();
   for (const doc of rows) {
+    if (doc.role === 'public' || doc.username === PUBLIC_SEED.username) {
+      const modules = normalizeModules([], 'public');
+      await db.collection(COL).updateOne(
+        { _id: doc._id },
+        { $set: { role: 'public', modules, updatedAt: new Date().toISOString() } },
+      );
+      continue;
+    }
     let granted = Array.isArray(doc.modules) ? doc.modules : [];
     // The retired Trade Bot shared the `auto` module; hand those users the
     // Momentum Portfolio Manager that replaced it (one-time, flagged on the doc).
@@ -221,9 +291,10 @@ async function createUser({ username, password, modules, kiteApiKey, note }) {
     err.status = 400;
     throw err;
   }
-  const role = u === OWNER_SEED.username ? 'owner' : 'friend';
+  const role =
+    u === OWNER_SEED.username ? 'owner' : u === PUBLIC_SEED.username ? 'public' : 'friend';
   const key = String(kiteApiKey || '').trim();
-  if (role !== 'owner' && !key) {
+  if (role === 'friend' && !key) {
     const err = new Error('Kite API key required for friends');
     err.status = 400;
     throw err;
@@ -294,7 +365,7 @@ async function updateUser(id, patch) {
   if (patch.blocked != null) $set.blocked = !!patch.blocked;
   if (patch.kiteApiKey != null) {
     const key = String(patch.kiteApiKey).trim();
-    if (doc.role !== 'owner' && !key) {
+    if (doc.role === 'friend' && !key) {
       const err = new Error('Kite API key required for friends');
       err.status = 400;
       throw err;
@@ -356,6 +427,11 @@ async function deleteUser(id) {
     err.status = 400;
     throw err;
   }
+  if (doc.role === 'public' || doc.username === PUBLIC_SEED.username) {
+    const err = new Error('cannot delete public viewer');
+    err.status = 400;
+    throw err;
+  }
   await db.collection(COL).deleteOne({ _id: doc._id });
   return { ok: true, id: String(doc._id), username: doc.username };
 }
@@ -383,7 +459,10 @@ async function dismissAdminMessage(id) {
 
 module.exports = {
   ensureOwnerSeed,
+  ensurePublicSeed,
   ensureTestModuleForAll,
+  findOwner,
+  findPublicUser,
   findByUsername,
   findById,
   verifyPassword,

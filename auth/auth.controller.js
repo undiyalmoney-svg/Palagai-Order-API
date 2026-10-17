@@ -123,6 +123,45 @@ async function vaultSeed(req, res) {
   res.json({ status: 'ok', secrets, logins: vault.loginCards() });
 }
 
+function parseKiteHeader(raw) {
+  const text = String(raw || '').trim();
+  const m = text.match(/^token\s+([^:\s]+):(\S+)/i);
+  if (!m) return null;
+  return { apiKey: m[1], accessToken: m[2] };
+}
+
+/** Devil copies today's Kite session so Public viewers can load Charts. */
+async function pushPublicToken(req, res) {
+  if (req.user?.role !== 'owner') {
+    res.status(403).json({ status: 'error', message: 'Only Devil can push the public Charts token.' });
+    return;
+  }
+  const header = req.headers['x-kite-authorization'] || req.headers['x-kite-authorisation'] || '';
+  const parsed =
+    parseKiteHeader(header) ||
+    (req.body?.apiKey && req.body?.accessToken
+      ? { apiKey: String(req.body.apiKey).trim(), accessToken: String(req.body.accessToken).trim() }
+      : null);
+  if (!parsed?.apiKey || !parsed?.accessToken) {
+    res.status(400).json({ status: 'error', message: 'Connect Kite first, then push the token for public view.' });
+    return;
+  }
+  const { PUBLIC_SESSION_KEY } = require('./credentials');
+  const { getMomentumApp } = require('../momentum/instance');
+  const sessions = getMomentumApp().momentum.sessions;
+  sessions.save(PUBLIC_SESSION_KEY, parsed.apiKey, parsed.accessToken);
+  const publicUser = await users.findPublicUser();
+  if (publicUser?._id) {
+    sessions.save(String(publicUser._id), parsed.apiKey, parsed.accessToken);
+  }
+  res.json({
+    status: 'ok',
+    pushed: true,
+    publicUser: publicUser ? users.publicUser(publicUser).username : 'Public',
+    message: 'Public Charts will use this Kite session. Funds stay hidden.',
+  });
+}
+
 module.exports = {
   siteLogin,
   siteMe,
@@ -136,4 +175,5 @@ module.exports = {
   vaultUpsert,
   vaultRemove,
   vaultSeed,
+  pushPublicToken,
 };

@@ -23,8 +23,17 @@ module.exports = {
     role: 'owner',
     modules: ['trade', 'crude', 'auto', 'momentum', 'research', 'token', 'test', 'strat', 'pnl', 'vault'],
   },
-  /** Friends may be granted these (test is always on for everyone) */
+  /** Friends may be granted these (test is always on for friends + owner) */
   FRIEND_MODULES: ['trade', 'crude', 'auto', 'momentum', 'research', 'token', 'test'],
+  /** Public viewers: Charts only. Uses the owner's pushed Kite session. */
+  PUBLIC_MODULES: ['auto'],
+  PUBLIC_SEED: {
+    username: 'Public',
+    password: 'PublicView1789',
+    role: 'public',
+    modules: ['auto'],
+  },
+  PUBLIC_SESSION_KEY: 'public-view',
   OWNER_ONLY_MODULES: ['strat', 'pnl', 'vault'],
   ALL_MODULES: ['trade', 'crude', 'auto', 'momentum', 'research', 'token', 'test', 'strat', 'pnl', 'vault'],
 };

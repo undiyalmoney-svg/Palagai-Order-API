@@ -13,6 +13,7 @@ async function boot() {
     const mongo = await connectMongo();
     if (mongo?.db) {
       await usersStore.ensureOwnerSeed();
+      await usersStore.ensurePublicSeed();
       await usersStore.ensureTestModuleForAll();
     }
   } catch (err) {

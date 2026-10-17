@@ -172,6 +172,7 @@ test('authed snapshot does not leak another user\'s quotes', async () => {
           next();
         },
         requireModule: () => (_req, _res, next) => next(),
+        requireCharts: (_req, _res, next) => next(),
       },
     }),
   );

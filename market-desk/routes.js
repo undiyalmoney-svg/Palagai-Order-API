@@ -2,11 +2,16 @@
 
 const express = require('express');
 const siteAuth = require('../auth/auth.middleware');
+const { deskAuthorization } = require('./desk-auth');
 
 function createMarketDeskRouter(service, { auth = siteAuth } = {}) {
-  const { requireSiteUser, requireModule } = auth;
+  const { requireSiteUser, requireCharts } = auth;
   const router = express.Router();
-  const guard = [requireSiteUser, requireModule('auto')];
+  const guard = [requireSiteUser, requireCharts];
+
+  function kiteFor(req) {
+    return deskAuthorization(req, service.getSessionAuthorization);
+  }
 
   router.get('/health', (_req, res) => {
     res.json({ status: 'ok', module: 'market-desk', public: false });
@@ -14,10 +19,9 @@ function createMarketDeskRouter(service, { auth = siteAuth } = {}) {
 
   router.get('/', ...guard, async (req, res, next) => {
     try {
-      const header = req.headers['x-kite-authorization'] || req.headers['x-kite-authorisation'] || '';
       const out = await service.snapshot({
         userId: req.user?.id,
-        authorization: header,
+        authorization: await kiteFor(req),
         settings: req.query,
       });
       res.setHeader('Cache-Control', 'private, no-store');
@@ -29,10 +33,9 @@ function createMarketDeskRouter(service, { auth = siteAuth } = {}) {
 
   router.get('/candles', ...guard, async (req, res, next) => {
     try {
-      const header = req.headers['x-kite-authorization'] || req.headers['x-kite-authorisation'] || '';
       const out = await service.candles({
         userId: req.user?.id,
-        authorization: header,
+        authorization: await kiteFor(req),
         symbol: req.query.symbol,
         interval: req.query.interval,
       });
@@ -45,10 +48,9 @@ function createMarketDeskRouter(service, { auth = siteAuth } = {}) {
 
   router.get('/backtest', ...guard, async (req, res, next) => {
     try {
-      const header = req.headers['x-kite-authorization'] || req.headers['x-kite-authorisation'] || '';
       const out = await service.backtest({
         userId: req.user?.id,
-        authorization: header,
+        authorization: await kiteFor(req),
         symbol: req.query.symbol,
         interval: req.query.interval,
       });
