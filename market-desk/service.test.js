@@ -55,6 +55,8 @@ test('demo snapshot is labelled when Kite is missing', async () => {
   assert.equal(snap.indices.some((i) => i.id === 'CRUDEOILM'), true);
   assert.equal(snap.stocks.length, 50);
   assert.equal(snap.private, true);
+  assert.equal(snap.indices.every((i) => i.behaviour?.sample === true), true);
+  assert.match(snap.indices[0].behaviour.classificationLabel, /sample/i);
 });
 
 test('snapshot uses only this user\'s authorization, never a shared desk token', async () => {

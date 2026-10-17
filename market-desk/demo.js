@@ -4,6 +4,7 @@ const { listNifty50 } = require('../heatmap/universe');
 const { deskIndices } = require('./universe');
 const { DEFAULTS } = require('./settings');
 const { deskSessionStatus, formatIst } = require('./engine');
+const { sampleBehaviour } = require('./behaviour');
 
 function hash(s) {
   let h = 0;
@@ -95,6 +96,16 @@ function demoSnapshot(now = new Date(), settings = DEFAULTS) {
       m15Trend: 'mixed',
       h1Trend: 'mixed',
       dayTrend: idx.id === 'CRUDEOILM' ? 'bullish' : 'mixed',
+      behaviour: sampleBehaviour({
+        id: idx.id,
+        name: idx.name,
+        ltp: [22640, 55120, 74210, 5452][i],
+        change: [-95.2, 168.4, -132.1, 30][i],
+        changePct,
+        bias: pack.bias,
+        dayTrend: idx.id === 'CRUDEOILM' ? 'bullish' : 'mixed',
+        now,
+      }),
     };
   });
 

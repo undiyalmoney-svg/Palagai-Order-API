@@ -14,6 +14,7 @@ const DEFAULTS = {
   cooldownBars: 4,
   uiRefreshMs: 5_000,
   alertCooldownMs: 120_000,
+  primaryTimeframe: '15minute',
 };
 
 function clamp(n, lo, hi, fallback) {
@@ -37,6 +38,9 @@ function normalizeSettings(raw = {}) {
     cooldownBars: clamp(raw.cooldownBars, 1, 20, DEFAULTS.cooldownBars),
     uiRefreshMs: clamp(raw.uiRefreshMs, 1_000, 60_000, DEFAULTS.uiRefreshMs),
     alertCooldownMs: clamp(raw.alertCooldownMs, 30_000, 600_000, DEFAULTS.alertCooldownMs),
+    primaryTimeframe: ['5minute', '15minute', '60minute', 'day'].includes(raw.primaryTimeframe)
+      ? raw.primaryTimeframe
+      : DEFAULTS.primaryTimeframe,
   };
 }
 

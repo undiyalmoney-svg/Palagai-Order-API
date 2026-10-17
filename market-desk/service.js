@@ -9,6 +9,7 @@ const { KiteMarketProvider } = require('./provider');
 const { DeskTicker } = require('./ticker');
 const { demoSnapshot } = require('./demo');
 const { evaluate } = require('./backtest');
+const { analyzeBehaviour } = require('./behaviour');
 const {
   deskSessionStatus,
   formatIst,
@@ -423,6 +424,24 @@ class MarketDeskService {
     const close = row.ltp ?? tf15.close;
     const setup = setupFrom(row, br15, br60, combined);
     const alerts = alertsFor(row.symbol, br15, br60, combined);
+    const isIndex = row.sector === 'INDEX' || row.sector === 'CRUDE' || ['NIFTY50', 'BANKNIFTY', 'SENSEX', 'CRUDEOILM'].includes(row.id);
+    const behaviour = isIndex
+      ? analyzeBehaviour({
+          candles5: this.candlesFor(token, '5minute'),
+          candles15: c15,
+          candles60: c60,
+          candlesDay: cDay,
+          settings,
+          now,
+          kind,
+          symbol: row.symbol || row.id,
+          name: row.name,
+          ltp: row.ltp,
+          change: row.change,
+          changePct: row.changePct,
+          primary: settings.primaryTimeframe || '15minute',
+        })
+      : null;
     return {
       ...row,
       bias: combined.bias,
@@ -446,6 +465,7 @@ class MarketDeskService {
       lastFormingAt: last15.forming?.date || null,
       setup,
       alerts,
+      behaviour,
     };
   }
 
@@ -570,9 +590,12 @@ class MarketDeskService {
         symbol: s.symbol,
       })),
     ];
-    const intervals = ['15minute', '60minute', 'day'];
+    const indexIds = new Set(['NIFTY50', 'BANKNIFTY', 'SENSEX', 'CRUDEOILM']);
     for (const row of want) {
       if (!row.token) continue;
+      const intervals = indexIds.has(row.symbol)
+        ? ['5minute', '15minute', '60minute', 'day']
+        : ['15minute', '60minute', 'day'];
       for (const iv of intervals) {
         const cached = this.histCache.get(this.histKey(row.token, iv));
         const ttl = HIST_TTL[iv];
