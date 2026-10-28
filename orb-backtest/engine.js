@@ -100,6 +100,7 @@ function groupByDay(bars) {
 
 function backtestStock(symbol, barsByDay, cfg, indexDir) {
   const trades = [];
+  const crosses = [];
   for (const [day, bars] of Object.entries(barsByDay)) {
     if (!bars || bars.length < 12) continue;
     const first = bars[0];
@@ -119,6 +120,7 @@ function backtestStock(symbol, barsByDay, cfg, indexDir) {
 
     let ema20 = null;
     let position = null;
+    let recordedCross = false;
     const exitTrade = (b, price, reason) => {
       const pnl = (price - position.entryPx) * position.qty * (position.side === 'L' ? 1 : -1);
       const chg = chargesRs(position.entryPx * position.qty, price * position.qty);
@@ -184,15 +186,46 @@ function backtestStock(symbol, barsByDay, cfg, indexDir) {
         const tgtPx = side === 'L' ? entryPx + riskPx * cfg.targetR : entryPx - riskPx * cfg.targetR;
         position = { side, entryPx, stopPx, tgtPx, qty, entryT: b.t };
       };
-      if (b.c > orh && b.o <= orh) carry('L');
-      else if (b.c < orl && b.o >= orl) carry('S');
+      if (b.c > orh && b.o <= orh) {
+        if (!recordedCross) {
+          recordedCross = true;
+          crosses.push({
+            symbol,
+            day,
+            side: 'L',
+            t: b.t,
+            close: roundPaise(b.c),
+            orh: roundPaise(orh),
+            orl: roundPaise(orl),
+            orWPct: roundPaise(orW * 100),
+            volume: b.v,
+          });
+        }
+        carry('L');
+      } else if (b.c < orl && b.o >= orl) {
+        if (!recordedCross) {
+          recordedCross = true;
+          crosses.push({
+            symbol,
+            day,
+            side: 'S',
+            t: b.t,
+            close: roundPaise(b.c),
+            orh: roundPaise(orh),
+            orl: roundPaise(orl),
+            orWPct: roundPaise(orW * 100),
+            volume: b.v,
+          });
+        }
+        carry('S');
+      }
     }
     if (position) {
       const last = bars[bars.length - 1];
       exitTrade(last, last.c, 'TIME');
     }
   }
-  return trades;
+  return { trades, crosses };
 }
 
 function indexDirection(barsByDay) {
@@ -313,10 +346,25 @@ function runOrbBacktest({ symbolBars, indexBars, config }) {
   const cfg = clampConfig(config);
   const indexDir = indexBars ? indexDirection(indexBars) : null;
   const all = [];
+  const crosses = [];
   for (const [symbol, barsByDay] of Object.entries(symbolBars || {})) {
-    all.push(...backtestStock(symbol, barsByDay, cfg, indexDir));
+    const out = backtestStock(symbol, barsByDay, cfg, indexDir);
+    all.push(...out.trades);
+    crosses.push(...out.crosses);
   }
   const desk = selectDeskTrades(all, cfg);
+  const takenKeys = new Set(desk.map((t) => `${t.day}|${t.symbol}`));
+  const qualifiedKeys = new Set(all.map((t) => `${t.day}|${t.symbol}`));
+  const crossed = crosses
+    .map((c) => ({
+      ...c,
+      qualified: qualifiedKeys.has(`${c.day}|${c.symbol}`),
+      taken: takenKeys.has(`${c.day}|${c.symbol}`),
+    }))
+    .sort((a, b) => a.day.localeCompare(b.day) || a.t.localeCompare(b.t) || a.symbol.localeCompare(b.symbol));
+  const summary = summarize(desk, cfg.capital);
+  summary.orbCrossed = crossed.length;
+  summary.orbCrossedTaken = crossed.filter((c) => c.taken).length;
   return {
     simulated: true,
     liveOrders: false,
@@ -334,10 +382,12 @@ function runOrbBacktest({ symbolBars, indexBars, config }) {
       'Opening range is 09:15–09:45 IST on 5-minute bars. Entry is a close through ORH/ORL between 09:50 and 14:30. Stop is 1R; target is configurable R multiples. Time exit 14:50.',
       'R is clamp(opening-range width × 0.5, 0.30%, 0.60%) of price. Qty sizes to ~0.75% of starting capital of risk, notional capped at 5× capital.',
       'Fill slippage 0.05%/side plus approximate Zerodha MIS charges. Existing OR-width, gap, volume, close-break and EMA20 gates from the stock ORB script are kept; no extra filters were added.',
+      'ORB crossed is the first 5-minute close through ORH/ORL in the entry window, even if volume/EMA or the max-stocks desk skipped the name.',
     ],
     rawTrades: all.length,
-    summary: summarize(desk, cfg.capital),
+    summary,
     trades: desk,
+    crosses: crossed,
   };
 }
 

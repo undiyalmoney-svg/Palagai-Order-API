@@ -40,7 +40,7 @@ test('Nifty 500 universe has about 500 equity symbols', () => {
 
 test('ORB long uses opening-range high and a 1R stop with configurable target', () => {
   const day = '2026-10-16';
-  const trades = backtestStock(
+  const { trades, crosses } = backtestStock(
     'AAA',
     { [day]: orDay(day) },
     {
@@ -70,6 +70,10 @@ test('ORB long uses opening-range high and a 1R stop with configurable target', 
   assert.ok(t.entryPx > 102);
   assert.ok(t.stopPx < t.entryPx);
   assert.ok(t.exitReason === 'TARGET' || t.exitReason === 'TIME' || t.exitReason === 'SL');
+  assert.equal(crosses.length, 1);
+  assert.equal(crosses[0].symbol, 'AAA');
+  assert.equal(crosses[0].side, 'L');
+  assert.equal(crosses[0].t, '10:10');
 });
 
 test('desk keeps at most N stocks per day and never places a live order flag', () => {
@@ -87,6 +91,9 @@ test('desk keeps at most N stocks per day and never places a live order flag', (
   });
   assert.equal(out.simulated, true);
   assert.equal(out.liveOrders, false);
+  assert.equal(out.crosses.length, 1);
+  assert.equal(out.crosses[0].taken, true);
+  assert.equal(out.summary.orbCrossed, 1);
 });
 
 test('clampConfig keeps target R configurable and never marks the book live', () => {
@@ -100,6 +107,23 @@ test('clampConfig keeps target R configurable and never marks the book live', ()
   assert.equal(out.summary.trades, 0);
   assert.equal(out.simulated, true);
   assert.equal(out.liveOrders, false);
+});
+
+test('ORB crossed list includes a close-through even when volume blocks the trade', () => {
+  const day = '2026-10-16';
+  const bars = orDay(day).map((b) => (b.t === '10:10' ? { ...b, v: 10 } : b));
+  const out = runOrbBacktest({
+    symbolBars: { BBB: { [day]: bars } },
+    config: { capital: 40000, maxStocksPerDay: 3, targetR: 2 },
+  });
+  assert.equal(out.trades.length, 0);
+  assert.equal(out.crosses.length, 1);
+  assert.equal(out.crosses[0].symbol, 'BBB');
+  assert.equal(out.crosses[0].side, 'L');
+  assert.equal(out.crosses[0].qualified, false);
+  assert.equal(out.crosses[0].taken, false);
+  assert.equal(out.summary.orbCrossed, 1);
+  assert.equal(out.summary.orbCrossedTaken, 0);
 });
 
 test('barsFromCandles drop pre-open prints', () => {
