@@ -135,7 +135,16 @@ function generateCandidates({ capital = 40000, budget = 24 } = {}) {
       crowdFilter: 'skipShort',
       maxStocksPerDay: 5,
       experimental: true,
-      name: 'Skip short-crowd 09:45, 5 widest stops (10k desk)',
+      name: 'Skip short-crowd 09:45, 5 widest stops (₹10k; do not exceed 8)',
+    },
+    {
+      family: 'combo',
+      rankBy: 'stopPct',
+      crowdFilter: 'skipShort',
+      maxStocksPerDay: 5,
+      entryEnd: '12:30',
+      experimental: true,
+      name: 'Skip short-crowd, last entry 12:30, 5 widest stops',
     },
     {
       family: 'combo',
