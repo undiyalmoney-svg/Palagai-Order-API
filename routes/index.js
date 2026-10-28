@@ -9,6 +9,7 @@ const { createResearchRouter } = require('../research/api/routes');
 const { createSlBuddyRouter } = require('../sl-buddy/routes');
 const { getHeatmapRouter } = require('../heatmap/instance');
 const { getMarketDeskRouter } = require('../market-desk/instance');
+const { createOrbBacktestRouter } = require('../orb-backtest/routes');
 
 const router = express.Router();
 
@@ -62,5 +63,12 @@ function marketDeskHandler(req, res, next) {
   return marketDeskRouter(req, res, next);
 }
 router.use('/market-desk', marketDeskHandler);
+
+let orbBacktestRouter = null;
+function orbBacktestHandler(req, res, next) {
+  if (!orbBacktestRouter) orbBacktestRouter = createOrbBacktestRouter();
+  return orbBacktestRouter(req, res, next);
+}
+router.use('/orb-backtest', orbBacktestHandler);
 
 module.exports = router;

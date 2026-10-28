@@ -25,6 +25,10 @@ function readCreds(body) {
 
 async function siteLogin(req, res) {
   const { username, password } = readCreds(req.body);
+  if (username.toLowerCase() !== String(OWNER_SEED.username).toLowerCase()) {
+    res.status(401).json({ status: 'error', message: 'Invalid username or password' });
+    return;
+  }
   const result = await users.verifyPassword(username, password);
   if (!result.ok) {
     if (result.reason === 'blocked') {

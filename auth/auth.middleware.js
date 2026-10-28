@@ -1,7 +1,13 @@
 const jwt = require('jsonwebtoken');
-const { JWT_SECRET, JWT_DAYS, ADMIN } = require('./credentials');
+const { JWT_SECRET, JWT_DAYS, ADMIN, OWNER_SEED } = require('./credentials');
 const users = require('./users.store');
 const { getDb } = require('../lib/mongo');
+
+function isSiteOwner(user) {
+  if (!user) return false;
+  if (user.role === 'owner') return true;
+  return String(user.username || '').toLowerCase() === String(OWNER_SEED.username).toLowerCase();
+}
 
 function userFromJwt(payload) {
   if (!payload?.sub || payload.role === 'admin') return null;
@@ -59,6 +65,10 @@ async function requireSiteUser(req, res, next) {
       // momentum app still has to run (synthetic data, paper trading).
       const fallback = !getDb() ? userFromJwt(payload) : null;
       if (fallback) {
+        if (!isSiteOwner(fallback)) {
+          res.status(403).json({ status: 'error', message: 'This desk is limited to the site owner.' });
+          return;
+        }
         req.user = fallback;
         next();
         return;
@@ -78,6 +88,10 @@ async function requireSiteUser(req, res, next) {
     }
     req.user = users.publicUser(doc);
     req.userDoc = doc;
+    if (!isSiteOwner(req.user)) {
+      res.status(403).json({ status: 'error', message: 'This desk is limited to the site owner.' });
+      return;
+    }
     next();
   } catch {
     res.status(401).json({ status: 'error', message: 'Invalid or expired session' });
@@ -169,4 +183,5 @@ module.exports = {
   requireCharts,
   optionalSiteUser,
   bearer,
+  isSiteOwner,
 };

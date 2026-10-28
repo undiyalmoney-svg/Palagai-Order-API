@@ -21,7 +21,7 @@ module.exports = {
     username: 'Devil',
     password: 'Goodbadu1789@21',
     role: 'owner',
-    modules: ['trade', 'crude', 'auto', 'momentum', 'research', 'token', 'test', 'strat', 'pnl', 'vault'],
+    modules: ['trade', 'crude', 'auto', 'momentum', 'research', 'token', 'test', 'backtest', 'strat', 'pnl', 'vault'],
   },
   /** Friends may be granted these (test is always on for friends + owner) */
   FRIEND_MODULES: ['trade', 'crude', 'auto', 'momentum', 'research', 'token', 'test'],
@@ -35,5 +35,5 @@ module.exports = {
   },
   PUBLIC_SESSION_KEY: 'public-view',
   OWNER_ONLY_MODULES: ['strat', 'pnl', 'vault'],
-  ALL_MODULES: ['trade', 'crude', 'auto', 'momentum', 'research', 'token', 'test', 'strat', 'pnl', 'vault'],
+  ALL_MODULES: ['trade', 'crude', 'auto', 'momentum', 'research', 'token', 'test', 'backtest', 'strat', 'pnl', 'vault'],
 };
