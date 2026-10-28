@@ -1,38 +1,46 @@
 'use strict';
 
 /**
- * Stock ORB desk — entry and stop from scripts/stock-orb-backtest.js.
+ * First-15 ORB + 5-minute two-low entry.
  *
- * Opening range 09:15–09:45. 5-minute close through ORH/ORL in 09:50–14:30.
- * Stop = R, R = clamp(OR width × 0.5, 0.30%, 0.60%). Target = targetR × R (default 2).
- * Time exit 14:50. MIS charges + 0.05% fill slippage.
+ * 1. Mark 09:15–09:30 high / low from 5-minute bars (aggregated to 15 minutes).
+ * 2. A later 15-minute candle must fully close beyond that range (close > high or close < low).
+ *    Wicks through the level without a close beyond it do not count.
+ * 3. After that close, on 5-minute bars: uptrend waits for two red candles (two lows) then a
+ *    green candle — entry is that green candle's high, stop is its low. Downtrend: two green
+ *    candles then a red candle — entry at its low, stop at its high.
+ * 4. No automatic target. Print 30-minute mark-to-market and EOD. SL closes the whole trade.
+ * 5. Max amount went is the best unrealized rupee move after fill (MFE).
  *
- * Filters already in that script are kept (OR width, gap, volume, close-break, EMA20).
- * No extra trend/volume/indicator gates are added here.
+ * Simulated MIS only. No live orders.
  */
 
 const { sessionDate, minutesOfDay } = require('../research/time');
 
 const DEFAULTS = {
-  orEnd: '09:45',
-  entryStart: '09:50',
+  orEnd: '09:30',
   entryEnd: '14:30',
-  timeExit: '14:50',
-  breakPct: 0.0004,
-  volMult: 1.2,
-  orMinPct: 0.002,
-  orMaxPct: 0.03,
-  maxGapPct: 0.02,
-  rPctFloor: 0.003,
-  rPctCeil: 0.006,
-  rPctFromOr: 0.5,
-  targetR: 2,
+  timeExit: '15:15',
   slippage: 0.0005,
-  cooldownMin: 15,
-  /** ₹300 risk on the original ₹40,000 book. */
+  cooldownMin: 0,
   riskFraction: 300 / 40000,
   buyPowerMultiple: 5,
 };
+
+const SNAPSHOT_TIMES = [
+  '10:00',
+  '10:30',
+  '11:00',
+  '11:30',
+  '12:00',
+  '12:30',
+  '13:00',
+  '13:30',
+  '14:00',
+  '14:30',
+  '15:00',
+  '15:15',
+];
 
 function toMin(hm) {
   const [h, m] = String(hm).split(':').map(Number);
@@ -51,11 +59,6 @@ function roundPaise(n) {
 function hm(iso) {
   const mins = minutesOfDay(iso);
   return `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`;
-}
-
-function ema(prev, price, n) {
-  if (prev == null) return price;
-  return price * (2 / (n + 1)) + prev * (1 - 2 / (n + 1));
 }
 
 function chargesRs(buyAmt, sellAmt) {
@@ -98,32 +101,104 @@ function groupByDay(bars) {
   return map;
 }
 
-function backtestStock(symbol, barsByDay, cfg, indexDir) {
+function bucketStart15(t) {
+  const m = toMin(t);
+  const open = toMin('09:15');
+  if (m < open) return null;
+  const start = open + Math.floor((m - open) / 15) * 15;
+  return `${String(Math.floor(start / 60)).padStart(2, '0')}:${String(start % 60).padStart(2, '0')}`;
+}
+
+function aggregate15(bars5) {
+  const map = {};
+  for (const b of bars5 || []) {
+    const t = bucketStart15(b.t);
+    if (!t) continue;
+    const cur = map[t];
+    if (!cur) {
+      map[t] = { t, day: b.day, o: b.o, h: b.h, l: b.l, c: b.c, v: b.v };
+    } else {
+      cur.h = Math.max(cur.h, b.h);
+      cur.l = Math.min(cur.l, b.l);
+      cur.c = b.c;
+      cur.v += b.v;
+    }
+  }
+  return Object.values(map).sort((a, b) => a.t.localeCompare(b.t));
+}
+
+function isGreen(b) {
+  return b.c > b.o;
+}
+
+function isRed(b) {
+  return b.c < b.o;
+}
+
+function mtmRs(side, entryPx, qty, px) {
+  return (px - entryPx) * qty * (side === 'L' ? 1 : -1);
+}
+
+function backtestStock(symbol, barsByDay, cfg) {
   const trades = [];
   const crosses = [];
-  for (const [day, bars] of Object.entries(barsByDay)) {
-    if (!bars || bars.length < 12) continue;
-    const first = bars[0];
-    const prevClose =
-      first.o === first.c && first.o === first.l && first.o === first.h
-        ? first.o
-        : bars.find((b) => b.h !== b.l)?.o || first.o;
-    if (!(prevClose > 0) || Math.abs(first.o - prevClose) / prevClose > cfg.maxGapPct) continue;
+  for (const [day, raw] of Object.entries(barsByDay || {})) {
+    if (!raw || raw.length < 12) continue;
+    const bars5 = [...raw].sort((a, b) => a.t.localeCompare(b.t));
+    const bars15 = aggregate15(bars5);
+    if (bars15.length < 2 || bars15[0].t !== '09:15') continue;
+    const first = bars15[0];
+    const orh = first.h;
+    const orl = first.l;
+    if (!(orh > orl)) continue;
+    const orWPct = roundPaise(((orh - orl) / orh) * 100);
 
-    const orr = bars.filter((b) => toMin(b.t) <= toMin(cfg.orEnd));
-    if (orr.length < 2) continue;
-    const orh = Math.max(...orr.map((b) => b.h));
-    const orl = Math.min(...orr.map((b) => b.l));
-    const orW = (orh - orl) / prevClose;
-    if (orW < cfg.orMinPct || orW > cfg.orMaxPct) continue;
-    const orAvgV = orr.reduce((s, b) => s + b.v, 0) / Math.max(1, orr.length);
+    let bias = null;
+    let confirm = null;
+    for (const b15 of bars15.slice(1)) {
+      if (b15.c > orh) {
+        bias = 'L';
+        confirm = b15;
+        break;
+      }
+      if (b15.c < orl) {
+        bias = 'S';
+        confirm = b15;
+        break;
+      }
+    }
+    if (!bias || !confirm) continue;
 
-    let ema20 = null;
+    crosses.push({
+      symbol,
+      day,
+      side: bias,
+      t: addMin(confirm.t, 15),
+      close: roundPaise(confirm.c),
+      orh: roundPaise(orh),
+      orl: roundPaise(orl),
+      orWPct,
+      volume: confirm.v,
+    });
+
+    const scanFrom = addMin(confirm.t, 15);
+    const startIdx = bars5.findIndex((b) => b.t >= scanFrom);
+    if (startIdx < 0) continue;
+
+    let pullbacks = 0;
+    let pending = null;
     let position = null;
-    let recordedCross = false;
+    let extremePx = null;
+    const marks = [];
+    const snap = new Set(SNAPSHOT_TIMES);
+
     const exitTrade = (b, price, reason) => {
-      const pnl = (price - position.entryPx) * position.qty * (position.side === 'L' ? 1 : -1);
+      const pnl = mtmRs(position.side, position.entryPx, position.qty, price);
       const chg = chargesRs(position.entryPx * position.qty, price * position.qty);
+      const fav =
+        position.side === 'L'
+          ? (extremePx - position.entryPx) * position.qty
+          : (position.entryPx - extremePx) * position.qty;
       trades.push({
         symbol,
         day,
@@ -134,95 +209,104 @@ function backtestStock(symbol, barsByDay, cfg, indexDir) {
         entryPx: roundPaise(position.entryPx),
         exitPx: roundPaise(price),
         stopPx: roundPaise(position.stopPx),
-        tgtPx: roundPaise(position.tgtPx),
         qty: position.qty,
         grossRs: roundPaise(pnl),
         chargesRs: chg,
         netRs: roundPaise(pnl - chg),
         notionalRs: roundPaise(position.entryPx * position.qty),
+        maxWentRs: roundPaise(Math.max(0, fav)),
+        maxWentPx: roundPaise(extremePx),
+        signalT: position.signalT,
+        marks: marks.map((m) => ({ ...m })),
       });
       position = null;
     };
 
-    for (const b of bars) {
-      ema20 = ema(ema20, b.c, 20);
+    const tryFill = (b) => {
+      if (!pending) return;
+      const side = pending.side;
+      const hit = side === 'L' ? b.h >= pending.entryPx : b.l <= pending.entryPx;
+      if (!hit) return;
+      const fill = side === 'L' ? (b.o > pending.entryPx ? b.o : pending.entryPx) : b.o < pending.entryPx ? b.o : pending.entryPx;
+      const riskPx = side === 'L' ? fill - pending.stopPx : pending.stopPx - fill;
+      if (!(riskPx > 0)) {
+        pending = null;
+        return;
+      }
+      const qty = Math.max(1, Math.floor(cfg.riskPerTrade / riskPx));
+      if (qty * fill > cfg.buyPower) {
+        pending = null;
+        return;
+      }
+      const entryPx = side === 'L' ? fill * (1 + cfg.slippage) : fill * (1 - cfg.slippage);
+      position = {
+        side,
+        entryPx,
+        stopPx: pending.stopPx,
+        qty,
+        entryT: b.t,
+        signalT: pending.signalT,
+      };
+      extremePx = side === 'L' ? b.h : b.l;
+      pending = null;
+      const stopped = side === 'L' ? b.l <= position.stopPx : b.h >= position.stopPx;
+      if (stopped) exitTrade(b, position.stopPx, 'SL');
+    };
+
+    for (let i = startIdx; i < bars5.length; i += 1) {
+      const b = bars5[i];
       const m = toMin(b.t);
+
       if (position) {
-        let done = false;
         if (position.side === 'L') {
-          if (b.l <= position.stopPx) {
-            exitTrade(b, position.stopPx, 'SL');
-            done = true;
-          } else if (b.h >= position.tgtPx) {
-            exitTrade(b, position.tgtPx, 'TARGET');
-            done = true;
-          }
-        } else if (b.h >= position.stopPx) {
+          if (b.h > extremePx) extremePx = b.h;
+        } else if (b.l < extremePx) extremePx = b.l;
+        const stopped = position.side === 'L' ? b.l <= position.stopPx : b.h >= position.stopPx;
+        if (stopped) {
           exitTrade(b, position.stopPx, 'SL');
-          done = true;
-        } else if (b.l <= position.tgtPx) {
-          exitTrade(b, position.tgtPx, 'TARGET');
-          done = true;
+          break;
         }
-        if (!done && m >= toMin(cfg.timeExit)) exitTrade(b, b.c, 'TIME');
+        if (snap.has(b.t)) {
+          marks.push({
+            t: b.t,
+            px: roundPaise(b.c),
+            mtmRs: roundPaise(mtmRs(position.side, position.entryPx, position.qty, b.c)),
+            label: b.t === cfg.timeExit ? 'EOD' : b.t,
+          });
+        }
+        if (m >= toMin(cfg.timeExit)) {
+          exitTrade(b, b.c, 'EOD');
+          break;
+        }
         continue;
       }
-      if (m < toMin(cfg.entryStart) || m > toMin(cfg.entryEnd)) continue;
 
-      const carry = (side) => {
-        const levelPx = side === 'L' ? orh : orl;
-        if (b.v < orAvgV * cfg.volMult || Math.abs(b.c - levelPx) / b.c < cfg.breakPct) return;
-        if (side === 'L' ? b.c <= ema20 : b.c >= ema20) return;
-        if (indexDir) {
-          const mdir = indexDir[day]?.[b.t];
-          if (mdir != null && ((side === 'L' && mdir < 0) || (side === 'S' && mdir > 0))) return;
+      if (pending) {
+        tryFill(b);
+        if (!position && m >= toMin(cfg.timeExit)) break;
+        if (position) {
+          i -= 1;
         }
-        const rPct = Math.max(cfg.rPctFloor, Math.min(cfg.rPctCeil, orW * cfg.rPctFromOr));
-        const riskPx = b.c * rPct;
-        const qty = Math.max(1, Math.floor(cfg.riskPerTrade / riskPx));
-        if (qty * b.c > cfg.buyPower) return;
-        const entryPx = side === 'L' ? b.c * (1 + cfg.slippage) : b.c * (1 - cfg.slippage);
-        const stopPx = side === 'L' ? entryPx - riskPx : entryPx + riskPx;
-        const tgtPx = side === 'L' ? entryPx + riskPx * cfg.targetR : entryPx - riskPx * cfg.targetR;
-        position = { side, entryPx, stopPx, tgtPx, qty, entryT: b.t };
-      };
-      if (b.c > orh && b.o <= orh) {
-        if (!recordedCross) {
-          recordedCross = true;
-          crosses.push({
-            symbol,
-            day,
-            side: 'L',
-            t: b.t,
-            close: roundPaise(b.c),
-            orh: roundPaise(orh),
-            orl: roundPaise(orl),
-            orWPct: roundPaise(orW * 100),
-            volume: b.v,
-          });
+        continue;
+      }
+
+      if (m > toMin(cfg.entryEnd)) break;
+
+      if (bias === 'L') {
+        if (isRed(b)) pullbacks += 1;
+        else if (isGreen(b)) {
+          if (pullbacks >= 2) pending = { side: 'L', entryPx: b.h, stopPx: b.l, signalT: b.t };
+          pullbacks = 0;
         }
-        carry('L');
-      } else if (b.c < orl && b.o >= orl) {
-        if (!recordedCross) {
-          recordedCross = true;
-          crosses.push({
-            symbol,
-            day,
-            side: 'S',
-            t: b.t,
-            close: roundPaise(b.c),
-            orh: roundPaise(orh),
-            orl: roundPaise(orl),
-            orWPct: roundPaise(orW * 100),
-            volume: b.v,
-          });
-        }
-        carry('S');
+      } else if (isGreen(b)) pullbacks += 1;
+      else if (isRed(b)) {
+        if (pullbacks >= 2) pending = { side: 'S', entryPx: b.l, stopPx: b.h, signalT: b.t };
+        pullbacks = 0;
       }
     }
     if (position) {
-      const last = bars[bars.length - 1];
-      exitTrade(last, last.c, 'TIME');
+      const last = bars5[bars5.length - 1];
+      exitTrade(last, last.c, 'EOD');
     }
   }
   return { trades, crosses };
@@ -256,21 +340,67 @@ function selectDeskTrades(allTrades, cfg) {
     for (const t of list) {
       if (used.size >= cfg.maxStocksPerDay) break;
       if (used.has(t.symbol)) continue;
-      if (cooldownUntil && t.entryT < cooldownUntil) continue;
+      if (cfg.cooldownMin && cooldownUntil && t.entryT < cooldownUntil) continue;
       used.add(t.symbol);
       desk.push(t);
-      cooldownUntil = addMin(String(t.exitT).slice(0, 5), cfg.cooldownMin);
+      cooldownUntil = addMin(String(t.exitT).slice(0, 5), cfg.cooldownMin || 0);
     }
   }
   return desk;
 }
 
+function markAt(trade, tm) {
+  if (trade.entryT > tm) return null;
+  if (trade.exitT <= tm) return { mtmRs: trade.netRs, closed: true };
+  const row = (trade.marks || []).filter((m) => m.t <= tm).pop();
+  if (row) return { mtmRs: row.mtmRs, closed: false };
+  return { mtmRs: 0, closed: false };
+}
+
+function buildSnapshots(trades) {
+  const byDay = {};
+  for (const t of trades) (byDay[t.day] ||= []).push(t);
+  const rows = [];
+  for (const day of Object.keys(byDay).sort()) {
+    for (const tm of SNAPSHOT_TIMES) {
+      let net = 0;
+      let slHits = 0;
+      let open = 0;
+      let taken = 0;
+      let maxWent = 0;
+      for (const tr of byDay[day]) {
+        const mark = markAt(tr, tm);
+        if (!mark) continue;
+        taken += 1;
+        net += mark.mtmRs;
+        if (!mark.closed) open += 1;
+        if (tr.exitReason === 'SL' && tr.exitT <= tm) slHits += 1;
+        if (tr.entryT <= tm) maxWent += tr.maxWentRs || 0;
+      }
+      rows.push({
+        day,
+        t: tm,
+        label: tm === '15:15' ? 'EOD' : tm,
+        netRs: roundPaise(net),
+        slHits,
+        open,
+        taken,
+        maxWentRs: roundPaise(maxWent),
+      });
+    }
+  }
+  return rows;
+}
+
 function summarize(trades, capital) {
   const wins = trades.filter((t) => t.netRs > 0);
   const losses = trades.filter((t) => t.netRs < 0);
+  const slHits = trades.filter((t) => t.exitReason === 'SL');
+  const eod = trades.filter((t) => t.exitReason === 'EOD');
   const net = trades.reduce((s, t) => s + t.netRs, 0);
   const notionals = trades.map((t) => t.notionalRs || t.entryPx * t.qty);
   const maxNotional = notionals.length ? Math.max(...notionals) : 0;
+  const maxWentRs = trades.reduce((m, t) => Math.max(m, t.maxWentRs || 0), 0);
   const byDay = {};
   for (const t of trades) {
     byDay[t.day] ||= 0;
@@ -291,18 +421,29 @@ function summarize(trades, capital) {
   }
   const byStock = {};
   for (const t of trades) {
-    const row = (byStock[t.symbol] ||= { symbol: t.symbol, trades: 0, wins: 0, netRs: 0 });
+    const row = (byStock[t.symbol] ||= { symbol: t.symbol, trades: 0, wins: 0, netRs: 0, slHits: 0, maxWentRs: 0 });
     row.trades += 1;
     if (t.netRs > 0) row.wins += 1;
+    if (t.exitReason === 'SL') row.slHits += 1;
     row.netRs += t.netRs;
+    row.maxWentRs += t.maxWentRs || 0;
   }
   const stocks = Object.values(byStock)
     .map((r) => ({
       ...r,
       netRs: roundPaise(r.netRs),
+      maxWentRs: roundPaise(r.maxWentRs),
       winRate: r.trades ? r.wins / r.trades : 0,
     }))
     .sort((a, b) => b.netRs - a.netRs);
+
+  const eodByDay = days.map((day) => ({
+    day,
+    netRs: roundPaise(byDay[day]),
+    trades: trades.filter((t) => t.day === day).length,
+    slHits: trades.filter((t) => t.day === day && t.exitReason === 'SL').length,
+    maxWentRs: roundPaise(trades.filter((t) => t.day === day).reduce((s, t) => s + (t.maxWentRs || 0), 0)),
+  }));
 
   return {
     trades: trades.length,
@@ -319,6 +460,11 @@ function summarize(trades, capital) {
     equityCurve: curve.filter((r) => r.day !== 'start' || curve.length === 1),
     stocks,
     days: days.length,
+    slHits: slHits.length,
+    eodExits: eod.length,
+    maxWentRs: roundPaise(maxWentRs),
+    snapshots: buildSnapshots(trades),
+    eod: eodByDay,
   };
 }
 
@@ -331,12 +477,10 @@ function priorDay(day) {
 function clampConfig(input = {}) {
   const capital = Math.max(1000, Math.min(10_000_000, Number(input.capital) || 40000));
   const maxStocksPerDay = Math.max(1, Math.min(50, Math.floor(Number(input.maxStocksPerDay) || 3)));
-  const targetR = Math.max(0.5, Math.min(10, Number(input.targetR) || DEFAULTS.targetR));
   return {
     ...DEFAULTS,
     capital,
     maxStocksPerDay,
-    targetR,
     riskPerTrade: capital * DEFAULTS.riskFraction,
     buyPower: capital * DEFAULTS.buyPowerMultiple,
   };
@@ -344,11 +488,10 @@ function clampConfig(input = {}) {
 
 function runOrbBacktest({ symbolBars, indexBars, config }) {
   const cfg = clampConfig(config);
-  const indexDir = indexBars ? indexDirection(indexBars) : null;
   const all = [];
   const crosses = [];
   for (const [symbol, barsByDay] of Object.entries(symbolBars || {})) {
-    const out = backtestStock(symbol, barsByDay, cfg, indexDir);
+    const out = backtestStock(symbol, barsByDay, cfg);
     all.push(...out.trades);
     crosses.push(...out.crosses);
   }
@@ -371,30 +514,32 @@ function runOrbBacktest({ symbolBars, indexBars, config }) {
     config: {
       capital: cfg.capital,
       maxStocksPerDay: cfg.maxStocksPerDay,
-      targetR: cfg.targetR,
       orEnd: cfg.orEnd,
-      entryStart: cfg.entryStart,
       entryEnd: cfg.entryEnd,
       timeExit: cfg.timeExit,
     },
     assumptions: [
       'Simulated MIS backtest. No live orders are placed.',
-      'Opening range is 09:15–09:45 IST on 5-minute bars. Entry is a close through ORH/ORL between 09:50 and 14:30. Stop is 1R; target is configurable R multiples. Time exit 14:50.',
-      'R is clamp(opening-range width × 0.5, 0.30%, 0.60%) of price. Qty sizes to ~0.75% of starting capital of risk, notional capped at 5× capital.',
-      'Fill slippage 0.05%/side plus approximate Zerodha MIS charges. Existing OR-width, gap, volume, close-break and EMA20 gates from the stock ORB script are kept; no extra filters were added.',
-      'ORB crossed is the first 5-minute close through ORH/ORL in the entry window, even if volume/EMA or the max-stocks desk skipped the name.',
+      'First 15-minute candle (09:15–09:30 IST) marks high and low. A later 15-minute candle must fully close above that high or below that low. A wick through the level without a close beyond it does not count.',
+      'After the 15-minute close, 5-minute bars: uptrend waits for two red candles (two lows) then a green candle — buy the green high, stop at the green low. Downtrend waits for two green candles then a red candle — sell the red low, stop at the red high.',
+      'No automatic target. Every 30 minutes the book is marked, and leftover positions exit at the 15:15 close (EOD). A stop closes the whole trade.',
+      'Max amount went is the best rupee move in the trade’s favour after fill. Qty sizes to ~0.75% of starting capital of candle-range risk, notional capped at 5× capital. Fill slippage 0.05% on entry plus approximate Zerodha MIS charges.',
+      'ORB crossed is every name whose 15-minute candle fully closed beyond the first 15-minute range, even if the 5-minute two-low pattern or the max-stocks desk skipped it.',
     ],
     rawTrades: all.length,
     summary,
     trades: desk,
     crosses: crossed,
+    snapshots: summary.snapshots,
   };
 }
 
 module.exports = {
   DEFAULTS,
+  SNAPSHOT_TIMES,
   barsFromCandles,
   groupByDay,
+  aggregate15,
   backtestStock,
   indexDirection,
   selectDeskTrades,

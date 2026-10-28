@@ -107,13 +107,6 @@ async function runJob(job, req) {
       });
     }
 
-    let indexBars = null;
-    try {
-      indexBars = await fetchSymbolBars(authorization, NIFTY_50_TOKEN, from, to);
-    } catch (err) {
-      warnings.push(`Nifty 50 index filter skipped: ${err.message || err}`);
-    }
-
     const symbolBars = {};
     const gaps = [];
     for (let i = 0; i < resolved.length; i += 1) {
@@ -156,7 +149,7 @@ async function runJob(job, req) {
     }
 
     job.progress = { phase: 'simulate', done: resolved.length, total: resolved.length, symbol: null };
-    const result = runOrbBacktest({ symbolBars, indexBars, config: cfg });
+    const result = runOrbBacktest({ symbolBars, config: cfg });
     result.universe = {
       requested: NIFTY_500.length,
       resolved: resolved.length,
@@ -220,7 +213,7 @@ function startJob(req, body) {
   const job = {
     id,
     status: 'running',
-    input: { from, to, capital: cfg.capital, maxStocksPerDay: cfg.maxStocksPerDay, targetR: cfg.targetR },
+    input: { from, to, capital: cfg.capital, maxStocksPerDay: cfg.maxStocksPerDay },
     progress: { phase: 'queued', done: 0, total: NIFTY_500.length, symbol: null },
     warnings: [],
     missing: [],
