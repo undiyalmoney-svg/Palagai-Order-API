@@ -58,6 +58,11 @@ test('search space always includes the original first-15 baseline with inspectab
   assert.match(text.stopLoss, /signal-candle/i);
   assert.ok(list.some((c) => c.experimental));
   assert.ok(list.every((c) => c.rules && c.rules.entry && c.rules.exit));
+  const tenK = list.find((c) => c.crowdFilter === 'skipShort' && c.rankBy === 'stopPct');
+  assert.ok(tenK, '10k skip-short-crowd widest-stop desk is in the search');
+  assert.equal(tenK.maxStocksPerDay, 5);
+  assert.match(tenK.rules.filters.join(' '), /short-crowd/i);
+  assert.match(tenK.rules.stockCount, /widest signal-candle stop/i);
 });
 
 test('chronological split never shuffles future days into training', () => {

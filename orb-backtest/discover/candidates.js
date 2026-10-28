@@ -21,6 +21,7 @@ function baseline(capital = 40000) {
     maxStocksPerDay: 3,
     sizing: 'risk',
     rankBy: 'time',
+    crowdFilter: null,
     slippage: 0.0005,
   };
 }
@@ -43,6 +44,13 @@ function describe(c) {
     );
   }
   if (c.minBreakPct != null) filters.push(`15-minute close at least ${(c.minBreakPct * 100).toFixed(3)}% beyond the range`);
+  if (c.crowdFilter === 'skipShort') {
+    filters.push('skip the day when 09:45 Nifty 500 breakout closes are ≤40% long (short-crowd)');
+  } else if (c.crowdFilter === 'skipLong') {
+    filters.push('skip the day when 09:45 Nifty 500 breakout closes are ≥60% long');
+  } else if (c.crowdFilter === 'follow') {
+    filters.push('only take the 09:45 majority side (≥60% long or ≤40% long); mixed days allow either');
+  }
   const exitParts = ['Stop is the signal-candle low (long) or high (short); SL closes the whole trade'];
   if (c.targetR) exitParts.push(`fixed target ${c.targetR}R of the signal-candle range`);
   if (c.trailAfterR) exitParts.push(`experimental: after ${c.trailAfterR}R, trail stop to entry`);
@@ -56,7 +64,13 @@ function describe(c) {
     exit: exitParts.join('. ') + '.',
     stopLoss: 'Signal-candle low (long) or high (short)',
     target: c.targetR ? `${c.targetR}R of signal-candle range` : 'None — decide from 30-minute marks / EOD',
-    stockCount: `${c.maxStocksPerDay} names / day, first eligible by ${c.rankBy === 'orWidth' ? 'opening-range width at 09:30' : 'entry time'}`,
+    stockCount: `${c.maxStocksPerDay} names / day, first eligible by ${
+      c.rankBy === 'orWidth'
+        ? 'opening-range width at 09:30'
+        : c.rankBy === 'stopPct'
+          ? 'widest signal-candle stop as % of price'
+          : 'entry time'
+    }`,
     sizing:
       c.sizing === 'equal'
         ? `Equal notional ≈ capital / ${c.maxStocksPerDay} per name, 5× capital cap`
@@ -116,6 +130,24 @@ function generateCandidates({ capital = 40000, budget = 24 } = {}) {
       name: 'Experimental pick widest OR first',
     },
     {
+      family: 'selection',
+      rankBy: 'stopPct',
+      crowdFilter: 'skipShort',
+      maxStocksPerDay: 5,
+      experimental: true,
+      name: 'Skip short-crowd 09:45, 5 widest stops (10k desk)',
+    },
+    {
+      family: 'combo',
+      rankBy: 'stopPct',
+      crowdFilter: 'follow',
+      orMinPct: 0.008,
+      orMaxPct: 0.025,
+      maxStocksPerDay: 5,
+      experimental: true,
+      name: 'Follow 09:45 + OR 0.80–2.50% + 5 widest stops',
+    },
+    {
       family: 'combo',
       entryEnd: '12:30',
       targetR: 2,
@@ -158,6 +190,8 @@ function generateCandidates({ capital = 40000, budget = 24 } = {}) {
         e.minBreakPct != null ? 'brk' : '',
         e.trailAfterR ? `tr${e.trailAfterR}` : '',
         e.rankBy === 'orWidth' ? 'orwrank' : '',
+        e.rankBy === 'stopPct' ? 'stprank' : '',
+        e.crowdFilter === 'skipShort' ? 'skipS' : e.crowdFilter === 'follow' ? 'cfollow' : e.crowdFilter === 'skipLong' ? 'skipL' : '',
       ]);
       return withId(row);
     }),
@@ -184,6 +218,7 @@ function toEngineConfig(candidate, capital) {
     minBreakPct: candidate.minBreakPct,
     sizing: candidate.sizing,
     rankBy: candidate.rankBy,
+    crowdFilter: candidate.crowdFilter || null,
     slippage: candidate.slippage,
   };
 }

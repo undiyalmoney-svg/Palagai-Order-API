@@ -11,6 +11,8 @@ const {
   aggregate15,
   clampConfig,
   toMin,
+  filterByCrowd,
+  dayCrowdFromCrosses,
 } = require('./engine');
 const { NIFTY_500 } = require('./universe');
 
@@ -193,6 +195,39 @@ test('15-minute full close is listed even when the 5-minute two-low pattern neve
   assert.equal(out.crosses[0].taken, false);
   assert.equal(out.summary.orbCrossed, 1);
   assert.equal(out.summary.orbCrossedTaken, 0);
+});
+
+test('stopPct ranking takes the widest signal-candle stop first, not the earliest fill', () => {
+  const trades = [
+    { symbol: 'TIGHT', day: '2026-10-16', side: 'L', entryT: '10:00', exitT: '15:15', entryPx: 100, stopPx: 99.8, netRs: 1 },
+    { symbol: 'WIDE', day: '2026-10-16', side: 'L', entryT: '10:05', exitT: '15:15', entryPx: 100, stopPx: 98.5, netRs: 1 },
+  ];
+  const desk = selectDeskTrades(trades, { maxStocksPerDay: 1, rankBy: 'stopPct', cooldownMin: 0 });
+  assert.equal(desk.length, 1);
+  assert.equal(desk[0].symbol, 'WIDE');
+});
+
+test('skipShort crowd filter drops a day whose 09:45 closes are mostly short', () => {
+  const crosses = [
+    { symbol: 'A', day: '2026-10-16', side: 'S', t: '09:45' },
+    { symbol: 'B', day: '2026-10-16', side: 'S', t: '09:45' },
+    { symbol: 'C', day: '2026-10-16', side: 'S', t: '09:45' },
+    { symbol: 'D', day: '2026-10-16', side: 'L', t: '09:45' },
+    { symbol: 'E', day: '2026-10-17', side: 'L', t: '09:45' },
+    { symbol: 'F', day: '2026-10-17', side: 'L', t: '09:45' },
+  ];
+  const crowd = dayCrowdFromCrosses(crosses);
+  assert.equal(crowd['2026-10-16'], 'S');
+  assert.equal(crowd['2026-10-17'], 'L');
+  const trades = [
+    { symbol: 'A', day: '2026-10-16', side: 'S', netRs: 10 },
+    { symbol: 'E', day: '2026-10-17', side: 'L', netRs: 10 },
+  ];
+  const kept = filterByCrowd(trades, crowd, 'skipShort');
+  assert.deepEqual(
+    kept.map((t) => t.symbol),
+    ['E'],
+  );
 });
 
 test('barsFromCandles drop pre-open prints', () => {

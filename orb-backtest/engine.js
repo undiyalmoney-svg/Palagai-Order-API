@@ -17,7 +17,7 @@
 
 const { sessionDate, minutesOfDay } = require('../research/time');
 
-const ENGINE_VERSION = '1.3.153-discover';
+const ENGINE_VERSION = '1.3.154-discover';
 
 const DEFAULTS = {
   orEnd: '09:30',
@@ -35,6 +35,7 @@ const DEFAULTS = {
   minBreakPct: null,
   sizing: 'risk',
   rankBy: 'time',
+  crowdFilter: null,
 };
 
 const SNAPSHOT_TIMES = [
@@ -378,6 +379,40 @@ function indexDirection(barsByDay) {
   return mk;
 }
 
+function stopPctOf(t) {
+  const risk = t.side === 'L' ? t.entryPx - t.stopPx : t.stopPx - t.entryPx;
+  return t.entryPx > 0 ? (100 * risk) / t.entryPx : 0;
+}
+
+function dayCrowdFromCrosses(crosses) {
+  const counts = {};
+  for (const c of crosses || []) {
+    if (c.t !== '09:45') continue;
+    const row = (counts[c.day] ||= { L: 0, S: 0 });
+    if (c.side === 'L') row.L += 1;
+    else if (c.side === 'S') row.S += 1;
+  }
+  const crowd = {};
+  for (const [day, row] of Object.entries(counts)) {
+    const n = row.L + row.S;
+    const longPct = n ? row.L / n : 0.5;
+    crowd[day] = longPct >= 0.6 ? 'L' : longPct <= 0.4 ? 'S' : 'M';
+  }
+  return crowd;
+}
+
+function filterByCrowd(trades, crowd, mode) {
+  if (!mode) return trades;
+  return (trades || []).filter((t) => {
+    const c = crowd[t.day];
+    if (!c) return true;
+    if (mode === 'skipShort') return c !== 'S';
+    if (mode === 'skipLong') return c !== 'L';
+    if (mode === 'follow') return c === 'M' || t.side === c;
+    return true;
+  });
+}
+
 function selectDeskTrades(allTrades, cfg) {
   const byDay = {};
   for (const t of allTrades) (byDay[t.day] ||= []).push(t);
@@ -386,6 +421,9 @@ function selectDeskTrades(allTrades, cfg) {
     const list = [...byDay[day]].sort((a, b) => {
       if (cfg.rankBy === 'orWidth') {
         return (b.orWPct || 0) - (a.orWPct || 0) || a.entryT.localeCompare(b.entryT) || a.symbol.localeCompare(b.symbol);
+      }
+      if (cfg.rankBy === 'stopPct') {
+        return stopPctOf(b) - stopPctOf(a) || a.entryT.localeCompare(b.entryT) || a.symbol.localeCompare(b.symbol);
       }
       return a.entryT.localeCompare(b.entryT) || a.symbol.localeCompare(b.symbol);
     });
@@ -539,7 +577,11 @@ function clampConfig(input = {}) {
     input.trailAfterR == null || input.trailAfterR === '' ? null : Math.max(0.5, Math.min(10, Number(input.trailAfterR)));
   const slippage = Math.max(0, Math.min(0.01, Number(input.slippage ?? DEFAULTS.slippage)));
   const sizing = input.sizing === 'equal' ? 'equal' : 'risk';
-  const rankBy = input.rankBy === 'orWidth' ? 'orWidth' : 'time';
+  const rankBy = input.rankBy === 'orWidth' ? 'orWidth' : input.rankBy === 'stopPct' ? 'stopPct' : 'time';
+  const crowdFilter =
+    input.crowdFilter === 'skipShort' || input.crowdFilter === 'skipLong' || input.crowdFilter === 'follow'
+      ? input.crowdFilter
+      : null;
   return {
     ...DEFAULTS,
     capital,
@@ -554,6 +596,7 @@ function clampConfig(input = {}) {
     minBreakPct: input.minBreakPct == null || input.minBreakPct === '' ? null : Number(input.minBreakPct),
     sizing,
     rankBy,
+    crowdFilter,
     slippage,
     equalNotional: capital / maxStocksPerDay,
     riskPerTrade: capital * DEFAULTS.riskFraction,
@@ -570,7 +613,9 @@ function runOrbBacktest({ symbolBars, indexBars, config }) {
     all.push(...out.trades);
     crosses.push(...out.crosses);
   }
-  const desk = selectDeskTrades(all, cfg);
+  const crowd = dayCrowdFromCrosses(crosses);
+  const filtered = filterByCrowd(all, crowd, cfg.crowdFilter);
+  const desk = selectDeskTrades(filtered, cfg);
   const takenKeys = new Set(desk.map((t) => `${t.day}|${t.symbol}`));
   const qualifiedKeys = new Set(all.map((t) => `${t.day}|${t.symbol}`));
   const crossed = crosses
@@ -597,6 +642,7 @@ function runOrbBacktest({ symbolBars, indexBars, config }) {
       trailAfterR: cfg.trailAfterR,
       sizing: cfg.sizing,
       rankBy: cfg.rankBy,
+      crowdFilter: cfg.crowdFilter,
       engineVersion: ENGINE_VERSION,
     },
     assumptions: [
@@ -606,6 +652,7 @@ function runOrbBacktest({ symbolBars, indexBars, config }) {
       'No automatic target. Every 30 minutes the book is marked, and leftover positions exit at the 15:15 close (EOD). A stop closes the whole trade.',
       'Max amount went is the best rupee move in the trade’s favour after fill. Qty sizes to ~0.75% of starting capital of candle-range risk, notional capped at 5× capital. Fill slippage 0.05% on entry plus approximate Zerodha MIS charges.',
       'ORB crossed is every name whose 15-minute candle fully closed beyond the first 15-minute range, even if the 5-minute two-low pattern or the max-stocks desk skipped it.',
+      'Optional crowdFilter uses only 09:45 full closes (knowable before most entries). skipShort sits out days whose 09:45 closes are ≤40% long. follow takes only the majority side; mixed days allow either. Optional rankBy stopPct picks the widest signal-candle stop as a percent of price, not same-day P/L.',
     ],
     rawTrades: all.length,
     summary,
@@ -625,6 +672,9 @@ module.exports = {
   backtestStock,
   indexDirection,
   selectDeskTrades,
+  dayCrowdFromCrosses,
+  filterByCrowd,
+  stopPctOf,
   summarize,
   clampConfig,
   runOrbBacktest,
