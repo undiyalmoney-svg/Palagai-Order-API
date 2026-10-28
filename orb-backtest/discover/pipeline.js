@@ -157,34 +157,56 @@ function cutoffLab(rows) {
   }));
 }
 
-function capitalSensitivity(symbolBars, candidate, capitals) {
-  return (capitals || [20000, 40000, 80000, 160000]).map((capital) => {
-    const out = simulateCandidate(symbolBars, { ...candidate, capital }, capital);
-    const m = scoreTrades(out.trades, capital, allDays(symbolBars));
-    return {
+function yieldEventLoop() {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
+async function capitalSensitivity(symbolBars, candidate, capitals, onProgress) {
+  const out = [];
+  const list = capitals || [20000, 40000, 80000, 160000];
+  for (let i = 0; i < list.length; i += 1) {
+    const capital = list[i];
+    if (onProgress) onProgress({ phase: 'sensitivity', done: i, total: list.length + 3, symbol: `capital-${capital}` });
+    const sim = simulateCandidate(symbolBars, { ...candidate, capital }, capital);
+    const m = scoreTrades(sim.trades, capital, allDays(symbolBars));
+    out.push({
       capital,
       netPnl: m.netPnl,
       returnPct: m.returnPct,
       maxDrawdown: m.maxDrawdown,
       trades: m.trades,
       capitalUtilized: m.capitalUtilized,
-    };
-  });
+    });
+    await yieldEventLoop();
+  }
+  return out;
 }
 
-function costSensitivity(symbolBars, candidate, capital) {
-  return [0, 0.0005, 0.001].map((slippage) => {
-    const out = simulateCandidate(symbolBars, { ...candidate, slippage }, capital);
-    const m = scoreTrades(out.trades, capital, allDays(symbolBars));
-    return { slippage, netPnl: m.netPnl, trades: m.trades, maxDrawdown: m.maxDrawdown };
-  });
+async function costSensitivity(symbolBars, candidate, capital, onProgress) {
+  const slips = [0, 0.0005, 0.001];
+  const out = [];
+  for (let i = 0; i < slips.length; i += 1) {
+    const slippage = slips[i];
+    if (onProgress) onProgress({ phase: 'sensitivity', done: i + 4, total: 7, symbol: `slip-${slippage}` });
+    const sim = simulateCandidate(symbolBars, { ...candidate, slippage }, capital);
+    const m = scoreTrades(sim.trades, capital, allDays(symbolBars));
+    out.push({ slippage, netPnl: m.netPnl, trades: m.trades, maxDrawdown: m.maxDrawdown });
+    await yieldEventLoop();
+  }
+  return out;
 }
 
-function runDiscovery({ symbolBars, capital = 40000, budget = 24, coverage = null }) {
+async function runDiscovery({ symbolBars, capital = 40000, budget = 24, coverage = null, onProgress = null }) {
   const days = allDays(symbolBars);
   const split = splitDays(days);
   const candidates = generateCandidates({ capital, budget });
-  const rows = candidates.map((c) => packRow(c, simulateCandidate(symbolBars, c, capital), days, capital, split));
+  const rows = [];
+  for (let i = 0; i < candidates.length; i += 1) {
+    const c = candidates[i];
+    if (onProgress) onProgress({ phase: 'simulate', done: i, total: candidates.length, symbol: c.id });
+    rows.push(packRow(c, simulateCandidate(symbolBars, c, capital), days, capital, split));
+    await yieldEventLoop();
+  }
 
   const folds = walkForwardFolds(days);
   if (folds.length) {
@@ -243,8 +265,8 @@ function runDiscovery({ symbolBars, capital = 40000, budget = 24, coverage = nul
     dailyWinners: dailyWinners(rows, days, ranking.recommended && ranking.recommended.id),
     weeklyWinners: weeklyWinners(rows, days, ranking.recommended && ranking.recommended.id),
     cutoffLab: cutoffLab(rows),
-    capitalSensitivity: recRow ? capitalSensitivity(symbolBars, recRow.candidate, capitals) : [],
-    costSensitivity: recRow ? costSensitivity(symbolBars, recRow.candidate, capital) : [],
+    capitalSensitivity: recRow ? await capitalSensitivity(symbolBars, recRow.candidate, capitals, onProgress) : [],
+    costSensitivity: recRow ? await costSensitivity(symbolBars, recRow.candidate, capital, onProgress) : [],
     baseline: {
       id: BASELINE_ID,
       metrics: (rows.find((r) => r.candidate.isBaseline) || rows[0]).full,

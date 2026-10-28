@@ -17,7 +17,7 @@
 
 const { sessionDate, minutesOfDay } = require('../research/time');
 
-const ENGINE_VERSION = '1.3.152-discover';
+const ENGINE_VERSION = '1.3.153-discover';
 
 const DEFAULTS = {
   orEnd: '09:30',

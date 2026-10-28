@@ -68,13 +68,13 @@ test('chronological split never shuffles future days into training', () => {
   assert.ok(split.validation[split.validation.length - 1] < split.oos[0]);
 });
 
-test('discovery ranks the original book against alternatives and never live-orders', () => {
+test('discovery ranks the original book against alternatives and never live-orders', async () => {
   const byDay = {};
   for (let d = 16; d <= 23; d += 1) {
     const day = `2026-10-${d}`;
     byDay[day] = longSetup(day);
   }
-  const out = runDiscovery({
+  const out = await runDiscovery({
     symbolBars: { AAA: byDay, BBB: byDay },
     capital: 40000,
     budget: 12,

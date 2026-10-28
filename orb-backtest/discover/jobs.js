@@ -79,6 +79,7 @@ async function runDiscoverJob(job, req) {
       onProgress: (p) => {
         job.progress = p;
         job.updatedAt = new Date().toISOString();
+        if (p.phase !== 'candles' || p.done % 25 === 0) persist(job);
       },
     });
     warnings.push(...(loaded.warnings || []));
@@ -102,11 +103,16 @@ async function runDiscoverJob(job, req) {
     }
     job.progress = { phase: 'simulate', done: 0, total: generateCandidates({ budget: job.input.budget }).length, symbol: null };
     persist(job);
-    const result = runDiscovery({
+    const result = await runDiscovery({
       symbolBars: loaded.symbolBars,
       capital: job.input.capital,
       budget: job.input.budget,
       coverage: job.coverage,
+      onProgress: (p) => {
+        job.progress = p;
+        job.updatedAt = new Date().toISOString();
+        persist(job);
+      },
     });
     result.warnings = warnings;
     result.note =
