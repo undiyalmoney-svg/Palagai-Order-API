@@ -11,6 +11,7 @@ const {
 const kite = require('../services/kite-market');
 const { deskAuthorization } = require('../market-desk/desk-auth');
 const { sessionDate } = require('../research/time');
+const { acquire, release, currentLock, resetLock } = require('./lock');
 
 const jobs = new Map();
 let runningId = null;
@@ -172,15 +173,17 @@ async function runJob(job, req) {
   } finally {
     job.updatedAt = new Date().toISOString();
     if (runningId === job.id) runningId = null;
+    release(job.id);
   }
 }
 
 function startJob(req, body) {
   const active = listActive();
-  if (active) {
+  const other = currentLock();
+  if (active || other) {
     const err = new Error('A historical backtest is already running. Wait for it to finish.');
     err.status = 409;
-    err.jobId = active.id;
+    err.jobId = (active && active.id) || other;
     throw err;
   }
   const from = validDay(body?.from || body?.date);
@@ -225,6 +228,7 @@ function startJob(req, body) {
   };
   jobs.set(id, job);
   runningId = id;
+  acquire(id);
   setImmediate(() => {
     void runJob(job, req);
   });
@@ -238,6 +242,7 @@ function getJob(id) {
 function resetJobs() {
   jobs.clear();
   runningId = null;
+  resetLock();
 }
 
 module.exports = {

@@ -6,6 +6,7 @@ const express = require('express');
 const http = require('node:http');
 const { createOrbBacktestRouter } = require('./routes');
 const { resetJobs } = require('./jobs');
+const { resetDiscoverJobs } = require('./discover/jobs');
 const { NIFTY_500 } = require('./universe');
 
 function listen(app) {
@@ -57,8 +58,29 @@ test('orb-backtest health is public; run/universe/jobs need a site user', async 
     const missingBody = await missing.json();
     assert.equal(missing.status, 404);
     assert.match(missingBody.message, /not found/i);
+
+    const space = await fetch(`${base}/orb-backtest/discover/space`);
+    const spaceBody = await space.json();
+    assert.equal(space.status, 200);
+    assert.equal(spaceBody.liveOrders, false);
+    assert.ok(spaceBody.count >= 8);
+    assert.match(spaceBody.baselineId, /baseline/);
+    assert.ok(spaceBody.candidates[0].rules.entry);
+
+    const missingDisc = await fetch(`${base}/orb-backtest/discover/not-a-job`);
+    assert.equal(missingDisc.status, 404);
+
+    const badDiscover = await fetch(`${base}/orb-backtest/discover`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    assert.equal(badDiscover.status, 400);
+    const badDiscoverBody = await badDiscover.json();
+    assert.equal(badDiscoverBody.status, 'error');
   } finally {
     await new Promise((r) => server.close(r));
     resetJobs();
+    resetDiscoverJobs();
   }
 });

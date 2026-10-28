@@ -17,6 +17,8 @@
 
 const { sessionDate, minutesOfDay } = require('../research/time');
 
+const ENGINE_VERSION = '1.3.152-discover';
+
 const DEFAULTS = {
   orEnd: '09:30',
   entryEnd: '14:30',
@@ -25,6 +27,14 @@ const DEFAULTS = {
   cooldownMin: 0,
   riskFraction: 300 / 40000,
   buyPowerMultiple: 5,
+  pullbacksNeeded: 2,
+  targetR: null,
+  trailAfterR: null,
+  orMinPct: null,
+  orMaxPct: null,
+  minBreakPct: null,
+  sizing: 'risk',
+  rankBy: 'time',
 };
 
 const SNAPSHOT_TIMES = [
@@ -181,6 +191,15 @@ function backtestStock(symbol, barsByDay, cfg) {
       volume: confirm.v,
     });
 
+    const orW = (orh - orl) / orh;
+    if (cfg.orMinPct != null && orW < cfg.orMinPct) continue;
+    if (cfg.orMaxPct != null && orW > cfg.orMaxPct) continue;
+    if (cfg.minBreakPct != null) {
+      const level = bias === 'L' ? orh : orl;
+      if (Math.abs(confirm.c - level) / confirm.c < cfg.minBreakPct) continue;
+    }
+
+    const pullbacksNeeded = Number.isFinite(cfg.pullbacksNeeded) ? cfg.pullbacksNeeded : 2;
     const scanFrom = addMin(confirm.t, 15);
     const startIdx = bars5.findIndex((b) => b.t >= scanFrom);
     if (startIdx < 0) continue;
@@ -217,6 +236,8 @@ function backtestStock(symbol, barsByDay, cfg) {
         maxWentRs: roundPaise(Math.max(0, fav)),
         maxWentPx: roundPaise(extremePx),
         signalT: position.signalT,
+        orWPct,
+        tgtPx: position.tgtPx != null ? roundPaise(position.tgtPx) : null,
         marks: marks.map((m) => ({ ...m })),
       });
       position = null;
@@ -233,12 +254,24 @@ function backtestStock(symbol, barsByDay, cfg) {
         pending = null;
         return;
       }
-      const qty = Math.max(1, Math.floor(cfg.riskPerTrade / riskPx));
+      let qty;
+      if (cfg.sizing === 'equal') {
+        const notional = cfg.equalNotional || cfg.capital / Math.max(1, cfg.maxStocksPerDay || 3);
+        qty = Math.max(1, Math.floor(notional / fill));
+      } else {
+        qty = Math.max(1, Math.floor(cfg.riskPerTrade / riskPx));
+      }
       if (qty * fill > cfg.buyPower) {
         pending = null;
         return;
       }
       const entryPx = side === 'L' ? fill * (1 + cfg.slippage) : fill * (1 - cfg.slippage);
+      const tgtPx =
+        cfg.targetR > 0
+          ? side === 'L'
+            ? entryPx + riskPx * cfg.targetR
+            : entryPx - riskPx * cfg.targetR
+          : null;
       position = {
         side,
         entryPx,
@@ -246,6 +279,8 @@ function backtestStock(symbol, barsByDay, cfg) {
         qty,
         entryT: b.t,
         signalT: pending.signalT,
+        riskPx,
+        tgtPx,
       };
       extremePx = side === 'L' ? b.h : b.l;
       pending = null;
@@ -265,6 +300,20 @@ function backtestStock(symbol, barsByDay, cfg) {
         if (stopped) {
           exitTrade(b, position.stopPx, 'SL');
           break;
+        }
+        if (position.tgtPx != null) {
+          const hitTgt = position.side === 'L' ? b.h >= position.tgtPx : b.l <= position.tgtPx;
+          if (hitTgt) {
+            exitTrade(b, position.tgtPx, 'TARGET');
+            break;
+          }
+        }
+        if (cfg.trailAfterR > 0 && position.riskPx > 0) {
+          const favMove = position.side === 'L' ? extremePx - position.entryPx : position.entryPx - extremePx;
+          if (favMove >= cfg.trailAfterR * position.riskPx) {
+            if (position.side === 'L' && position.stopPx < position.entryPx) position.stopPx = position.entryPx;
+            if (position.side === 'S' && position.stopPx > position.entryPx) position.stopPx = position.entryPx;
+          }
         }
         if (snap.has(b.t)) {
           marks.push({
@@ -295,12 +344,12 @@ function backtestStock(symbol, barsByDay, cfg) {
       if (bias === 'L') {
         if (isRed(b)) pullbacks += 1;
         else if (isGreen(b)) {
-          if (pullbacks >= 2) pending = { side: 'L', entryPx: b.h, stopPx: b.l, signalT: b.t };
+          if (pullbacks >= pullbacksNeeded) pending = { side: 'L', entryPx: b.h, stopPx: b.l, signalT: b.t };
           pullbacks = 0;
         }
       } else if (isGreen(b)) pullbacks += 1;
       else if (isRed(b)) {
-        if (pullbacks >= 2) pending = { side: 'S', entryPx: b.l, stopPx: b.h, signalT: b.t };
+        if (pullbacks >= pullbacksNeeded) pending = { side: 'S', entryPx: b.l, stopPx: b.h, signalT: b.t };
         pullbacks = 0;
       }
     }
@@ -334,7 +383,12 @@ function selectDeskTrades(allTrades, cfg) {
   for (const t of allTrades) (byDay[t.day] ||= []).push(t);
   const desk = [];
   for (const day of Object.keys(byDay).sort()) {
-    const list = [...byDay[day]].sort((a, b) => a.entryT.localeCompare(b.entryT) || a.symbol.localeCompare(b.symbol));
+    const list = [...byDay[day]].sort((a, b) => {
+      if (cfg.rankBy === 'orWidth') {
+        return (b.orWPct || 0) - (a.orWPct || 0) || a.entryT.localeCompare(b.entryT) || a.symbol.localeCompare(b.symbol);
+      }
+      return a.entryT.localeCompare(b.entryT) || a.symbol.localeCompare(b.symbol);
+    });
     const used = new Set();
     let cooldownUntil = '';
     for (const t of list) {
@@ -477,10 +531,31 @@ function priorDay(day) {
 function clampConfig(input = {}) {
   const capital = Math.max(1000, Math.min(10_000_000, Number(input.capital) || 40000));
   const maxStocksPerDay = Math.max(1, Math.min(50, Math.floor(Number(input.maxStocksPerDay) || 3)));
+  const pullbacksNeeded = Math.max(1, Math.min(5, Math.floor(Number(input.pullbacksNeeded) || DEFAULTS.pullbacksNeeded)));
+  const entryEnd = String(input.entryEnd || DEFAULTS.entryEnd);
+  const timeExit = String(input.timeExit || DEFAULTS.timeExit);
+  const targetR = input.targetR == null || input.targetR === '' ? null : Math.max(0.5, Math.min(10, Number(input.targetR)));
+  const trailAfterR =
+    input.trailAfterR == null || input.trailAfterR === '' ? null : Math.max(0.5, Math.min(10, Number(input.trailAfterR)));
+  const slippage = Math.max(0, Math.min(0.01, Number(input.slippage ?? DEFAULTS.slippage)));
+  const sizing = input.sizing === 'equal' ? 'equal' : 'risk';
+  const rankBy = input.rankBy === 'orWidth' ? 'orWidth' : 'time';
   return {
     ...DEFAULTS,
     capital,
     maxStocksPerDay,
+    pullbacksNeeded,
+    entryEnd,
+    timeExit,
+    targetR,
+    trailAfterR,
+    orMinPct: input.orMinPct == null || input.orMinPct === '' ? null : Number(input.orMinPct),
+    orMaxPct: input.orMaxPct == null || input.orMaxPct === '' ? null : Number(input.orMaxPct),
+    minBreakPct: input.minBreakPct == null || input.minBreakPct === '' ? null : Number(input.minBreakPct),
+    sizing,
+    rankBy,
+    slippage,
+    equalNotional: capital / maxStocksPerDay,
     riskPerTrade: capital * DEFAULTS.riskFraction,
     buyPower: capital * DEFAULTS.buyPowerMultiple,
   };
@@ -517,6 +592,12 @@ function runOrbBacktest({ symbolBars, indexBars, config }) {
       orEnd: cfg.orEnd,
       entryEnd: cfg.entryEnd,
       timeExit: cfg.timeExit,
+      pullbacksNeeded: cfg.pullbacksNeeded,
+      targetR: cfg.targetR,
+      trailAfterR: cfg.trailAfterR,
+      sizing: cfg.sizing,
+      rankBy: cfg.rankBy,
+      engineVersion: ENGINE_VERSION,
     },
     assumptions: [
       'Simulated MIS backtest. No live orders are placed.',
@@ -535,6 +616,7 @@ function runOrbBacktest({ symbolBars, indexBars, config }) {
 }
 
 module.exports = {
+  ENGINE_VERSION,
   DEFAULTS,
   SNAPSHOT_TIMES,
   barsFromCandles,

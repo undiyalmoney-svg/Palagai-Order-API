@@ -25,6 +25,9 @@ sr-observations/
 # Momentum Portfolio Manager local SQLite store
 data/momentum/
 
+# ORB discovery candle cache / experiments (runtime)
+data/orb-backtest/
+
 # Charts Protect day lock / open fills (runtime)
 data/charts-protect/
 
