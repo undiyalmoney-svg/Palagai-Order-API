@@ -173,6 +173,23 @@ test('clampConfig keeps capital and max stocks and does not mark the book live',
   assert.equal(out.liveOrders, false);
 });
 
+test('winner preset is skip-short, widest-stop, ₹10k, 5 names, and caps names at 8', () => {
+  const cfg = clampConfig({ preset: 'winner' });
+  assert.equal(cfg.capital, 10000);
+  assert.equal(cfg.maxStocksPerDay, 5);
+  assert.equal(cfg.rankBy, 'stopPct');
+  assert.equal(cfg.crowdFilter, 'skipShort');
+  assert.equal(cfg.pullbacksNeeded, 2);
+  assert.equal(cfg.entryEnd, '14:30');
+  assert.equal(cfg.timeExit, '15:15');
+  assert.equal(cfg.targetR, null);
+  assert.equal(cfg.riskPerTrade, 75);
+  const capped = clampConfig({ preset: 'winner', maxStocksPerDay: 20, capital: 12000 });
+  assert.equal(capped.maxStocksPerDay, 8);
+  assert.equal(capped.capital, 12000);
+  assert.equal(capped.rankBy, 'stopPct');
+});
+
 test('15-minute full close is listed even when the 5-minute two-low pattern never prints', () => {
   const day = '2026-10-16';
   const bars = sessionBars(day, {

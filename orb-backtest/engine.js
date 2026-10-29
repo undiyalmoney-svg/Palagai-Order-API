@@ -17,7 +17,7 @@
 
 const { sessionDate, minutesOfDay } = require('../research/time');
 
-const ENGINE_VERSION = '1.3.154-discover';
+const ENGINE_VERSION = '1.3.155-desk';
 
 const DEFAULTS = {
   orEnd: '09:30',
@@ -37,6 +37,47 @@ const DEFAULTS = {
   rankBy: 'time',
   crowdFilter: null,
 };
+
+/** Two-month ₹10k research winner. Hard name-count cap is 8. */
+const WINNER_MAX_STOCKS = 8;
+const WINNER_DESK = {
+  capital: 10000,
+  maxStocksPerDay: 5,
+  rankBy: 'stopPct',
+  crowdFilter: 'skipShort',
+  pullbacksNeeded: 2,
+  entryEnd: '14:30',
+  timeExit: '15:15',
+  targetR: null,
+  trailAfterR: null,
+  orMinPct: null,
+  orMaxPct: null,
+  minBreakPct: null,
+  sizing: 'risk',
+};
+
+function isWinnerPreset(input = {}) {
+  const preset = String(input.preset || input.desk || '').trim();
+  return preset === 'winner';
+}
+
+function applyDeskPreset(input = {}) {
+  if (!isWinnerPreset(input)) return input;
+  return {
+    ...WINNER_DESK,
+    ...input,
+    rankBy: input.rankBy || WINNER_DESK.rankBy,
+    crowdFilter:
+      input.crowdFilter === undefined || input.crowdFilter === ''
+        ? WINNER_DESK.crowdFilter
+        : input.crowdFilter,
+    maxStocksPerDay: Math.min(
+      WINNER_MAX_STOCKS,
+      Math.max(1, Math.floor(Number(input.maxStocksPerDay) || WINNER_DESK.maxStocksPerDay)),
+    ),
+    capital: Math.max(1000, Number(input.capital) || WINNER_DESK.capital),
+  };
+}
 
 const SNAPSHOT_TIMES = [
   '10:00',
@@ -567,20 +608,21 @@ function priorDay(day) {
 }
 
 function clampConfig(input = {}) {
-  const capital = Math.max(1000, Math.min(10_000_000, Number(input.capital) || 40000));
-  const maxStocksPerDay = Math.max(1, Math.min(50, Math.floor(Number(input.maxStocksPerDay) || 3)));
-  const pullbacksNeeded = Math.max(1, Math.min(5, Math.floor(Number(input.pullbacksNeeded) || DEFAULTS.pullbacksNeeded)));
-  const entryEnd = String(input.entryEnd || DEFAULTS.entryEnd);
-  const timeExit = String(input.timeExit || DEFAULTS.timeExit);
-  const targetR = input.targetR == null || input.targetR === '' ? null : Math.max(0.5, Math.min(10, Number(input.targetR)));
+  const src = applyDeskPreset(input);
+  const capital = Math.max(1000, Math.min(10_000_000, Number(src.capital) || 40000));
+  const maxStocksPerDay = Math.max(1, Math.min(50, Math.floor(Number(src.maxStocksPerDay) || 3)));
+  const pullbacksNeeded = Math.max(1, Math.min(5, Math.floor(Number(src.pullbacksNeeded) || DEFAULTS.pullbacksNeeded)));
+  const entryEnd = String(src.entryEnd || DEFAULTS.entryEnd);
+  const timeExit = String(src.timeExit || DEFAULTS.timeExit);
+  const targetR = src.targetR == null || src.targetR === '' ? null : Math.max(0.5, Math.min(10, Number(src.targetR)));
   const trailAfterR =
-    input.trailAfterR == null || input.trailAfterR === '' ? null : Math.max(0.5, Math.min(10, Number(input.trailAfterR)));
-  const slippage = Math.max(0, Math.min(0.01, Number(input.slippage ?? DEFAULTS.slippage)));
-  const sizing = input.sizing === 'equal' ? 'equal' : 'risk';
-  const rankBy = input.rankBy === 'orWidth' ? 'orWidth' : input.rankBy === 'stopPct' ? 'stopPct' : 'time';
+    src.trailAfterR == null || src.trailAfterR === '' ? null : Math.max(0.5, Math.min(10, Number(src.trailAfterR)));
+  const slippage = Math.max(0, Math.min(0.01, Number(src.slippage ?? DEFAULTS.slippage)));
+  const sizing = src.sizing === 'equal' ? 'equal' : 'risk';
+  const rankBy = src.rankBy === 'orWidth' ? 'orWidth' : src.rankBy === 'stopPct' ? 'stopPct' : 'time';
   const crowdFilter =
-    input.crowdFilter === 'skipShort' || input.crowdFilter === 'skipLong' || input.crowdFilter === 'follow'
-      ? input.crowdFilter
+    src.crowdFilter === 'skipShort' || src.crowdFilter === 'skipLong' || src.crowdFilter === 'follow'
+      ? src.crowdFilter
       : null;
   return {
     ...DEFAULTS,
@@ -591,9 +633,9 @@ function clampConfig(input = {}) {
     timeExit,
     targetR,
     trailAfterR,
-    orMinPct: input.orMinPct == null || input.orMinPct === '' ? null : Number(input.orMinPct),
-    orMaxPct: input.orMaxPct == null || input.orMaxPct === '' ? null : Number(input.orMaxPct),
-    minBreakPct: input.minBreakPct == null || input.minBreakPct === '' ? null : Number(input.minBreakPct),
+    orMinPct: src.orMinPct == null || src.orMinPct === '' ? null : Number(src.orMinPct),
+    orMaxPct: src.orMaxPct == null || src.orMaxPct === '' ? null : Number(src.orMaxPct),
+    minBreakPct: src.minBreakPct == null || src.minBreakPct === '' ? null : Number(src.minBreakPct),
     sizing,
     rankBy,
     crowdFilter,
@@ -665,6 +707,9 @@ function runOrbBacktest({ symbolBars, indexBars, config }) {
 module.exports = {
   ENGINE_VERSION,
   DEFAULTS,
+  WINNER_DESK,
+  WINNER_MAX_STOCKS,
+  applyDeskPreset,
   SNAPSHOT_TIMES,
   barsFromCandles,
   groupByDay,

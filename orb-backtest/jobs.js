@@ -16,6 +16,29 @@ const { acquire, release, currentLock, resetLock } = require('./lock');
 const jobs = new Map();
 let runningId = null;
 
+function persistInput(from, to, cfg, body) {
+  const preset = body?.preset === 'winner' || body?.desk === 'winner' ? 'winner' : undefined;
+  return {
+    from,
+    to,
+    ...(preset ? { preset } : {}),
+    capital: cfg.capital,
+    maxStocksPerDay: cfg.maxStocksPerDay,
+    pullbacksNeeded: cfg.pullbacksNeeded,
+    entryEnd: cfg.entryEnd,
+    timeExit: cfg.timeExit,
+    targetR: cfg.targetR,
+    trailAfterR: cfg.trailAfterR,
+    orMinPct: cfg.orMinPct,
+    orMaxPct: cfg.orMaxPct,
+    minBreakPct: cfg.minBreakPct,
+    sizing: cfg.sizing,
+    rankBy: cfg.rankBy,
+    crowdFilter: cfg.crowdFilter,
+    slippage: cfg.slippage,
+  };
+}
+
 function publicJob(job) {
   if (!job) return null;
   return {
@@ -23,6 +46,7 @@ function publicJob(job) {
     status: job.status,
     simulated: true,
     liveOrders: false,
+    input: job.input || null,
     progress: job.progress,
     error: job.error || null,
     warnings: job.warnings || [],
@@ -216,7 +240,7 @@ function startJob(req, body) {
   const job = {
     id,
     status: 'running',
-    input: { from, to, capital: cfg.capital, maxStocksPerDay: cfg.maxStocksPerDay },
+    input: persistInput(from, to, cfg, body),
     progress: { phase: 'queued', done: 0, total: NIFTY_500.length, symbol: null },
     warnings: [],
     missing: [],

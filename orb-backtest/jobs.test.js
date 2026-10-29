@@ -45,3 +45,20 @@ test('startJob returns 409 while another historical backtest is running', () => 
   );
   resetJobs();
 });
+
+test('startJob persists the ₹10k winner desk so the single book actually uses those rules', () => {
+  resetJobs();
+  const job = startJob(
+    { headers: {} },
+    { from: '2026-10-16', to: '2026-10-16', preset: 'winner' },
+  );
+  assert.equal(job.input.preset, 'winner');
+  assert.equal(job.input.capital, 10000);
+  assert.equal(job.input.maxStocksPerDay, 5);
+  assert.equal(job.input.rankBy, 'stopPct');
+  assert.equal(job.input.crowdFilter, 'skipShort');
+  assert.equal(job.input.entryEnd, '14:30');
+  assert.equal(job.input.timeExit, '15:15');
+  assert.equal(job.input.targetR, null);
+  resetJobs();
+});
