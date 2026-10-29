@@ -99,6 +99,7 @@ function slFields(fill, stop) {
     product: 'MIS',
     validity: 'DAY',
     trigger_price: trig.toFixed(2),
+    market_protection: '-1',
     tag: SL_TAG,
   };
 }

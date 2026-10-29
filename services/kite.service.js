@@ -11,7 +11,24 @@ const ipv4HttpAgent = new http.Agent({ family: 4, keepAlive: true });
 /**
  * Thin Kite Connect client for order-related endpoints only.
  * Always uses this machine's egress IP (DigitalOcean static IP).
+ *
+ * Exchange/SEBI: API MARKET and SL-M must send a non-zero market_protection.
+ * -1 is the broker auto band. 0 or a missing field is rejected.
  */
+function withMarketProtection(fields = {}) {
+  const out = {};
+  for (const [key, value] of Object.entries(fields || {})) {
+    if (value == null) continue;
+    out[key] = String(value);
+  }
+  const orderType = String(out.order_type || '').toUpperCase();
+  if (orderType === 'MARKET' || orderType === 'SL-M') {
+    const raw = String(out.market_protection || '').trim();
+    if (!raw || raw === '0') out.market_protection = '-1';
+  }
+  return out;
+}
+
 class KiteService {
   constructor() {
     this.client = axios.create({
@@ -37,14 +54,14 @@ class KiteService {
   }
 
   async placeOrder(authorization, variety, fields) {
-    const body = new URLSearchParams(fields).toString();
+    const body = new URLSearchParams(withMarketProtection(fields)).toString();
     return this.client.post(`/orders/${variety}`, body, {
       headers: this.headers(authorization, 'application/x-www-form-urlencoded'),
     });
   }
 
   async modifyOrder(authorization, variety, orderId, fields) {
-    const body = new URLSearchParams(fields).toString();
+    const body = new URLSearchParams(withMarketProtection(fields)).toString();
     return this.client.put(`/orders/${variety}/${encodeURIComponent(orderId)}`, body, {
       headers: this.headers(authorization, 'application/x-www-form-urlencoded'),
     });
@@ -93,4 +110,4 @@ class KiteService {
   }
 }
 
-module.exports = { kiteService: new KiteService() };
+module.exports = { kiteService: new KiteService(), withMarketProtection };

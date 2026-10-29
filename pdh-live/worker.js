@@ -251,7 +251,18 @@ async function tickExits(now = new Date()) {
       }
       if (working.stop) {
         const sl = await orders.ensureStop(kite, authorization, working, working.stop, slPlacedAt);
-        if (!sl.ok && !sl.skipped) state.lastError = sl.message;
+        if (sl.orderId) {
+          const cur = (state.fills || []).find((row) => row.instrument === working.instrument);
+          if (cur) cur.slOrderId = sl.orderId;
+        }
+        if (sl.ok) {
+          state.lastError = null;
+          if (!sl.skipped) {
+            state.lastMessage = `SL-M resting on ${working.instrument} @ ${working.stop}`;
+          }
+        } else if (!sl.skipped) {
+          state.lastError = sl.message;
+        }
       }
     }
     if (scan.pastTimeExit(now) && (state.fills || []).length) {

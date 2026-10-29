@@ -189,6 +189,7 @@ test('entry is NSE MIS MARKET; stop is SL-M; flatten is the other side after can
   assert.equal(orders.entryFields(long).product, 'MIS');
   assert.equal(orders.entryFields(long).transaction_type, 'BUY');
   assert.equal(orders.entryFields(long).tag, 'PALAGAI_PDH');
+  assert.equal(orders.entryFields(long).market_protection, '-1');
   assert.equal(orders.entryFields(short).transaction_type, 'SELL');
 
   const slLong = orders.slFields(long, 101.05);
@@ -196,12 +197,15 @@ test('entry is NSE MIS MARKET; stop is SL-M; flatten is the other side after can
   assert.equal(slLong.transaction_type, 'SELL');
   assert.equal(slLong.trigger_price, '101.05');
   assert.equal(slLong.tag, 'PALAGAI_PDH_SL');
+  assert.equal(slLong.market_protection, '-1');
   assert.equal(orders.slFields(short, 102.1).transaction_type, 'BUY');
+  assert.equal(orders.slFields(short, 102.1).market_protection, '-1');
 
   const exitLong = orders.exitFields(long, 2);
   assert.equal(exitLong.order_type, 'MARKET');
   assert.equal(exitLong.transaction_type, 'SELL');
   assert.equal(exitLong.tag, 'PALAGAI_PDH_EXIT');
+  assert.equal(exitLong.market_protection, '-1');
   assert.equal(orders.exitFields(short, 1).transaction_type, 'BUY');
 
   const resting = orders.restingProtectIds(
@@ -349,4 +353,21 @@ test('live 1R take-profit is compulsory on levels and flatten', () => {
   assert.equal(orders.decideFillAction(fill, 105, late).action, 'flatten');
   assert.equal(orders.decideFillAction(fill, 105, late).reason, 'TARGET');
   assert.equal(orders.decideFillAction(fill, 104.9, late).action, 'hold');
+});
+
+test('Kite MARKET and SL-M get non-zero market protection even if the caller omits it', () => {
+  const { withMarketProtection } = require('../services/kite.service');
+  const sl = withMarketProtection({
+    exchange: 'NSE',
+    tradingsymbol: 'JWL',
+    transaction_type: 'SELL',
+    order_type: 'SL-M',
+    quantity: '7',
+    product: 'MIS',
+    validity: 'DAY',
+    trigger_price: '184.95',
+  });
+  assert.equal(sl.market_protection, '-1');
+  assert.equal(withMarketProtection({ order_type: 'MARKET', market_protection: '0' }).market_protection, '-1');
+  assert.equal(withMarketProtection({ order_type: 'LIMIT', price: '100' }).market_protection, undefined);
 });
