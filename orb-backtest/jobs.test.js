@@ -75,7 +75,7 @@ test('₹40k capital auto-trades 8 names and ignores an old maxStocks field', ()
   resetJobs();
 });
 
-test('startLiveJob is 1 name, 1R lock, Kite-cash sized, and never live orders', () => {
+test('startLiveJob is 2 names, compulsory 1R lock, Kite-cash sized, and never live orders', () => {
   resetJobs();
   const job = startLiveJob({ headers: {} }, { capital: 100000 });
   assert.equal(job.status, 'running');
@@ -84,7 +84,7 @@ test('startLiveJob is 1 name, 1R lock, Kite-cash sized, and never live orders', 
   assert.equal(job.input.liveToday, true);
   assert.equal(job.input.preset, 'pdh-follow-live-lock');
   assert.equal(job.input.family, 'pdh_break');
-  assert.equal(job.input.maxStocksPerDay, 1);
+  assert.equal(job.input.maxStocksPerDay, 2);
   assert.equal(job.input.targetR, 1);
   assert.equal(job.input.capital, 0);
   assert.notEqual(job.input.capital, 100000);

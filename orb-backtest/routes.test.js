@@ -94,7 +94,7 @@ test('orb-backtest health is public; run/universe/jobs need a site user', async 
     const liveBody = await live.json();
     assert.equal(liveBody.liveOrders, false);
     assert.equal(liveBody.input.liveToday, true);
-    assert.equal(liveBody.input.maxStocksPerDay, 1);
+    assert.equal(liveBody.input.maxStocksPerDay, 2);
     assert.equal(liveBody.input.targetR, 1);
     assert.equal(liveBody.input.capital, 0);
   } finally {

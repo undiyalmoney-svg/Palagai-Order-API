@@ -198,7 +198,7 @@ async function placeEntry(authorization, state, picked, now) {
     if (cur) cur.slOrderId = sl.orderId;
   }
   state.lastError = sl.ok || sl.skipped ? null : sl.message;
-  state.lastMessage = `LIVE ${picked.side === 'S' ? 'short' : 'long'} ${picked.symbol} x${picked.qty} @ ${fillPx} · SL-M ${fill.stop} · 1R ${fill.target}. ${sl.message || ''}`.trim();
+    state.lastMessage = `LIVE ${picked.side === 'S' ? 'short' : 'long'} ${picked.symbol} x${picked.qty} @ ${fillPx} · SL-M ${fill.stop} · compulsory 1R ${fill.target}. ${sl.message || ''}`.trim();
   state.lastTick = new Date(now).toISOString();
   return state;
 }
@@ -232,7 +232,7 @@ async function tickExits(now = new Date()) {
       const qty = orders.signedQty(positions, fill.instrument);
       if (!qty) {
         state = store.dropFill(state, fill.instrument);
-        state.doneToday = true;
+        state.doneToday = store.bookComplete(state, LIVE_MAX_NAMES);
         state.lastMessage = `Flat ${fill.instrument}`;
         continue;
       }
@@ -245,7 +245,7 @@ async function tickExits(now = new Date()) {
         state.lastError = result.ok ? null : result.message;
         if (result.ok) {
           state = store.dropFill(state, working.instrument);
-          state.doneToday = true;
+          state.doneToday = store.bookComplete(state, LIVE_MAX_NAMES);
         }
         continue;
       }
@@ -260,7 +260,7 @@ async function tickExits(now = new Date()) {
         state.lastMessage = result.message;
         if (result.ok) {
           state = store.dropFill(state, fill.instrument);
-          state.doneToday = true;
+          state.doneToday = store.bookComplete(state, LIVE_MAX_NAMES);
         }
       }
     }
@@ -281,7 +281,13 @@ async function tickEntries(now = new Date()) {
   if (entryBusy) return;
   let state = store.load(now);
   if (!state.enabled) return;
-  if (state.doneToday) return;
+  if (store.bookComplete(state, LIVE_MAX_NAMES) || store.takenList(state).length >= LIVE_MAX_NAMES) {
+    if (!state.doneToday && store.bookComplete(state, LIVE_MAX_NAMES)) {
+      state.doneToday = true;
+      store.save(state);
+    }
+    return;
+  }
   if ((state.fills || []).length >= LIVE_MAX_NAMES) return;
   if (minutesOfDay(now) > toMin(scan.ENTRY_END) && !(state.fills || []).length) {
     state.lastMessage = 'No new live entries after 14:30. Open fills still auto-exit at 1R, SL-M, or 15:15.';
@@ -331,22 +337,30 @@ async function tickEntries(now = new Date()) {
       now,
       capital: state.capital,
       crowdDay: state.crowd,
+      taken: store.takenList(state),
     });
     if (found.crowd) state.crowd = found.crowd;
-    if (!found.picked) {
+    const picks = found.picks && found.picks.length ? found.picks : found.picked ? [found.picked] : [];
+    if (!picks.length) {
       const watching = Object.keys(universe.symbolBars).length;
+      const taken = store.takenList(state).length;
       state.lastMessage =
         found.reason === 'before-crowd'
           ? 'Waiting for the 09:45 crowd, then scanning every closed 5-minute bar.'
           : found.reason === 'crowd-pending'
             ? '09:45 bars still loading. Scanning continues — not a one-shot 09:50 job.'
-            : `Watching ${watching} names until 14:30. Crowd ${state.crowd || 'pending'}. No live fill yet.`;
+            : `Watching ${watching} names until 14:30. Crowd ${state.crowd || 'pending'}. ${taken}/2 live names. Compulsory 1R.`;
       state.lastError = null;
       state.lastTick = new Date(now).toISOString();
       store.save(state);
       return;
     }
-    state = await placeEntry(authorization, state, found.picked, now);
+    for (const pick of picks) {
+      const already = store.takenList(state);
+      if (already.length >= LIVE_MAX_NAMES) break;
+      if (already.includes(String(pick.symbol || '').toUpperCase())) continue;
+      state = await placeEntry(authorization, state, pick, now);
+    }
     store.save(state);
   } catch (err) {
     const stateErr = store.load(now);

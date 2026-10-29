@@ -3,16 +3,16 @@
 /**
  * Prior-day high/low break, follow the 09:45 majority side.
  * Name count is derived from capital (₹2,000 / name, hard cap 8).
- * Live today: same engine, Kite cash, 1 name, 1R lock. Simulated MIS only.
+ * Live today: same engine, Kite cash, best 2 names, compulsory 1R take-profit.
  */
 const { summarize } = require('./engine');
 const { simulateDesk, dailyBooks } = require('../daily-profit/portfolio');
 const { allDays } = require('./discover/split');
 
-const ENGINE_VERSION = '1.3.161-pdh-live';
+const ENGINE_VERSION = '1.3.162-pdh-live';
 const NAME_RUPEES = 2000;
 const MAX_NAMES = 8;
-const LIVE_MAX_NAMES = 1;
+const LIVE_MAX_NAMES = 2;
 const LIVE_TARGET_R = 1;
 const FAMILY = 'pdh_break';
 
@@ -59,12 +59,14 @@ function pdhFollowCandidate(capital, opts = {}) {
       entry: row.entry,
       cutoff: 'No new entries after 14:30 IST',
       exit: liveLock
-        ? 'Stop, 1R take-profit, or 15:15. Open trades mark to the last 5-minute close until then.'
+        ? 'Stop, compulsory 1R take-profit, or 15:15. Open trades mark to the last 5-minute close until then.'
         : 'Stop or 15:15 time exit. No automatic target.',
       stopLoss: row.stopLoss,
-      target: liveLock ? '1R lock — exit if the trade makes 1× the stop distance. Not a guaranteed profit.' : 'None',
+      target: liveLock
+        ? 'Compulsory 1R take-profit — exit if the trade makes 1× the stop distance. Not a guaranteed profit.'
+        : 'None',
       stockCount: liveLock
-        ? '1 name / day on live Kite cash'
+        ? '2 names / day on live Kite cash'
         : `${maxStocksPerDay} name${maxStocksPerDay === 1 ? '' : 's'} / day, auto from capital (₹2,000 each, max 8)`,
       sizing: 'Risk ~0.75% of capital per stop distance, 5× notional cap',
       filters: ['Only the 09:45 majority side.', ...(liveLock ? ['Live today never places a Kite order.'] : [])],
@@ -149,7 +151,7 @@ async function runPdhFollowBook({ symbolBars, capital, liveLock = false, fundsRs
       ? [
           'Same prior-day follow engine as Historical Backtest. No live orders are placed.',
           'Capital is Kite equity cash, not a typed backtest amount.',
-          'One name only. Exit at 1R if the trade gets there, else stop or 15:15.',
+          'Best two names. Compulsory 1R take-profit if the trade gets there, else stop or 15:15.',
           'The 1R lock is the take-profit we exit at — not a promised or guaranteed profit.',
           'Open trades mark to the last closed 5-minute candle until 15:15.',
           'Quantity is ~0.75% of that cash in rupee risk, notional capped at 5× cash.',
@@ -170,7 +172,7 @@ async function runPdhFollowBook({ symbolBars, capital, liveLock = false, fundsRs
     dailyBooks: books,
     lastBook: books.length ? books[books.length - 1] : null,
     note: liveLock
-      ? 'Live today on retrieved Kite 5-minute candles, sized from Kite cash. 1R lock is a take-profit, not a guaranteed return. No live orders.'
+      ? 'Live today on retrieved Kite 5-minute candles, sized from Kite cash. Best two names. Compulsory 1R take-profit, not a guaranteed return. No live orders.'
       : 'Simulated prior-day break book on retrieved Kite 5-minute candles. Not live trading P&L.',
   };
 }

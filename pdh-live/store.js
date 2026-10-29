@@ -19,6 +19,7 @@ function empty(date) {
     userId: null,
     date,
     fills: [],
+    takenToday: [],
     doneToday: false,
     crowd: null,
     capital: 0,
@@ -54,6 +55,10 @@ function load(now = new Date()) {
       enabled: raw.enabled === true,
       doneToday: raw.doneToday === true,
       fills: Array.isArray(raw.fills) ? raw.fills : [],
+      takenToday: normalizeTaken([
+        ...(Array.isArray(raw.takenToday) ? raw.takenToday : []),
+        ...(Array.isArray(raw.fills) ? raw.fills.map((row) => row.instrument) : []),
+      ]),
       sessionOk: raw.sessionOk === true,
       scan: raw.scan && typeof raw.scan === 'object' ? raw.scan : empty(today).scan,
     };
@@ -70,12 +75,34 @@ function save(state) {
   fs.renameSync(tmp, dest);
 }
 
+function normalizeTaken(list) {
+  const out = [];
+  const seen = new Set();
+  for (const row of list || []) {
+    const symbol = String(row || '').trim().toUpperCase();
+    if (!symbol || seen.has(symbol)) continue;
+    seen.add(symbol);
+    out.push(symbol);
+  }
+  return out;
+}
+
+function takenList(state) {
+  return normalizeTaken([...(state.takenToday || []), ...(state.fills || []).map((row) => row.instrument)]);
+}
+
+function bookComplete(state, maxNames) {
+  const cap = Math.max(1, Math.floor(Number(maxNames) || 0));
+  return takenList(state).length >= cap && !(state.fills || []).length;
+}
+
 function upsertFill(state, fill) {
   const instrument = String(fill.instrument || fill.symbol || '').trim().toUpperCase();
   if (!instrument) return state;
   const rest = (state.fills || []).filter((row) => String(row.instrument || '').toUpperCase() !== instrument);
   return {
     ...state,
+    takenToday: normalizeTaken([...(state.takenToday || []), instrument]),
     fills: [
       ...rest,
       {
@@ -113,6 +140,7 @@ function publicView(state) {
     capital: state.capital || 0,
     fundsRs: state.fundsRs || 0,
     doneToday: state.doneToday === true,
+    takenToday: takenList(state),
     fills: fills.map((f) => ({
       instrument: f.instrument,
       side: f.side,
@@ -141,5 +169,7 @@ module.exports = {
   save,
   upsertFill,
   dropFill,
+  takenList,
+  bookComplete,
   publicView,
 };

@@ -125,8 +125,46 @@ test('scans all names and keeps the widest stop among still-open breaks', () => 
     capital: 20000,
   });
   assert.equal(found.signals.length, 2);
+  assert.equal(found.picks.length, 2);
+  assert.equal(found.picks[0].symbol, 'WIDE');
+  assert.equal(found.picks[1].symbol, 'NARROW');
   assert.equal(found.picked.symbol, 'WIDE');
   assert.equal(found.picked.qty >= 1, true);
+
+  const afterWide = scan.eligibleFromBars(symbolBars, {
+    day: a.day,
+    now: istAt(a.day, '11:25'),
+    capital: 20000,
+    taken: ['WIDE'],
+  });
+  assert.equal(afterWide.picks.length, 1);
+  assert.equal(afterWide.picks[0].symbol, 'NARROW');
+  assert.equal(afterWide.skipped.some((s) => s.symbol === 'WIDE' && s.resolved === 'TAKEN'), true);
+
+  const full = scan.eligibleFromBars(symbolBars, {
+    day: a.day,
+    now: istAt(a.day, '11:25'),
+    capital: 20000,
+    taken: ['WIDE', 'NARROW'],
+  });
+  assert.equal(full.picks.length, 0);
+  assert.equal(full.picked, null);
+});
+
+test('does not re-enter a name that already hit 1R on later bars', () => {
+  const locked = longCrowdDay({
+    '09:50': { o: 102.6, h: 103.4, l: 102.5, c: 103.3 },
+    '09:55': { o: 103.3, h: 106.0, l: 103.2, c: 105.5 },
+  });
+  const symbolBars = { AAA: { [locked.prev]: locked.prevBars, [locked.day]: locked.bars } };
+  const found = scan.eligibleFromBars(symbolBars, {
+    day: locked.day,
+    now: istAt(locked.day, '10:05'),
+    capital: 20000,
+  });
+  assert.equal(found.picked, null);
+  assert.equal(found.picks.length, 0);
+  assert.equal(found.skipped[0].resolved, 'TARGET');
 });
 
 test('does not re-enter a name that already hit stop or 1R on later bars', () => {
@@ -200,7 +238,29 @@ test('store stays disarmed until Start live money', () => {
     target: 101,
   });
   assert.equal(next.fills[0].instrument, 'RELIANCE');
-  assert.equal(store.dropFill(next, 'RELIANCE').fills.length, 0);
+  assert.deepEqual(next.takenToday, ['RELIANCE']);
+  const dropped = store.dropFill(next, 'RELIANCE');
+  assert.equal(dropped.fills.length, 0);
+  assert.deepEqual(dropped.takenToday, ['RELIANCE']);
+  assert.deepEqual(store.takenList(dropped), ['RELIANCE']);
+  assert.equal(store.bookComplete(dropped, 2), false);
+});
+
+test('1R flatten of name 1 still allows name 2 and blocks a third', () => {
+  let state = store.empty('2026-10-16');
+  state = store.upsertFill(state, { instrument: 'WIDE', side: 'L', qty: 1, entry: 105, stop: 101, target: 109 });
+  assert.deepEqual(store.takenList(state), ['WIDE']);
+  assert.equal(store.bookComplete(state, 2), false);
+  state = store.dropFill(state, 'WIDE');
+  assert.equal(state.fills.length, 0);
+  assert.deepEqual(store.takenList(state), ['WIDE']);
+  assert.equal(store.bookComplete(state, 2), false);
+  state = store.upsertFill(state, { instrument: 'NARROW', side: 'L', qty: 1, entry: 103, stop: 101, target: 105 });
+  assert.deepEqual(store.takenList(state), ['WIDE', 'NARROW']);
+  assert.equal(store.bookComplete(state, 2), false);
+  state = store.dropFill(state, 'NARROW');
+  assert.equal(store.bookComplete(state, 2), true);
+  assert.deepEqual(store.publicView(state).takenToday, ['WIDE', 'NARROW']);
 });
 
 test('live money start needs the confirm checkbox and stop reports liveOrders false', async () => {
@@ -264,9 +324,29 @@ test('live money start needs the confirm checkbox and stop reports liveOrders fa
   }
 });
 
-test('pdh live candidate is still 1 name and 1R', () => {
+test('pdh live candidate is 2 names with compulsory 1R', () => {
+  const { LIVE_MAX_NAMES, LIVE_TARGET_R } = require('../orb-backtest/pdh-desk');
+  assert.equal(LIVE_MAX_NAMES, 2);
+  assert.equal(LIVE_TARGET_R, 1);
   const c = pdhFollowCandidate(670, { liveLock: true });
-  assert.equal(c.maxStocksPerDay, 1);
+  assert.equal(c.maxStocksPerDay, 2);
   assert.equal(c.targetR, 1);
+  assert.notEqual(c.targetR, null);
   assert.equal(c.entryEnd, '14:30');
+  assert.match(c.rules.target, /compulsory 1r/i);
+  assert.match(c.rules.stockCount, /2 names/i);
+});
+
+test('live 1R take-profit is compulsory on levels and flatten', () => {
+  const long = scan.liveLevels('L', 103, 101);
+  assert.equal(long.riskPx, 2);
+  assert.equal(long.target, 105);
+  const short = scan.liveLevels('S', 100, 102);
+  assert.equal(short.riskPx, 2);
+  assert.equal(short.target, 98);
+  const fill = { instrument: 'AAA', side: 'L', entry: 103, stop: 101, target: 110 };
+  const late = Date.now() + orders.SL_GRACE_MS + 1;
+  assert.equal(orders.decideFillAction(fill, 105, late).action, 'flatten');
+  assert.equal(orders.decideFillAction(fill, 105, late).reason, 'TARGET');
+  assert.equal(orders.decideFillAction(fill, 104.9, late).action, 'hold');
 });

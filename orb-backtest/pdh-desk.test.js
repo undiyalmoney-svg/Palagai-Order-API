@@ -38,15 +38,18 @@ test('pdh follow candidate is prior-day break + 09:45 follow and never live', ()
   assert.match(c.entry, /prior session/i);
 });
 
-test('live lock candidate is 1 name, 1R, and never live orders', () => {
+test('live lock candidate is 2 names, compulsory 1R, and never live orders', () => {
   const c = pdhFollowCandidate(670, { liveLock: true });
   assert.equal(c.family, 'pdh_break');
-  assert.equal(c.maxStocksPerDay, 1);
+  assert.equal(c.maxStocksPerDay, 2);
   assert.equal(c.targetR, 1);
+  assert.notEqual(c.targetR, null);
   assert.equal(c.allowOpen, true);
   assert.equal(c.capital, 670);
   assert.equal(c.id, 'pdh-follow-live-lock');
+  assert.match(c.rules.target, /compulsory 1r/i);
   assert.match(c.rules.target, /not a guaranteed/i);
+  assert.match(c.rules.exit, /compulsory 1r/i);
 });
 
 test('runPdhFollowBook takes a prior-day high break on a long-crowd day', async () => {
@@ -115,9 +118,11 @@ test('live lock book uses 1R, marks OPEN before 15:15, and never places orders',
   assert.equal(out.simulated, true);
   assert.equal(out.liveOrders, false);
   assert.equal(out.config.targetR, 1);
-  assert.equal(out.config.maxStocksPerDay, 1);
+  assert.equal(out.config.maxStocksPerDay, 2);
   assert.equal(out.config.liveLock, true);
   assert.ok(out.promised);
+  assert.equal(out.promised.names, 2);
+  assert.equal(out.promised.targetR, 1);
   assert.equal(out.promised.guaranteed, false);
   assert.equal(out.promised.liveOrders, false);
   assert.equal(out.promised.fundsRs, 670);

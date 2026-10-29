@@ -108,18 +108,27 @@ function ltpBeyond(ltp, prev, crowd) {
   return null;
 }
 
-function eligibleFromBars(symbolBars, { day, now, capital, crowdDay = null } = {}) {
+function eligibleFromBars(symbolBars, { day, now, capital, crowdDay = null, taken = [] } = {}) {
   const session = day || sessionDate(now);
   if (!inEntryWindow(now)) {
-    return { crowd: crowdDay, signals: [], picked: null, skipped: [], reason: crowdReady(now) ? 'outside-entry' : 'before-crowd' };
+    return {
+      crowd: crowdDay,
+      signals: [],
+      picks: [],
+      picked: null,
+      skipped: [],
+      reason: crowdReady(now) ? 'outside-entry' : 'before-crowd',
+    };
   }
   const closed = closeUniverse(symbolBars, session, now);
   const candidate = pdhFollowCandidate(capital || 1, { liveLock: true });
   const crowdMap = orCrosses(closed);
   const crowd = crowdMap[session] || crowdDay || null;
   if (!crowd) {
-    return { crowd: null, signals: [], picked: null, skipped: [], reason: 'crowd-pending' };
+    return { crowd: null, signals: [], picks: [], picked: null, skipped: [], reason: 'crowd-pending' };
   }
+  const takenSet = new Set((taken || []).map((s) => String(s || '').trim().toUpperCase()).filter(Boolean));
+  const slots = Math.max(0, LIVE_MAX_NAMES - takenSet.size);
   const raw = pdhSignalsForDay(closed, session, candidate);
   const filtered = filterCrowd(raw, { [session]: crowd }, candidate.crowdFilter);
   const open = [];
@@ -128,6 +137,11 @@ function eligibleFromBars(symbolBars, { day, now, capital, crowdDay = null } = {
     const bars = (closed[sig.symbol] && closed[sig.symbol][session]) || [];
     const print = barAt(bars, sig.signalT);
     const fillPx = print && print.c > 0 ? print.c : sig.entryPx;
+    const symbol = String(sig.symbol || '').trim().toUpperCase();
+    if (takenSet.has(symbol)) {
+      skipped.push({ ...sig, fillPx, resolved: 'TAKEN' });
+      continue;
+    }
     const resolved = subsequentResolved(bars, { side: sig.side, fillPx, stopPx: sig.stopPx }, sig.signalT);
     if (resolved !== 'OPEN') {
       skipped.push({ ...sig, fillPx, resolved });
@@ -152,13 +166,15 @@ function eligibleFromBars(symbolBars, { day, now, capital, crowdDay = null } = {
       resolved: 'OPEN',
     });
   }
-  const picked = pickDay(open, LIVE_MAX_NAMES)[0] || null;
+  const picks = slots > 0 ? pickDay(open, slots) : [];
+  const picked = picks[0] || null;
   return {
     crowd,
     signals: open,
+    picks,
     picked,
     skipped,
-    reason: picked ? 'entry' : open.length ? 'ranked' : filtered.length ? 'resolved' : 'waiting',
+    reason: picks.length ? 'entry' : open.length ? 'ranked' : filtered.length ? 'resolved' : 'waiting',
   };
 }
 

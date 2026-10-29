@@ -156,7 +156,7 @@ function decideFillAction(fill, last, now = Date.now(), slPlacedAt = new Map()) 
   if (hm && hm >= '15:15') return { action: 'flatten', reason: 'EOD' };
   if (last == null || !Number.isFinite(last)) return { action: 'hold' };
   const stop = Number(fill.stop);
-  const target = Number(fill.target) || targetPx(fill);
+  const target = targetPx(fill);
   if (fill.side === 'S') {
     if (stop > 0 && last >= stop) return { action: 'flatten', reason: 'SL' };
     if (target > 0 && last <= target) return { action: 'flatten', reason: 'TARGET' };
