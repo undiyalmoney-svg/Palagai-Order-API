@@ -16,6 +16,18 @@ const { acquire, release, currentLock, resetLock } = require('./lock');
 const jobs = new Map();
 let runningId = null;
 
+function withSingleBookDefaults(body = {}) {
+  if (body.preset === 'original' || body.desk === 'original') return body;
+  if (body.preset === 'winner' || body.desk === 'winner') return { ...body, preset: 'winner' };
+  if (body.rankBy || Object.prototype.hasOwnProperty.call(body, 'crowdFilter')) return body;
+  const next = { ...body, preset: 'winner' };
+  const capital = Number(body.capital);
+  const names = Number(body.maxStocksPerDay);
+  if (!Number.isFinite(capital) || capital === 40000) delete next.capital;
+  if (!Number.isFinite(names) || names === 3) delete next.maxStocksPerDay;
+  return next;
+}
+
 function persistInput(from, to, cfg, body) {
   const preset = body?.preset === 'winner' || body?.desk === 'winner' ? 'winner' : undefined;
   return {
@@ -235,12 +247,13 @@ function startJob(req, body) {
     err.status = 400;
     throw err;
   }
-  const cfg = clampConfig(body);
+  const deskBody = withSingleBookDefaults(body);
+  const cfg = clampConfig(deskBody);
   const id = crypto.randomUUID();
   const job = {
     id,
     status: 'running',
-    input: persistInput(from, to, cfg, body),
+    input: persistInput(from, to, cfg, deskBody),
     progress: { phase: 'queued', done: 0, total: NIFTY_500.length, symbol: null },
     warnings: [],
     missing: [],

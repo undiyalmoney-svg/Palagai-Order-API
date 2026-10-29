@@ -62,3 +62,17 @@ test('startJob persists the ₹10k winner desk so the single book actually uses 
   assert.equal(job.input.targetR, null);
   resetJobs();
 });
+
+test('startJob treats the old 40k / 3-name form as the ₹10k winner desk', () => {
+  resetJobs();
+  const job = startJob(
+    { headers: {} },
+    { from: '2026-10-16', to: '2026-10-16', capital: 40000, maxStocksPerDay: 3 },
+  );
+  assert.equal(job.input.preset, 'winner');
+  assert.equal(job.input.capital, 10000);
+  assert.equal(job.input.maxStocksPerDay, 5);
+  assert.equal(job.input.rankBy, 'stopPct');
+  assert.equal(job.input.crowdFilter, 'skipShort');
+  resetJobs();
+});
