@@ -57,6 +57,7 @@ test('startJob locks the prior-day follow desk and picks 2 names', () => {
   assert.equal(job.input.crowdFilter, 'follow');
   assert.equal(job.input.entryEnd, '14:30');
   assert.equal(job.input.timeExit, '15:15');
+  assert.equal(job.input.targetR, 1);
   assert.equal(job.liveOrders, false);
   resetJobs();
 });

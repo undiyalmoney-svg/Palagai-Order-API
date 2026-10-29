@@ -9,7 +9,7 @@ const { summarize } = require('./engine');
 const { simulateDesk, dailyBooks } = require('../daily-profit/portfolio');
 const { allDays } = require('./discover/split');
 
-const ENGINE_VERSION = '1.3.164-pdh-live';
+const ENGINE_VERSION = '1.3.165-pdh-test';
 const NAME_RUPEES = 2000;
 const MAX_NAMES = 8;
 const LIVE_MAX_NAMES = 2;
@@ -45,9 +45,11 @@ function pdhFollowCandidate(capital, opts = {}) {
     sizing: 'risk',
     entryEnd: '14:30',
     timeExit: '15:15',
-    targetR: liveLock ? LIVE_TARGET_R : null,
+    targetR: LIVE_TARGET_R,
     allowOpen: liveLock,
     liveLock,
+    matchLiveScan: true,
+    entryFill: 'signalClose',
     entry:
       'After 09:45, a 5-minute bar fully closes beyond the prior session high or low. Only the 09:45 majority side is taken.',
     stopLoss: 'The prior-day level that was broken',
@@ -60,14 +62,13 @@ function pdhFollowCandidate(capital, opts = {}) {
       cutoff: 'No new entries after 14:30 IST',
       exit: liveLock
         ? 'Stop, compulsory 1R take-profit, or 15:15. Open trades mark to the last 5-minute close until then.'
-        : 'Stop or 15:15 time exit. No automatic target.',
+        : 'Stop, compulsory 1R take-profit, or 15:15 — same exits as live. Fill is the signal print close.',
       stopLoss: row.stopLoss,
-      target: liveLock
-        ? 'Compulsory 1R take-profit — exit if the trade makes 1× the stop distance. Not a guaranteed profit.'
-        : 'None',
+      target:
+        'Compulsory 1R take-profit — exit if the trade makes 1× the stop distance. Not a guaranteed profit.',
       stockCount: liveLock
         ? '2 names / day on live Kite cash'
-        : '2 names / day, ranked by widest stop. Capital sizes quantity.',
+        : '2 names / day, filled as prints arrive like live. Capital sizes quantity.',
       sizing: 'Risk ~0.75% of capital per stop distance, 5× notional cap',
       filters: ['Only the 09:45 majority side.', ...(liveLock ? ['Live today never places a Kite order.'] : [])],
     },
@@ -89,6 +90,8 @@ function deskConfig(capital, opts = {}) {
     targetR: candidate.targetR,
     allowOpen: candidate.allowOpen,
     liveLock: candidate.liveLock,
+    matchLiveScan: candidate.matchLiveScan,
+    entryFill: candidate.entryFill,
     engineVersion: ENGINE_VERSION,
   };
 }
@@ -139,7 +142,7 @@ async function runPdhFollowBook({ symbolBars, capital, liveLock = false, fundsRs
   }));
   summary.orbCrossed = crosses.length;
   summary.orbCrossedTaken = crosses.filter((c) => c.taken).length;
-  const promised = liveLock ? promisedLock(sim.trades, cfg.capital, fundsRs) : null;
+  const promised = promisedLock(sim.trades, cfg.capital, fundsRs);
   return {
     simulated: true,
     liveOrders: false,
@@ -160,8 +163,9 @@ async function runPdhFollowBook({ symbolBars, capital, liveLock = false, fundsRs
           'Simulated MIS backtest. No live orders are placed.',
           'After 09:45 IST, a 5-minute candle must fully close above the prior session high (long) or below the prior session low (short).',
           'The book only takes the 09:45 majority side from first-15 full closes. Mixed 09:45 days allow either side.',
-          'Names are ranked by widest stop as a percent of price. Best two names per day — same selection as live.',
-          'Quantity is ~0.75% of capital in rupee risk, notional capped at 5× capital. Stop is the prior-day level. Leftover exits at 15:15.',
+          'Names fill as 5-minute prints arrive, same as live: remaining slots take the widest stop among names that have already qualified. A later name cannot replace an earlier fill.',
+          'Fill is the signal candle close (live MARKET). Stop is the prior-day level. Compulsory 1R take-profit, else leftover at 15:15. Not a guaranteed profit.',
+          'Quantity is ~0.75% of capital in rupee risk, notional capped at 5× capital.',
           'History is never invented. Missing Nifty 500 names stay listed in coverage.',
         ],
     rawTrades: (sim.signals || []).length,
@@ -173,7 +177,7 @@ async function runPdhFollowBook({ symbolBars, capital, liveLock = false, fundsRs
     lastBook: books.length ? books[books.length - 1] : null,
     note: liveLock
       ? 'Live today on retrieved Kite 5-minute candles, sized from Kite cash. Best two names. Compulsory 1R take-profit, not a guaranteed return. No live orders.'
-      : 'Simulated prior-day break book on retrieved Kite 5-minute candles. Best two names. Not live trading P&L.',
+      : 'Simulated prior-day break book on retrieved Kite 5-minute candles. Same two-name scan and 1R exit as live. Capital sizes quantity. Not live trading P&L.',
   };
 }
 

@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { walkSignal } = require('./simulate');
 const { generateCandidates } = require('./candidates');
-const { simulateDesk, pickDay, dailyBooks } = require('./portfolio');
+const { simulateDesk, pickDay, pickDaySequential, dailyBooks } = require('./portfolio');
 const { runDailyProfit } = require('./pipeline');
 const { startJob, resetJobs } = require('./jobs');
 
@@ -132,6 +132,56 @@ test('pickDay keeps the requested name count using only rankScore', () => {
     picked.map((s) => s.symbol),
     ['B', 'C'],
   );
+});
+
+test('pickDaySequential keeps the first two prints and ignores a later higher score', () => {
+  const picked = pickDaySequential(
+    [
+      { symbol: 'EARLY_A', rankScore: 0.02, signalT: '09:50' },
+      { symbol: 'EARLY_B', rankScore: 0.015, signalT: '09:50' },
+      { symbol: 'LATE', rankScore: 0.08, signalT: '13:00' },
+    ],
+    2,
+  );
+  assert.deepEqual(
+    picked.map((s) => s.symbol).sort(),
+    ['EARLY_A', 'EARLY_B'],
+  );
+});
+
+test('walkSignal signalClose fills the print close without needing the next bar through the high', () => {
+  const day = '2026-10-16';
+  const bars = sessionBars(day, {
+    '10:00': { o: 101, h: 110, l: 100.9, c: 103.3 },
+    '10:05': { o: 103.2, h: 103.4, l: 103.0, c: 103.1 },
+    '15:15': { o: 103.1, h: 103.2, l: 102.9, c: 103.0 },
+  });
+  const trade = walkSignal(
+    bars,
+    {
+      symbol: 'AAA',
+      day,
+      side: 'L',
+      signalT: '10:00',
+      entryPx: 110,
+      stopPx: 100.4,
+      reason: 'test',
+      family: 'pdh_break',
+    },
+    {
+      capital: 10000,
+      maxStocksPerDay: 2,
+      sizing: 'risk',
+      timeExit: '15:15',
+      entryEnd: '14:30',
+      targetR: 1,
+      entryFill: 'signalClose',
+      slippage: 0,
+    },
+  );
+  assert.ok(trade);
+  assert.equal(trade.entryT, '10:00');
+  assert.equal(trade.entryPx, 103.3);
 });
 
 test('prior-day follow desk and daily book stay simulated with combined P/L', async () => {

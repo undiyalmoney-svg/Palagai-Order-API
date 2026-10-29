@@ -37,7 +37,7 @@ function persistInput(from, to, capital) {
     crowdFilter: cfg.crowdFilter,
     entryEnd: cfg.entryEnd,
     timeExit: cfg.timeExit,
-    targetR: null,
+    targetR: LIVE_TARGET_R,
     sizing: cfg.sizing,
   };
 }

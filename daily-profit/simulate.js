@@ -5,7 +5,7 @@
  */
 const { toMin } = require('../orb-backtest/engine');
 
-const ENGINE_VERSION = '1.3.164-pdh-live';
+const ENGINE_VERSION = '1.3.165-pdh-test';
 const RISK_FRACTION = 300 / 40000;
 const BUY_POWER_MULT = 5;
 const DEFAULT_SLIP = 0.0005;
@@ -47,19 +47,27 @@ function walkSignal(bars5, signal, cfg) {
   const timeExit = cfg.timeExit || '15:15';
   const entryEnd = cfg.entryEnd || '14:30';
   const after = bars5.filter((b) => toMin(b.t) > toMin(signal.signalT) && toMin(b.t) <= toMin(timeExit));
-  if (!after.length) return null;
   if (toMin(signal.signalT) > toMin(entryEnd)) return null;
 
   let fill = null;
   let fillT = null;
-  for (const b of after) {
-    if (toMin(b.t) > toMin(entryEnd) && !fill) return null;
-    const hit = side === 'L' ? b.h >= signal.entryPx : b.l <= signal.entryPx;
-    if (!hit) continue;
-    const raw = side === 'L' ? (b.o > signal.entryPx ? b.o : signal.entryPx) : b.o < signal.entryPx ? b.o : signal.entryPx;
-    fill = applySlip(raw, side, slip);
-    fillT = b.t;
-    break;
+  if (cfg.entryFill === 'signalClose') {
+    // Live MARKET uses the signal print close, not a later bar through the high.
+    const print = (bars5 || []).find((b) => b.t === signal.signalT);
+    if (!print || !(Number(print.c) > 0)) return null;
+    fill = applySlip(print.c, side, slip);
+    fillT = signal.signalT;
+  } else {
+    if (!after.length) return null;
+    for (const b of after) {
+      if (toMin(b.t) > toMin(entryEnd) && !fill) return null;
+      const hit = side === 'L' ? b.h >= signal.entryPx : b.l <= signal.entryPx;
+      if (!hit) continue;
+      const raw = side === 'L' ? (b.o > signal.entryPx ? b.o : signal.entryPx) : b.o < signal.entryPx ? b.o : signal.entryPx;
+      fill = applySlip(raw, side, slip);
+      fillT = b.t;
+      break;
+    }
   }
   if (!(fill > 0)) return null;
 
@@ -101,7 +109,11 @@ function walkSignal(bars5, signal, cfg) {
     if (b.t === timeExit) return finish(signal, cfg, fill, fillT, qty, b.c, b.t, 'EOD', extreme, tgtPx, riskPx);
   }
   const last = rest[rest.length - 1] || after[after.length - 1];
-  const sessionDone = last && toMin(last.t) >= toMin(timeExit);
+  if (!last) {
+    const reason = cfg.allowOpen ? 'OPEN' : 'EOD';
+    return finish(signal, cfg, fill, fillT, qty, fill, fillT, reason, extreme, tgtPx, riskPx);
+  }
+  const sessionDone = toMin(last.t) >= toMin(timeExit);
   const reason = !sessionDone && cfg.allowOpen ? 'OPEN' : 'EOD';
   return finish(signal, cfg, fill, fillT, qty, last.c, last.t, reason, extreme, tgtPx, riskPx);
 }

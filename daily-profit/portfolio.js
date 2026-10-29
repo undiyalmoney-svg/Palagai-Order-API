@@ -30,6 +30,29 @@ function pickDay(signals, maxNames) {
   return taken;
 }
 
+/**
+ * Fill remaining slots as each print arrives — same as the live worker if it
+ * had been scanning from 09:45. A later wider stop cannot replace an earlier fill.
+ */
+function pickDaySequential(signals, maxNames) {
+  const list = signals || [];
+  const cap = Math.max(0, Math.floor(Number(maxNames) || 0));
+  if (!cap) return [];
+  const times = [...new Set(list.map((s) => s.signalT))].sort((a, b) => String(a).localeCompare(String(b)));
+  const taken = [];
+  const seen = new Set();
+  for (const t of times) {
+    if (taken.length >= cap) break;
+    const pool = list.filter((s) => String(s.signalT) <= String(t) && !seen.has(s.symbol));
+    const picks = pickDay(pool, cap - taken.length);
+    for (const p of picks) {
+      seen.add(p.symbol);
+      taken.push(p);
+    }
+  }
+  return taken;
+}
+
 async function simulateDesk(symbolBars, candidate, capital) {
   if (candidate.family === 'orb_two_low' || candidate.family === 'orb_winner' || candidate.family === 'orb_original') {
     return { trades: orbTrades(symbolBars, candidate, capital), signals: [] };
@@ -53,11 +76,17 @@ async function simulateDesk(symbolBars, candidate, capital) {
     allowOpen: !!candidate.allowOpen,
   };
   for (const [day, list] of Object.entries(byDay)) {
-    const picked = pickDay(list, candidate.maxStocksPerDay);
+    const picked = candidate.matchLiveScan
+      ? pickDaySequential(list, candidate.maxStocksPerDay)
+      : pickDay(list, candidate.maxStocksPerDay);
     selected.push(...picked);
     for (const sig of picked) {
       const bars5 = (symbolBars[sig.symbol] && symbolBars[sig.symbol][day]) || [];
-      const trade = walkSignal(bars5, sig, cfg);
+      const trade = walkSignal(bars5, sig, {
+        ...cfg,
+        entryFill: candidate.entryFill,
+        slippage: candidate.entryFill === 'signalClose' ? 0 : candidate.slippage,
+      });
       if (trade) trades.push(trade);
     }
   }
@@ -110,4 +139,4 @@ function dailyBooks(trades, signals, days, capital) {
   });
 }
 
-module.exports = { simulateDesk, filterCrowd, pickDay, dailyBooks };
+module.exports = { simulateDesk, filterCrowd, pickDay, pickDaySequential, dailyBooks };
