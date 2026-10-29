@@ -10,6 +10,7 @@ const { createSlBuddyRouter } = require('../sl-buddy/routes');
 const { getHeatmapRouter } = require('../heatmap/instance');
 const { getMarketDeskRouter } = require('../market-desk/instance');
 const { createOrbBacktestRouter } = require('../orb-backtest/routes');
+const { createDailyProfitRouter } = require('../daily-profit/routes');
 
 const router = express.Router();
 
@@ -70,5 +71,12 @@ function orbBacktestHandler(req, res, next) {
   return orbBacktestRouter(req, res, next);
 }
 router.use('/orb-backtest', orbBacktestHandler);
+
+let dailyProfitRouter = null;
+function dailyProfitHandler(req, res, next) {
+  if (!dailyProfitRouter) dailyProfitRouter = createDailyProfitRouter();
+  return dailyProfitRouter(req, res, next);
+}
+router.use('/daily-profit', dailyProfitHandler);
 
 module.exports = router;
