@@ -167,7 +167,7 @@ async function runDailyProfit({ symbolBars, capital = 10000, budget = 24, covera
   for (let i = 0; i < candidates.length; i += 1) {
     const c = candidates[i];
     if (onProgress) onProgress({ phase: 'simulate', done: i, total: candidates.length, symbol: c.id });
-    const sim = simulateDesk(symbolBars, c, c.capital || capital);
+    const sim = await simulateDesk(symbolBars, c, c.capital || capital);
     const train = scoreTrades(filterTrades(sim.trades, split.train), capital, split.train);
     const validation = scoreTrades(filterTrades(sim.trades, split.validation), capital, split.validation);
     const oos = scoreTrades(filterTrades(sim.trades, split.oos), capital, split.oos);

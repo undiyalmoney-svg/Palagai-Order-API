@@ -76,10 +76,12 @@ async function runJob(job, req) {
       to: job.input.to,
       db: getDb(),
       shouldCancel: () => job.cancel,
+      batchSize: 10,
       onProgress: (p) => {
         job.progress = p;
         job.updatedAt = new Date().toISOString();
-        if (p.phase !== 'candles' || p.done % 25 === 0) persist(job);
+        const size = p.batchSize || 10;
+        if (p.phase !== 'candles' || p.done % size === 0 || (p.done + 1) % size === 0) persist(job);
       },
     });
     warnings.push(...(loaded.warnings || []));

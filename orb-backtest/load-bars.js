@@ -3,7 +3,13 @@
 const { NIFTY_500 } = require('./universe');
 const { barsFromCandles, groupByDay } = require('./engine');
 const kite = require('../services/kite-market');
-const { getCachedBars, putCachedBars } = require('./store');
+const { getCachedBarsCovering, putCachedBars } = require('./store');
+
+const CANDLE_BATCH = 10;
+
+function yieldEventLoop() {
+  return new Promise((resolve) => setImmediate(resolve));
+}
 
 function parseNseEqMap(csv, symbols) {
   const want = new Set((symbols || []).map((s) => String(s).toUpperCase()));
@@ -49,41 +55,97 @@ async function loadUniverseBars({
   onProgress,
   shouldCancel,
   symbols = NIFTY_500,
+  batchSize = CANDLE_BATCH,
+  instrumentMap = null,
 }) {
   const warnings = [];
-  const inst = await resolveNseEq(authorization, symbols);
-  const missing = symbols.filter((s) => !inst.has(s));
-  const resolved = symbols.filter((s) => inst.has(s));
-  if (!resolved.length) {
+  const wanted = (symbols || []).map((s) => String(s).toUpperCase());
+  const symbolBars = {};
+  const needFetch = [];
+  const gaps = [];
+  let cacheHits = 0;
+  const size = Math.max(1, Math.min(50, Math.floor(Number(batchSize) || CANDLE_BATCH)));
+  const cacheBatches = Math.ceil(wanted.length / size) || 1;
+
+  for (let i = 0; i < wanted.length; i += 1) {
+    if (shouldCancel && shouldCancel()) {
+      throw Object.assign(new Error('Cancelled'), { status: 499 });
+    }
+    const symbol = wanted[i];
+    if (onProgress) {
+      onProgress({
+        phase: 'candles',
+        done: i,
+        total: wanted.length,
+        symbol,
+        cacheHits,
+        batch: Math.floor(i / size) + 1,
+        batches: cacheBatches,
+        batchSize: size,
+      });
+    }
+    const cached = db ? getCachedBarsCovering(db, symbol, from, to) : null;
+    if (cached && Object.keys(cached).length) {
+      symbolBars[symbol] = cached;
+      cacheHits += 1;
+    } else {
+      needFetch.push(symbol);
+    }
+    if ((i + 1) % size === 0) await yieldEventLoop();
+  }
+
+  let missing = [];
+  if (!needFetch.length) {
+    return {
+      symbolBars,
+      missing,
+      gaps,
+      warnings,
+      resolved: cacheHits,
+      requested: wanted.length,
+      cacheHits,
+      withBars: Object.keys(symbolBars).length,
+    };
+  }
+
+  const inst = instrumentMap instanceof Map ? instrumentMap : await resolveNseEq(authorization, needFetch);
+  missing = needFetch.filter((s) => !inst.has(s));
+  const resolved = needFetch.filter((s) => inst.has(s));
+  if (!resolved.length && !cacheHits) {
     throw Object.assign(new Error('No Nifty 500 NSE EQ tokens were found in the Kite instrument dump.'), {
       status: 400,
     });
   }
-  const symbolBars = {};
-  const gaps = [];
-  let cacheHits = 0;
+
+  const fetchTotal = wanted.length;
   for (let i = 0; i < resolved.length; i += 1) {
     if (shouldCancel && shouldCancel()) {
       throw Object.assign(new Error('Cancelled'), { status: 499 });
     }
     const symbol = resolved[i];
-    if (onProgress) onProgress({ phase: 'candles', done: i, total: resolved.length, symbol, cacheHits });
-    const cached = db ? getCachedBars(db, symbol, from, to) : null;
-    if (cached && Object.keys(cached).length) {
-      symbolBars[symbol] = cached;
-      cacheHits += 1;
-      continue;
+    const done = cacheHits + i;
+    if (onProgress) {
+      onProgress({
+        phase: 'candles',
+        done,
+        total: fetchTotal,
+        symbol,
+        cacheHits,
+        batch: Math.floor(done / size) + 1,
+        batches: Math.ceil(fetchTotal / size) || 1,
+        batchSize: size,
+      });
     }
     try {
-      if (i) await new Promise((r) => setTimeout(r, 350));
+      await new Promise((r) => setTimeout(r, 350));
       const bars = await fetchSymbolBars(authorization, inst.get(symbol).instrumentToken, from, to);
       const days = Object.keys(bars);
       if (!days.length) {
         gaps.push(symbol);
-        continue;
+      } else {
+        symbolBars[symbol] = bars;
+        if (db) putCachedBars(db, symbol, from, to, bars);
       }
-      symbolBars[symbol] = bars;
-      if (db) putCachedBars(db, symbol, from, to, bars);
     } catch (err) {
       const msg = String(err.message || err);
       if (/401|403|incorrect|token|session/i.test(msg)) {
@@ -100,14 +162,16 @@ async function loadUniverseBars({
       gaps.push(symbol);
       warnings.push(`${symbol}: ${msg}`);
     }
+    if ((i + 1) % size === 0) await yieldEventLoop();
   }
+
   return {
     symbolBars,
     missing,
     gaps,
     warnings,
-    resolved: resolved.length,
-    requested: symbols.length,
+    resolved: cacheHits + resolved.length,
+    requested: wanted.length,
     cacheHits,
     withBars: Object.keys(symbolBars).length,
   };

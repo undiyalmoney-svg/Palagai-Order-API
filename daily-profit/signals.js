@@ -87,10 +87,15 @@ function orCrosses(symbolBars) {
   return dayCrowdFromCrosses(crosses);
 }
 
-function collectSignals(symbolBars, candidate) {
+function yieldEventLoop() {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
+async function collectSignals(symbolBars, candidate) {
   const family = candidate.family;
   if (family === 'orb_two_low' || family === 'orb_winner' || family === 'orb_original') return [];
   const out = [];
+  let n = 0;
   for (const [symbol, byDay] of Object.entries(symbolBars || {})) {
     for (const [day, raw] of Object.entries(byDay || {})) {
       const bars5 = [...(raw || [])].sort((a, b) => a.t.localeCompare(b.t));
@@ -98,6 +103,8 @@ function collectSignals(symbolBars, candidate) {
       const bars15 = aggregate15(bars5);
       const sigs = emitFamily(family, { symbol, day, bars5, bars15, byDay, candidate });
       if (sigs) out.push(...(Array.isArray(sigs) ? sigs : [sigs]).filter(Boolean));
+      n += 1;
+      if (n % 25 === 0) await yieldEventLoop();
     }
   }
   return out;

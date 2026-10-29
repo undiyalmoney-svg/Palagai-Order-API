@@ -30,12 +30,12 @@ function pickDay(signals, maxNames) {
   return taken;
 }
 
-function simulateDesk(symbolBars, candidate, capital) {
+async function simulateDesk(symbolBars, candidate, capital) {
   if (candidate.family === 'orb_two_low' || candidate.family === 'orb_winner' || candidate.family === 'orb_original') {
     return { trades: orbTrades(symbolBars, candidate, capital), signals: [] };
   }
   const crowd = orCrosses(symbolBars);
-  const raw = collectSignals(symbolBars, candidate);
+  const raw = await collectSignals(symbolBars, candidate);
   const filtered = filterCrowd(raw, crowd, candidate.crowdFilter || null);
   const byDay = {};
   for (const s of filtered) (byDay[s.day] ||= []).push(s);

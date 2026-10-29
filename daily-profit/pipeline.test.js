@@ -82,7 +82,7 @@ test('pickDay keeps the requested name count using only rankScore', () => {
   );
 });
 
-test('first-30 break and daily book stay simulated with combined P/L', () => {
+test('first-30 break and daily book stay simulated with combined P/L', async () => {
   const day = '2026-10-16';
   const prev = '2026-10-15';
   const rising = sessionBars(day, {
@@ -103,7 +103,7 @@ test('first-30 break and daily book stay simulated with combined P/L', () => {
     BBB: { [prev]: sessionBars(prev), [day]: sessionBars(day) },
   };
   const candidate = generateCandidates({ budget: 20 }).find((c) => c.family === 'or30_break' && c.maxStocksPerDay === 5 && !c.targetR && !c.crowdFilter && c.sizing === 'risk');
-  const sim = simulateDesk(symbolBars, candidate, 10000);
+  const sim = await simulateDesk(symbolBars, candidate, 10000);
   assert.equal(sim.trades.every((t) => t.symbol), true);
   const books = dailyBooks(sim.trades, sim.signals, [day], 10000);
   assert.equal(books[0].day, day);
@@ -125,6 +125,31 @@ test('runDailyProfit reports honestly when evidence is thin and never live-order
   } else {
     assert.ok(out.recommended.risks.some((r) => /not guaranteed/i.test(r)));
   }
+});
+
+test('runDailyProfit evaluates a 25-name batched book without blocking forever', async () => {
+  const days = ['2026-09-15', '2026-09-16', '2026-10-16'];
+  const symbolBars = {};
+  for (let i = 1; i <= 25; i += 1) {
+    const symbol = `SYM${String(i).padStart(2, '0')}`;
+    symbolBars[symbol] = {};
+    for (const day of days) symbolBars[symbol][day] = sessionBars(day);
+  }
+  const started = Date.now();
+  let last = 0;
+  const out = await runDailyProfit({
+    symbolBars,
+    capital: 10000,
+    budget: 12,
+    onProgress: (p) => {
+      last = p.done;
+    },
+  });
+  const elapsed = Date.now() - started;
+  assert.equal(out.liveOrders, false);
+  assert.ok(out.candidatesEvaluated >= 10);
+  assert.ok(last > 0);
+  assert.ok(elapsed < 30_000, `batched daily-profit took ${elapsed}ms`);
 });
 
 test('startJob rejects a future range and a missing date', () => {

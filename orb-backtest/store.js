@@ -60,6 +60,14 @@ function barsKey(symbol, from, to) {
   return `${String(symbol).toUpperCase()}|${from}|${to}`;
 }
 
+function sliceBars(barsByDay, from, to) {
+  const sliced = {};
+  for (const [day, list] of Object.entries(barsByDay || {})) {
+    if (day >= from && day <= to) sliced[day] = list;
+  }
+  return Object.keys(sliced).length ? sliced : null;
+}
+
 function getCachedBars(db, symbol, from, to) {
   const row = db.prepare('SELECT bars_json FROM bar_cache WHERE cache_key = ?').get(barsKey(symbol, from, to));
   if (!row) return null;
@@ -68,6 +76,28 @@ function getCachedBars(db, symbol, from, to) {
   } catch {
     return null;
   }
+}
+
+/** Reuse a wider cached pull (discovery often stores 60-day chunks). */
+function getCachedBarsCovering(db, symbol, from, to) {
+  const exact = getCachedBars(db, symbol, from, to);
+  if (exact) return exact;
+  const rows = db
+    .prepare(
+      `SELECT from_day, to_day, bars_json FROM bar_cache
+       WHERE symbol = ? AND from_day <= ? AND to_day >= ?
+       ORDER BY from_day DESC`,
+    )
+    .all(String(symbol).toUpperCase(), from, to);
+  for (const row of rows) {
+    try {
+      const sliced = sliceBars(JSON.parse(row.bars_json), from, to);
+      if (sliced) return sliced;
+    } catch {
+      /* try next covering row */
+    }
+  }
+  return null;
 }
 
 function putCachedBars(db, symbol, from, to, barsByDay) {
@@ -153,6 +183,8 @@ module.exports = {
   closeDb,
   barsKey,
   getCachedBars,
+  getCachedBarsCovering,
+  sliceBars,
   putCachedBars,
   saveExperiment,
   loadExperiment,
