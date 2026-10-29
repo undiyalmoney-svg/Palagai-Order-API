@@ -45,6 +45,15 @@ function loadWindow(input, today) {
   };
 }
 
+/** Reported book window. Live today loads lookback candles but only scores today, same as One day of today. */
+function reportWindow(input) {
+  const liveToday = !!input.liveToday;
+  return {
+    from: liveToday ? input.to : input.from,
+    to: input.to,
+  };
+}
+
 function persistInput(from, to, capital) {
   const cfg = deskConfig(capital);
   return {
@@ -177,13 +186,14 @@ async function runJob(job, req) {
     }
 
     job.progress = { phase: 'simulate', done: loaded.withBars, total: loaded.requested, symbol: null };
+    const reported = reportWindow(job.input);
     const result = await runPdhFollowBook({
       symbolBars: loaded.symbolBars,
       capital: job.input.capital,
       liveLock: liveToday,
       fundsRs: liveToday ? job.input.fundsRs : null,
-      from: job.input.from,
-      to: job.input.to,
+      from: reported.from,
+      to: reported.to,
     });
     result.universe = {
       requested: loaded.requested,
@@ -193,7 +203,7 @@ async function runJob(job, req) {
       missing: loaded.missing,
       noCandles: loaded.gaps,
     };
-    result.range = { from: job.input.from, to: job.input.to };
+    result.range = { from: reported.from, to: reported.to };
     result.warnings = warnings;
     job.result = result;
     job.warnings = warnings;
@@ -323,5 +333,6 @@ module.exports = {
   namesFromCapital,
   barsFromFor,
   loadWindow,
+  reportWindow,
   PDH_LOOKBACK_DAYS,
 };

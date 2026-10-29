@@ -221,10 +221,11 @@ test('entry is NSE MIS MARKET; stop is SL-M; flatten is the other side after can
 test('1R and 15:15 flatten; SL grace does not fire the exit', () => {
   const fill = { instrument: 'AAA', side: 'L', entry: 103, stop: 101, target: 105 };
   const map = new Map([['AAA', 1_000]]);
+  const session = Date.parse('2026-10-16T11:00:00+05:30');
   assert.equal(orders.decideFillAction(fill, 105, 1_000 + orders.SL_GRACE_MS - 1, map).action, 'wait');
   assert.equal(orders.decideFillAction(fill, 105, 1_000 + orders.SL_GRACE_MS + 1, map).action, 'flatten');
   assert.equal(orders.decideFillAction(fill, 105, 1_000 + orders.SL_GRACE_MS + 1, map).reason, 'TARGET');
-  assert.equal(orders.decideFillAction(fill, 101, Date.now() + 60_000).reason, 'SL');
+  assert.equal(orders.decideFillAction(fill, 101, session).reason, 'SL');
   const eod = Date.parse('2026-10-16T15:16:00+05:30');
   assert.equal(orders.decideFillAction(fill, 104, eod).reason, 'EOD');
 });
@@ -349,10 +350,10 @@ test('live 1R take-profit is compulsory on levels and flatten', () => {
   assert.equal(short.riskPx, 2);
   assert.equal(short.target, 98);
   const fill = { instrument: 'AAA', side: 'L', entry: 103, stop: 101, target: 110 };
-  const late = Date.now() + orders.SL_GRACE_MS + 1;
-  assert.equal(orders.decideFillAction(fill, 105, late).action, 'flatten');
-  assert.equal(orders.decideFillAction(fill, 105, late).reason, 'TARGET');
-  assert.equal(orders.decideFillAction(fill, 104.9, late).action, 'hold');
+  const session = Date.parse('2026-10-16T11:00:00+05:30');
+  assert.equal(orders.decideFillAction(fill, 105, session).action, 'flatten');
+  assert.equal(orders.decideFillAction(fill, 105, session).reason, 'TARGET');
+  assert.equal(orders.decideFillAction(fill, 104.9, session).action, 'hold');
 });
 
 test('Kite MARKET and SL-M get non-zero market protection even if the caller omits it', () => {

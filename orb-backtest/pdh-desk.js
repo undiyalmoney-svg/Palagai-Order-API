@@ -9,7 +9,7 @@ const { summarize } = require('./engine');
 const { simulateDesk, dailyBooks } = require('../daily-profit/portfolio');
 const { allDays } = require('./discover/split');
 
-const ENGINE_VERSION = '1.3.166-pdh-test';
+const ENGINE_VERSION = '1.3.167-pdh-test';
 const NAME_RUPEES = 2000;
 const MAX_NAMES = 8;
 const LIVE_MAX_NAMES = 2;
@@ -46,7 +46,7 @@ function pdhFollowCandidate(capital, opts = {}) {
     entryEnd: '14:30',
     timeExit: '15:15',
     targetR: LIVE_TARGET_R,
-    allowOpen: liveLock,
+    allowOpen: true,
     liveLock,
     matchLiveScan: true,
     entryFill: 'signalClose',
@@ -62,7 +62,7 @@ function pdhFollowCandidate(capital, opts = {}) {
       cutoff: 'No new entries after 14:30 IST',
       exit: liveLock
         ? 'Stop, compulsory 1R take-profit, or 15:15. Open trades mark to the last 5-minute close until then.'
-        : 'Stop, compulsory 1R take-profit, or 15:15 — same exits as live. Fill is the signal print close.',
+        : 'Stop, compulsory 1R take-profit, or 15:15 — same exits as live. Fill is the signal print close. Leftover before 15:15 marks OPEN.',
       stopLoss: row.stopLoss,
       target:
         'Compulsory 1R take-profit — exit if the trade makes 1× the stop distance. Not a guaranteed profit.',

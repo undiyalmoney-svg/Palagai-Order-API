@@ -11,6 +11,7 @@ const {
   namesFromCapital,
   barsFromFor,
   loadWindow,
+  reportWindow,
 } = require('./jobs');
 
 const NSE_CSV = `instrument_token,exchange_token,tradingsymbol,name,last_price,expiry,strike,tick_size,lot_size,instrument_type,segment,exchange
@@ -93,6 +94,11 @@ test('One day loads a prior-day lookback and refreshes today without changing li
   assert.equal(live.to, '2026-10-29');
   assert.equal(live.fillDay, '2026-10-29');
   assert.equal(live.alwaysRefreshFillDay, true);
+
+  const histBook = reportWindow({ from: '2026-10-29', to: '2026-10-29', liveToday: false });
+  const liveBook = reportWindow({ from: '2026-10-22', to: '2026-10-29', liveToday: true });
+  assert.deepEqual(histBook, { from: '2026-10-29', to: '2026-10-29' });
+  assert.deepEqual(liveBook, { from: '2026-10-29', to: '2026-10-29' });
 });
 
 test('₹40k capital still takes 2 names and ignores an old maxStocks field', () => {

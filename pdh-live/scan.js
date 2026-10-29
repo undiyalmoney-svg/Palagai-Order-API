@@ -7,7 +7,7 @@
 
 const { toMin } = require('../orb-backtest/engine');
 const { minutesOfDay, sessionDate } = require('../research/time');
-const { orCrosses, pdhBreak } = require('../daily-profit/signals');
+const { orCrosses, pdhSignalsForDay } = require('../daily-profit/signals');
 const { filterCrowd, pickDay } = require('../daily-profit/portfolio');
 const { sizeQty, RISK_FRACTION, BUY_POWER_MULT } = require('../daily-profit/simulate');
 const { pdhFollowCandidate, LIVE_MAX_NAMES, LIVE_TARGET_R } = require('../orb-backtest/pdh-desk');
@@ -65,17 +65,6 @@ function subsequentResolved(bars, { side, fillPx, stopPx, targetR = LIVE_TARGET_
 
 function barAt(bars, t) {
   return (bars || []).find((b) => b.t === t) || null;
-}
-
-function pdhSignalsForDay(symbolBars, day, candidate) {
-  const out = [];
-  for (const [symbol, byDay] of Object.entries(symbolBars || {})) {
-    const bars5 = [...((byDay && byDay[day]) || [])].sort((a, b) => a.t.localeCompare(b.t));
-    if (bars5.length < 2) continue;
-    const sig = pdhBreak({ symbol, day, bars5, byDay, candidate });
-    if (sig) out.push(sig);
-  }
-  return out;
 }
 
 function liveQty({ side, fill, stopPx, capital }) {

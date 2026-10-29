@@ -45,6 +45,7 @@ test('historical test book stays at 2 names even when capital would have bought 
   assert.equal(pdhFollowCandidate(10000).targetR, 1);
   assert.equal(pdhFollowCandidate(10000).matchLiveScan, true);
   assert.equal(pdhFollowCandidate(10000).entryFill, 'signalClose');
+  assert.equal(pdhFollowCandidate(10000).allowOpen, true);
 });
 
 test('live lock candidate is 2 names, compulsory 1R, and never live orders', () => {

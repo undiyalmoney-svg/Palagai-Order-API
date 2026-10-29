@@ -261,6 +261,29 @@ function vwapReclaim({ symbol, day, bars5, candidate }) {
   return null;
 }
 
+function pdhSignalsForDay(symbolBars, day, candidate) {
+  const out = [];
+  for (const [symbol, byDay] of Object.entries(symbolBars || {})) {
+    const bars5 = [...((byDay && byDay[day]) || [])].sort((a, b) => String(a.t).localeCompare(String(b.t)));
+    if (bars5.length < 2) continue;
+    const sig = pdhBreak({ symbol, day, bars5, byDay, candidate });
+    if (sig) out.push(sig);
+  }
+  return out;
+}
+
+function pdhSignals(symbolBars, candidate) {
+  const days = new Set();
+  for (const byDay of Object.values(symbolBars || {})) {
+    for (const day of Object.keys(byDay || {})) days.add(day);
+  }
+  const out = [];
+  for (const day of [...days].sort()) {
+    out.push(...pdhSignalsForDay(symbolBars, day, candidate));
+  }
+  return out;
+}
+
 function pdhBreak({ symbol, day, bars5, byDay, candidate }) {
   const prev = prevDayRange(byDay, day);
   if (!prev) return null;
@@ -419,5 +442,7 @@ module.exports = {
   prevClose,
   prevDayRange,
   pdhBreak,
+  pdhSignalsForDay,
+  pdhSignals,
   sessionVwap,
 };

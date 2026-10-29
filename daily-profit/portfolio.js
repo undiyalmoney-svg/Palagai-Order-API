@@ -1,7 +1,7 @@
 'use strict';
 
-const { walkSignal } = require('./simulate');
-const { collectSignals, orCrosses, orbTrades } = require('./signals');
+const { walkSignal, sizeQty, BUY_POWER_MULT } = require('./simulate');
+const { collectSignals, orCrosses, orbTrades, pdhSignals } = require('./signals');
 
 function filterCrowd(signals, crowd, mode) {
   if (!mode) return signals;
@@ -53,13 +53,37 @@ function pickDaySequential(signals, maxNames) {
   return taken;
 }
 
+function canLiveFill(sig, symbolBars, capital, candidate) {
+  const bars5 = (symbolBars[sig.symbol] && symbolBars[sig.symbol][sig.day]) || [];
+  const print = (bars5 || []).find((b) => b.t === sig.signalT);
+  const fill = print && Number(print.c) > 0 ? Number(print.c) : sig.entryPx;
+  return (
+    sizeQty({
+      side: sig.side,
+      fill,
+      stopPx: sig.stopPx,
+      capital,
+      maxStocks: candidate.maxStocksPerDay,
+      sizing: candidate.sizing || 'risk',
+      buyPower: capital * BUY_POWER_MULT,
+    }) > 0
+  );
+}
+
 async function simulateDesk(symbolBars, candidate, capital) {
   if (candidate.family === 'orb_two_low' || candidate.family === 'orb_winner' || candidate.family === 'orb_original') {
     return { trades: orbTrades(symbolBars, candidate, capital), signals: [] };
   }
   const crowd = orCrosses(symbolBars);
-  const raw = await collectSignals(symbolBars, candidate);
-  const filtered = filterCrowd(raw, crowd, candidate.crowdFilter || null);
+  const raw =
+    candidate.family === 'pdh_break'
+      ? pdhSignals(symbolBars, candidate)
+      : await collectSignals(symbolBars, candidate);
+  const crowdFiltered = filterCrowd(raw, crowd, candidate.crowdFilter || null);
+  const filtered =
+    candidate.family === 'pdh_break'
+      ? crowdFiltered.filter((sig) => canLiveFill(sig, symbolBars, capital, candidate))
+      : crowdFiltered;
   const byDay = {};
   for (const s of filtered) (byDay[s.day] ||= []).push(s);
   const trades = [];
