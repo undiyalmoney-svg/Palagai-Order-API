@@ -2,7 +2,16 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { parseNseEqMap, startJob, startLiveJob, resetJobs, NIFTY_50_TOKEN, namesFromCapital } = require('./jobs');
+const {
+  parseNseEqMap,
+  startJob,
+  startLiveJob,
+  resetJobs,
+  NIFTY_50_TOKEN,
+  namesFromCapital,
+  barsFromFor,
+  loadWindow,
+} = require('./jobs');
 
 const NSE_CSV = `instrument_token,exchange_token,tradingsymbol,name,last_price,expiry,strike,tick_size,lot_size,instrument_type,segment,exchange
 738561,2885,RELIANCE,RELIANCE,0,,,,1,EQ,NSE,NSE
@@ -59,7 +68,31 @@ test('startJob locks the prior-day follow desk and picks 2 names', () => {
   assert.equal(job.input.timeExit, '15:15');
   assert.equal(job.input.targetR, 1);
   assert.equal(job.liveOrders, false);
+  assert.equal(job.input.from, '2026-10-16');
+  assert.equal(job.input.to, '2026-10-16');
+  assert.equal(job.input.barsFrom, '2026-10-09');
+  assert.equal(barsFromFor('2026-10-16'), '2026-10-09');
   resetJobs();
+});
+
+test('One day loads a prior-day lookback and refreshes today without changing live money', () => {
+  const hist = loadWindow({ from: '2026-10-16', to: '2026-10-16', barsFrom: '2026-10-09', liveToday: false }, '2026-10-29');
+  assert.equal(hist.from, '2026-10-09');
+  assert.equal(hist.to, '2026-10-16');
+  assert.equal(hist.fillDay, null);
+  assert.equal(hist.alwaysRefreshFillDay, false);
+
+  const todayHist = loadWindow({ from: '2026-10-29', to: '2026-10-29', barsFrom: '2026-10-22', liveToday: false }, '2026-10-29');
+  assert.equal(todayHist.from, '2026-10-22');
+  assert.equal(todayHist.to, '2026-10-29');
+  assert.equal(todayHist.fillDay, '2026-10-29');
+  assert.equal(todayHist.alwaysRefreshFillDay, true);
+
+  const live = loadWindow({ from: '2026-10-22', to: '2026-10-29', liveToday: true }, '2026-10-29');
+  assert.equal(live.from, '2026-10-22');
+  assert.equal(live.to, '2026-10-29');
+  assert.equal(live.fillDay, '2026-10-29');
+  assert.equal(live.alwaysRefreshFillDay, true);
 });
 
 test('₹40k capital still takes 2 names and ignores an old maxStocks field', () => {

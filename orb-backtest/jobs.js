@@ -22,12 +22,35 @@ const jobs = new Map();
 let runningId = null;
 
 const NIFTY_50_TOKEN = 256265;
+const PDH_LOOKBACK_DAYS = 7;
+
+function addCalendarDays(day, delta) {
+  const ms = Date.parse(`${day}T12:00:00+05:30`) + delta * 86400000;
+  return sessionDate(new Date(ms));
+}
+
+function barsFromFor(from) {
+  return addCalendarDays(from, -PDH_LOOKBACK_DAYS);
+}
+
+/** Candle window for a historical One day / range. Live today already includes lookback in `from`. */
+function loadWindow(input, today) {
+  const liveToday = !!input.liveToday;
+  const refreshToday = liveToday || input.to === today;
+  return {
+    from: liveToday ? input.from : input.barsFrom || barsFromFor(input.from),
+    to: input.to,
+    fillDay: refreshToday ? input.to : null,
+    alwaysRefreshFillDay: refreshToday,
+  };
+}
 
 function persistInput(from, to, capital) {
   const cfg = deskConfig(capital);
   return {
     from,
     to,
+    barsFrom: barsFromFor(from),
     liveToday: false,
     preset: 'pdh-follow',
     family: cfg.family,
@@ -40,11 +63,6 @@ function persistInput(from, to, capital) {
     targetR: LIVE_TARGET_R,
     sizing: cfg.sizing,
   };
-}
-
-function addCalendarDays(day, delta) {
-  const ms = Date.parse(`${day}T12:00:00+05:30`) + delta * 86400000;
-  return sessionDate(new Date(ms));
 }
 
 function persistLiveInput(today) {
@@ -133,15 +151,16 @@ async function runJob(job, req) {
     job.progress = { phase: 'instruments', done: 0, total: NIFTY_500.length, symbol: null };
     job.updatedAt = new Date().toISOString();
 
+    const window = loadWindow(job.input, sessionDate(new Date()));
     const loaded = await loadUniverseBars({
       authorization,
-      from: job.input.from,
-      to: job.input.to,
+      from: window.from,
+      to: window.to,
       db: getDb(),
       shouldCancel: () => job.cancel,
       batchSize: 10,
-      fillDay: liveToday ? job.input.to : null,
-      alwaysRefreshFillDay: liveToday,
+      fillDay: window.fillDay,
+      alwaysRefreshFillDay: window.alwaysRefreshFillDay,
       onProgress: (p) => {
         job.progress = p;
         job.updatedAt = new Date().toISOString();
@@ -163,6 +182,8 @@ async function runJob(job, req) {
       capital: job.input.capital,
       liveLock: liveToday,
       fundsRs: liveToday ? job.input.fundsRs : null,
+      from: job.input.from,
+      to: job.input.to,
     });
     result.universe = {
       requested: loaded.requested,
@@ -300,4 +321,7 @@ module.exports = {
   resetJobs,
   NIFTY_50_TOKEN,
   namesFromCapital,
+  barsFromFor,
+  loadWindow,
+  PDH_LOOKBACK_DAYS,
 };

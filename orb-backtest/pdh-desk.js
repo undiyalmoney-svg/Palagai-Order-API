@@ -9,7 +9,7 @@ const { summarize } = require('./engine');
 const { simulateDesk, dailyBooks } = require('../daily-profit/portfolio');
 const { allDays } = require('./discover/split');
 
-const ENGINE_VERSION = '1.3.165-pdh-test';
+const ENGINE_VERSION = '1.3.166-pdh-test';
 const NAME_RUPEES = 2000;
 const MAX_NAMES = 8;
 const LIVE_MAX_NAMES = 2;
@@ -119,15 +119,23 @@ function promisedLock(trades, capital, fundsRs) {
   };
 }
 
-async function runPdhFollowBook({ symbolBars, capital, liveLock = false, fundsRs = null }) {
+function inRange(day, from, to) {
+  if (from && day < from) return false;
+  if (to && day > to) return false;
+  return true;
+}
+
+async function runPdhFollowBook({ symbolBars, capital, liveLock = false, fundsRs = null, from = null, to = null }) {
   const cfg = deskConfig(capital, { liveLock });
   const candidate = pdhFollowCandidate(cfg.capital, { liveLock });
   const sim = await simulateDesk(symbolBars, candidate, cfg.capital);
-  const days = allDays(symbolBars);
-  const books = dailyBooks(sim.trades, sim.signals, days, cfg.capital);
-  const summary = summarize(sim.trades, cfg.capital);
-  const taken = new Set((sim.trades || []).map((t) => `${t.day}|${t.symbol}`));
-  const crosses = (sim.signals || []).map((s) => ({
+  const trades = (sim.trades || []).filter((t) => inRange(t.day, from, to));
+  const signals = (sim.signals || []).filter((s) => inRange(s.day, from, to));
+  const days = allDays(symbolBars).filter((d) => inRange(d, from, to));
+  const books = dailyBooks(trades, signals, days, cfg.capital);
+  const summary = summarize(trades, cfg.capital);
+  const taken = new Set(trades.map((t) => `${t.day}|${t.symbol}`));
+  const crosses = signals.map((s) => ({
     symbol: s.symbol,
     day: s.day,
     side: s.side,
@@ -142,14 +150,13 @@ async function runPdhFollowBook({ symbolBars, capital, liveLock = false, fundsRs
   }));
   summary.orbCrossed = crosses.length;
   summary.orbCrossedTaken = crosses.filter((c) => c.taken).length;
-  const promised = promisedLock(sim.trades, cfg.capital, fundsRs);
   return {
     simulated: true,
     liveOrders: false,
     family: FAMILY,
     config: cfg,
     rules: candidate.rules,
-    promised,
+    promised: promisedLock(trades, cfg.capital, fundsRs),
     assumptions: liveLock
       ? [
           'Same prior-day follow engine as Historical Backtest. No live orders are placed.',
@@ -168,9 +175,9 @@ async function runPdhFollowBook({ symbolBars, capital, liveLock = false, fundsRs
           'Quantity is ~0.75% of capital in rupee risk, notional capped at 5× capital.',
           'History is never invented. Missing Nifty 500 names stay listed in coverage.',
         ],
-    rawTrades: (sim.signals || []).length,
+    rawTrades: signals.length,
     summary,
-    trades: sim.trades || [],
+    trades,
     crosses,
     snapshots: summary.snapshots,
     dailyBooks: books,

@@ -61,6 +61,60 @@ test('live lock candidate is 2 names, compulsory 1R, and never live orders', () 
   assert.match(c.rules.exit, /compulsory 1r/i);
 });
 
+test('one calendar day of bars cannot take a prior-day break', async () => {
+  const day = '2026-10-16';
+  const dayBars = sessionBars(day, {
+    '09:15': { o: 101, h: 101.4, l: 100.8, c: 101.3 },
+    '09:20': { o: 101.3, h: 101.5, l: 101.1, c: 101.4 },
+    '09:25': { o: 101.4, h: 101.6, l: 101.2, c: 101.5 },
+    '09:30': { o: 101.6, h: 102.4, l: 101.5, c: 102.3 },
+    '09:35': { o: 102.3, h: 102.5, l: 102.2, c: 102.4 },
+    '09:40': { o: 102.4, h: 102.6, l: 102.3, c: 102.5 },
+    '09:50': { o: 102.6, h: 103.4, l: 102.5, c: 103.3 },
+    '15:15': { o: 103.3, h: 103.5, l: 103.1, c: 103.4 },
+  });
+  const out = await runPdhFollowBook({
+    symbolBars: { AAA: { [day]: dayBars } },
+    capital: 10000,
+    from: day,
+    to: day,
+  });
+  assert.equal(out.trades.length, 0);
+  assert.equal(out.crosses.length, 0);
+});
+
+test('one-day window still takes the break when lookback bars are loaded', async () => {
+  const prev = '2026-10-15';
+  const day = '2026-10-16';
+  const prevBars = sessionBars(prev, {
+    '09:15': { o: 100, h: 101, l: 99.5, c: 100.8 },
+    '15:15': { o: 101, h: 101.2, l: 100.8, c: 101 },
+  });
+  const dayBars = sessionBars(day, {
+    '09:15': { o: 101, h: 101.4, l: 100.8, c: 101.3 },
+    '09:20': { o: 101.3, h: 101.5, l: 101.1, c: 101.4 },
+    '09:25': { o: 101.4, h: 101.6, l: 101.2, c: 101.5 },
+    '09:30': { o: 101.6, h: 102.4, l: 101.5, c: 102.3 },
+    '09:35': { o: 102.3, h: 102.5, l: 102.2, c: 102.4 },
+    '09:40': { o: 102.4, h: 102.6, l: 102.3, c: 102.5 },
+    '09:50': { o: 102.6, h: 103.4, l: 102.5, c: 103.3 },
+    '15:15': { o: 103.3, h: 103.5, l: 103.1, c: 103.4 },
+  });
+  const out = await runPdhFollowBook({
+    symbolBars: { AAA: { [prev]: prevBars, [day]: dayBars } },
+    capital: 10000,
+    from: day,
+    to: day,
+  });
+  assert.equal(out.trades.length, 1);
+  assert.equal(out.trades[0].symbol, 'AAA');
+  assert.equal(out.trades[0].day, day);
+  assert.equal(out.dailyBooks.length, 1);
+  assert.equal(out.dailyBooks[0].day, day);
+  assert.equal(out.summary.days, 1);
+  assert.ok(!out.trades.some((t) => t.day === prev));
+});
+
 test('runPdhFollowBook takes a prior-day high break on a long-crowd day', async () => {
   const prev = '2026-10-15';
   const day = '2026-10-16';
