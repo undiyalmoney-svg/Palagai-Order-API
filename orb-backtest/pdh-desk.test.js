@@ -32,10 +32,17 @@ test('pdh follow candidate is prior-day break + 09:45 follow and never live', ()
   assert.equal(c.family, 'pdh_break');
   assert.equal(c.crowdFilter, 'follow');
   assert.equal(c.rankBy, 'stopPct');
-  assert.equal(c.maxStocksPerDay, 5);
+  assert.equal(c.maxStocksPerDay, 2);
   assert.equal(c.entryEnd, '14:30');
   assert.equal(c.timeExit, '15:15');
   assert.match(c.entry, /prior session/i);
+  assert.match(c.rules.stockCount, /2 names/i);
+});
+
+test('historical test book stays at 2 names even when capital would have bought 5–8', () => {
+  assert.equal(pdhFollowCandidate(10000).maxStocksPerDay, 2);
+  assert.equal(pdhFollowCandidate(40000).maxStocksPerDay, 2);
+  assert.equal(pdhFollowCandidate(10000).targetR, null);
 });
 
 test('live lock candidate is 2 names, compulsory 1R, and never live orders', () => {
@@ -80,11 +87,40 @@ test('runPdhFollowBook takes a prior-day high break on a long-crowd day', async 
   assert.equal(out.liveOrders, false);
   assert.equal(out.family, 'pdh_break');
   assert.equal(out.config.crowdFilter, 'follow');
-  assert.equal(out.config.maxStocksPerDay, 5);
+  assert.equal(out.config.maxStocksPerDay, 2);
   assert.ok(out.trades.length >= 1);
   assert.equal(out.trades[0].symbol, 'AAA');
   assert.equal(out.trades[0].side, 'L');
   assert.ok(out.dailyBooks.length);
+});
+
+test('historical test book takes the best two names when more than two qualify', async () => {
+  const prev = '2026-10-15';
+  const day = '2026-10-16';
+  const prevBars = sessionBars(prev, {
+    '09:15': { o: 100, h: 101, l: 99.5, c: 100.8 },
+    '15:15': { o: 101, h: 101.2, l: 100.8, c: 101 },
+  });
+  const first15 = {
+    '09:15': { o: 101, h: 101.4, l: 100.8, c: 101.3 },
+    '09:20': { o: 101.3, h: 101.5, l: 101.1, c: 101.4 },
+    '09:25': { o: 101.4, h: 101.6, l: 101.2, c: 101.5 },
+    '09:30': { o: 101.6, h: 102.4, l: 101.5, c: 102.3 },
+    '09:35': { o: 102.3, h: 102.5, l: 102.2, c: 102.4 },
+    '09:40': { o: 102.4, h: 102.6, l: 102.3, c: 102.5 },
+  };
+  const hold = { '09:55': { o: 104.6, h: 105.2, l: 104.4, c: 104.8 }, '15:15': { o: 104.6, h: 104.8, l: 104.3, c: 104.5 } };
+  const out = await runPdhFollowBook({
+    symbolBars: {
+      NARROW: { [prev]: prevBars, [day]: sessionBars(day, { ...first15, '09:50': { o: 102.6, h: 103.2, l: 102.5, c: 103.1 }, ...hold }) },
+      WIDE: { [prev]: prevBars, [day]: sessionBars(day, { ...first15, '09:50': { o: 102.6, h: 104.8, l: 102.5, c: 104.5 }, ...hold }) },
+      THIRD: { [prev]: prevBars, [day]: sessionBars(day, { ...first15, '09:50': { o: 102.6, h: 102.8, l: 102.5, c: 102.7 }, ...hold }) },
+    },
+    capital: 40000,
+  });
+  assert.equal(out.config.maxStocksPerDay, 2);
+  assert.equal(out.trades.length, 2);
+  assert.deepEqual(out.trades.map((t) => t.symbol).sort(), ['NARROW', 'WIDE']);
 });
 
 test('live lock book uses 1R, marks OPEN before 15:15, and never places orders', async () => {

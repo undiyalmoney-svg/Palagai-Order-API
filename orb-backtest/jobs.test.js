@@ -46,13 +46,13 @@ test('startJob returns 409 while another historical backtest is running', () => 
   resetJobs();
 });
 
-test('startJob locks the prior-day follow desk and auto-picks names from capital', () => {
+test('startJob locks the prior-day follow desk and picks 2 names', () => {
   resetJobs();
   const job = startJob({ headers: {} }, { from: '2026-10-16', to: '2026-10-16', capital: 10000 });
   assert.equal(job.input.preset, 'pdh-follow');
   assert.equal(job.input.family, 'pdh_break');
   assert.equal(job.input.capital, 10000);
-  assert.equal(job.input.maxStocksPerDay, 5);
+  assert.equal(job.input.maxStocksPerDay, 2);
   assert.equal(job.input.rankBy, 'stopPct');
   assert.equal(job.input.crowdFilter, 'follow');
   assert.equal(job.input.entryEnd, '14:30');
@@ -61,16 +61,16 @@ test('startJob locks the prior-day follow desk and auto-picks names from capital
   resetJobs();
 });
 
-test('₹40k capital auto-trades 8 names and ignores an old maxStocks field', () => {
+test('₹40k capital still takes 2 names and ignores an old maxStocks field', () => {
   resetJobs();
   const job = startJob(
     { headers: {} },
-    { from: '2026-10-16', to: '2026-10-16', capital: 40000, maxStocksPerDay: 3, preset: 'winner' },
+    { from: '2026-10-16', to: '2026-10-16', capital: 40000, maxStocksPerDay: 8, preset: 'winner' },
   );
   assert.equal(job.input.preset, 'pdh-follow');
   assert.equal(job.input.capital, 40000);
-  assert.equal(job.input.maxStocksPerDay, namesFromCapital(40000));
-  assert.equal(job.input.maxStocksPerDay, 8);
+  assert.equal(job.input.maxStocksPerDay, 2);
+  assert.notEqual(job.input.maxStocksPerDay, namesFromCapital(40000));
   assert.equal(job.input.crowdFilter, 'follow');
   resetJobs();
 });

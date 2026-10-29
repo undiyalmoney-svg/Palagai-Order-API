@@ -115,7 +115,7 @@ test('search space is only prior-day follow and never enables live orders', () =
   assert.equal(list.length, 1);
   assert.equal(list[0].family, 'pdh_break');
   assert.equal(list[0].crowdFilter, 'follow');
-  assert.equal(list[0].maxStocksPerDay, 5);
+  assert.equal(list[0].maxStocksPerDay, 2);
   assert.ok(list[0].rules.entry && list[0].rules.exit);
 });
 

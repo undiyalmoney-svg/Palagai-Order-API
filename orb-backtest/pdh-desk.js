@@ -2,14 +2,14 @@
 
 /**
  * Prior-day high/low break, follow the 09:45 majority side.
- * Name count is derived from capital (₹2,000 / name, hard cap 8).
- * Live today: same engine, Kite cash, best 2 names, compulsory 1R take-profit.
+ * Test and live both take the best 2 names (widest stop %). Capital sizes quantity.
+ * Live today: same engine, Kite cash, compulsory 1R take-profit.
  */
 const { summarize } = require('./engine');
 const { simulateDesk, dailyBooks } = require('../daily-profit/portfolio');
 const { allDays } = require('./discover/split');
 
-const ENGINE_VERSION = '1.3.163-pdh-live';
+const ENGINE_VERSION = '1.3.164-pdh-live';
 const NAME_RUPEES = 2000;
 const MAX_NAMES = 8;
 const LIVE_MAX_NAMES = 2;
@@ -32,7 +32,7 @@ function namesFromCapital(capital) {
 function pdhFollowCandidate(capital, opts = {}) {
   const liveLock = !!opts.liveLock;
   const cap = liveLock ? clampLiveCapital(capital) : clampCapital(capital);
-  const maxStocksPerDay = liveLock ? LIVE_MAX_NAMES : namesFromCapital(cap);
+  const maxStocksPerDay = LIVE_MAX_NAMES;
   const row = {
     family: FAMILY,
     name: liveLock
@@ -67,7 +67,7 @@ function pdhFollowCandidate(capital, opts = {}) {
         : 'None',
       stockCount: liveLock
         ? '2 names / day on live Kite cash'
-        : `${maxStocksPerDay} name${maxStocksPerDay === 1 ? '' : 's'} / day, auto from capital (₹2,000 each, max 8)`,
+        : '2 names / day, ranked by widest stop. Capital sizes quantity.',
       sizing: 'Risk ~0.75% of capital per stop distance, 5× notional cap',
       filters: ['Only the 09:45 majority side.', ...(liveLock ? ['Live today never places a Kite order.'] : [])],
     },
@@ -160,7 +160,7 @@ async function runPdhFollowBook({ symbolBars, capital, liveLock = false, fundsRs
           'Simulated MIS backtest. No live orders are placed.',
           'After 09:45 IST, a 5-minute candle must fully close above the prior session high (long) or below the prior session low (short).',
           'The book only takes the 09:45 majority side from first-15 full closes. Mixed 09:45 days allow either side.',
-          'Names are ranked by widest stop as a percent of price. Name count is auto: 1 per ₹2,000 of starting capital, hard cap 8.',
+          'Names are ranked by widest stop as a percent of price. Best two names per day — same selection as live.',
           'Quantity is ~0.75% of capital in rupee risk, notional capped at 5× capital. Stop is the prior-day level. Leftover exits at 15:15.',
           'History is never invented. Missing Nifty 500 names stay listed in coverage.',
         ],
@@ -173,7 +173,7 @@ async function runPdhFollowBook({ symbolBars, capital, liveLock = false, fundsRs
     lastBook: books.length ? books[books.length - 1] : null,
     note: liveLock
       ? 'Live today on retrieved Kite 5-minute candles, sized from Kite cash. Best two names. Compulsory 1R take-profit, not a guaranteed return. No live orders.'
-      : 'Simulated prior-day break book on retrieved Kite 5-minute candles. Not live trading P&L.',
+      : 'Simulated prior-day break book on retrieved Kite 5-minute candles. Best two names. Not live trading P&L.',
   };
 }
 
