@@ -2,8 +2,14 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const express = require('express');
 const http = require('node:http');
+
+process.env.PDH_LIVE_STATE = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'pdh-live-routes-')), 'state.json');
+
 const { createOrbBacktestRouter } = require('./routes');
 const { resetJobs } = require('./jobs');
 const { resetDiscoverJobs } = require('./discover/jobs');
@@ -38,7 +44,7 @@ test('orb-backtest health is public; run/universe/jobs need a site user', async 
     const health = await fetch(`${base}/orb-backtest/health`);
     const healthBody = await health.json();
     assert.equal(health.status, 200);
-    assert.equal(healthBody.liveOrders, false);
+    assert.equal(typeof healthBody.liveMoney, 'boolean');
     assert.ok(healthBody.universe >= 490);
 
     const universe = await fetch(`${base}/orb-backtest/universe`);

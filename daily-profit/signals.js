@@ -417,5 +417,7 @@ module.exports = {
   orbTrades,
   first30HighLow,
   prevClose,
+  prevDayRange,
+  pdhBreak,
   sessionVwap,
 };

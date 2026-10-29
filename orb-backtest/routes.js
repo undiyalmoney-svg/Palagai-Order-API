@@ -7,6 +7,8 @@ const discoverJobs = require('./discover/jobs');
 const { NIFTY_500 } = require('./universe');
 const { generateCandidates } = require('./discover/candidates');
 const { ENGINE_VERSION } = require('./pdh-desk');
+const liveStore = require('../pdh-live/store');
+const { attachLiveMoneyRoutes } = require('../pdh-live/routes');
 
 function createOrbBacktestRouter({ auth = siteAuth } = {}) {
   const { requireSiteUser } = auth;
@@ -14,11 +16,13 @@ function createOrbBacktestRouter({ auth = siteAuth } = {}) {
   const guard = [requireSiteUser];
 
   router.get('/health', (_req, res) => {
+    const live = liveStore.load();
     res.json({
       status: 'ok',
       module: 'orb-backtest',
       universe: NIFTY_500.length,
-      liveOrders: false,
+      liveOrders: live.enabled === true,
+      liveMoney: live.enabled === true,
       engineVersion: ENGINE_VERSION,
     });
   });
@@ -39,6 +43,8 @@ function createOrbBacktestRouter({ auth = siteAuth } = {}) {
       });
     }
   });
+
+  attachLiveMoneyRoutes(router, guard);
 
   router.post('/live-today', ...guard, (req, res) => {
     try {

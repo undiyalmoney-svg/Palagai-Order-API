@@ -33,3 +33,6 @@ data/charts-protect/
 
 # SL Buddy watch flag (runtime)
 data/sl-buddy/
+
+# Prior-day live money fills (runtime)
+data/pdh-live/
