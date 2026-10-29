@@ -5,7 +5,7 @@
  */
 const { toMin } = require('../orb-backtest/engine');
 
-const ENGINE_VERSION = '1.3.157-daily-profit-batches';
+const ENGINE_VERSION = '1.3.158-pdh-follow';
 const RISK_FRACTION = 300 / 40000;
 const BUY_POWER_MULT = 5;
 const DEFAULT_SLIP = 0.0005;

@@ -7,7 +7,6 @@ const { generateCandidates } = require('./candidates');
 const { simulateDesk, pickDay, dailyBooks } = require('./portfolio');
 const { runDailyProfit } = require('./pipeline');
 const { startJob, resetJobs } = require('./jobs');
-const { first30HighLow } = require('./signals');
 
 function sessionBars(day, overlays = {}) {
   const out = [];
@@ -52,19 +51,13 @@ test('walkSignal fills a long stop, charges the book, and never marks live', () 
   assert.ok(Number.isFinite(trade.netRs));
 });
 
-test('search space covers multiple families and never enables live orders', () => {
+test('search space is only prior-day follow and never enables live orders', () => {
   const list = generateCandidates({ capital: 10000, budget: 20 });
-  const families = new Set(list.map((c) => c.family));
-  assert.ok(families.has('orb_winner'));
-  assert.ok(families.has('or30_break'));
-  assert.ok(families.has('gap_continue'));
-  assert.ok(families.has('vwap_reclaim'));
-  assert.ok(families.has('pdh_break'));
-  assert.ok(families.has('morning_thrust'));
-  assert.ok(families.has('ema_cross'));
-  assert.ok(list.some((c) => c.maxStocksPerDay === 1));
-  assert.ok(list.some((c) => c.maxStocksPerDay === 5));
-  assert.ok(list.every((c) => c.rules.entry && c.rules.exit));
+  assert.equal(list.length, 1);
+  assert.equal(list[0].family, 'pdh_break');
+  assert.equal(list[0].crowdFilter, 'follow');
+  assert.equal(list[0].maxStocksPerDay, 5);
+  assert.ok(list[0].rules.entry && list[0].rules.exit);
 });
 
 test('pickDay keeps the requested name count using only rankScore', () => {
@@ -82,29 +75,23 @@ test('pickDay keeps the requested name count using only rankScore', () => {
   );
 });
 
-test('first-30 break and daily book stay simulated with combined P/L', async () => {
+test('prior-day follow desk and daily book stay simulated with combined P/L', async () => {
   const day = '2026-10-16';
   const prev = '2026-10-15';
   const rising = sessionBars(day, {
-    '09:15': { o: 100, h: 100.4, l: 99.9, c: 100.2 },
-    '09:20': { o: 100.2, h: 100.5, l: 100.1, c: 100.3 },
-    '09:25': { o: 100.3, h: 100.6, l: 100.2, c: 100.4 },
-    '09:30': { o: 100.4, h: 100.6, l: 100.3, c: 100.5 },
-    '09:35': { o: 100.5, h: 100.7, l: 100.4, c: 100.55 },
-    '09:40': { o: 100.55, h: 100.7, l: 100.45, c: 100.6 },
-    '09:45': { o: 100.6, h: 101.2, l: 100.5, c: 101.1 },
-    '09:50': { o: 101.1, h: 101.6, l: 101, c: 101.4 },
-    '15:15': { o: 101.3, h: 101.5, l: 101.2, c: 101.4 },
+    '09:15': { o: 101, h: 101.4, l: 100.8, c: 101.3 },
+    '09:20': { o: 101.3, h: 101.5, l: 101.1, c: 101.4 },
+    '09:25': { o: 101.4, h: 101.6, l: 101.2, c: 101.5 },
+    '09:30': { o: 101.5, h: 102.2, l: 101.4, c: 102.1 },
+    '09:50': { o: 102.2, h: 103.2, l: 102.1, c: 103.1 },
+    '15:15': { o: 103.1, h: 103.3, l: 102.9, c: 103.2 },
   });
-  const rng = first30HighLow(rising);
-  assert.ok(rng.h > rng.l);
   const symbolBars = {
-    AAA: { [prev]: sessionBars(prev), [day]: rising },
-    BBB: { [prev]: sessionBars(prev), [day]: sessionBars(day) },
+    AAA: { [prev]: sessionBars(prev, { '15:15': { o: 101, h: 101.2, l: 100.8, c: 101 } }), [day]: rising },
   };
-  const candidate = generateCandidates({ budget: 20 }).find((c) => c.family === 'or30_break' && c.maxStocksPerDay === 5 && !c.targetR && !c.crowdFilter && c.sizing === 'risk');
+  const candidate = generateCandidates({ capital: 10000 })[0];
+  assert.equal(candidate.family, 'pdh_break');
   const sim = await simulateDesk(symbolBars, candidate, 10000);
-  assert.equal(sim.trades.every((t) => t.symbol), true);
   const books = dailyBooks(sim.trades, sim.signals, [day], 10000);
   assert.equal(books[0].day, day);
   assert.ok(Object.prototype.hasOwnProperty.call(books[0], 'netPnl'));
@@ -117,7 +104,7 @@ test('runDailyProfit reports honestly when evidence is thin and never live-order
   const out = await runDailyProfit({ symbolBars, capital: 10000, budget: 12 });
   assert.equal(out.simulated, true);
   assert.equal(out.liveOrders, false);
-  assert.ok(out.candidatesEvaluated >= 10);
+  assert.ok(out.candidatesEvaluated >= 1);
   assert.ok(out.leaderboard.length);
   assert.ok(out.assumptions.some((a) => /not guaranteed|No live orders/i.test(a) || /Simulated MIS/i.test(a)));
   if (!out.recommended) {
@@ -136,19 +123,14 @@ test('runDailyProfit evaluates a 25-name batched book without blocking forever',
     for (const day of days) symbolBars[symbol][day] = sessionBars(day);
   }
   const started = Date.now();
-  let last = 0;
   const out = await runDailyProfit({
     symbolBars,
     capital: 10000,
     budget: 12,
-    onProgress: (p) => {
-      last = p.done;
-    },
   });
   const elapsed = Date.now() - started;
   assert.equal(out.liveOrders, false);
-  assert.ok(out.candidatesEvaluated >= 10);
-  assert.ok(last > 0);
+  assert.equal(out.candidatesEvaluated, 1);
   assert.ok(elapsed < 30_000, `batched daily-profit took ${elapsed}ms`);
 });
 

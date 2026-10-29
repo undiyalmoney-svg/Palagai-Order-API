@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { parseNseEqMap, startJob, resetJobs, NIFTY_50_TOKEN } = require('./jobs');
+const { parseNseEqMap, startJob, resetJobs, NIFTY_50_TOKEN, namesFromCapital } = require('./jobs');
 
 const NSE_CSV = `instrument_token,exchange_token,tradingsymbol,name,last_price,expiry,strike,tick_size,lot_size,instrument_type,segment,exchange
 738561,2885,RELIANCE,RELIANCE,0,,,,1,EQ,NSE,NSE
@@ -46,33 +46,31 @@ test('startJob returns 409 while another historical backtest is running', () => 
   resetJobs();
 });
 
-test('startJob persists the ₹10k winner desk so the single book actually uses those rules', () => {
+test('startJob locks the prior-day follow desk and auto-picks names from capital', () => {
   resetJobs();
-  const job = startJob(
-    { headers: {} },
-    { from: '2026-10-16', to: '2026-10-16', preset: 'winner' },
-  );
-  assert.equal(job.input.preset, 'winner');
+  const job = startJob({ headers: {} }, { from: '2026-10-16', to: '2026-10-16', capital: 10000 });
+  assert.equal(job.input.preset, 'pdh-follow');
+  assert.equal(job.input.family, 'pdh_break');
   assert.equal(job.input.capital, 10000);
   assert.equal(job.input.maxStocksPerDay, 5);
   assert.equal(job.input.rankBy, 'stopPct');
-  assert.equal(job.input.crowdFilter, 'skipShort');
+  assert.equal(job.input.crowdFilter, 'follow');
   assert.equal(job.input.entryEnd, '14:30');
   assert.equal(job.input.timeExit, '15:15');
-  assert.equal(job.input.targetR, null);
+  assert.equal(job.liveOrders, false);
   resetJobs();
 });
 
-test('startJob treats the old 40k / 3-name form as the ₹10k winner desk', () => {
+test('₹40k capital auto-trades 8 names and ignores an old maxStocks field', () => {
   resetJobs();
   const job = startJob(
     { headers: {} },
-    { from: '2026-10-16', to: '2026-10-16', capital: 40000, maxStocksPerDay: 3 },
+    { from: '2026-10-16', to: '2026-10-16', capital: 40000, maxStocksPerDay: 3, preset: 'winner' },
   );
-  assert.equal(job.input.preset, 'winner');
-  assert.equal(job.input.capital, 10000);
-  assert.equal(job.input.maxStocksPerDay, 5);
-  assert.equal(job.input.rankBy, 'stopPct');
-  assert.equal(job.input.crowdFilter, 'skipShort');
+  assert.equal(job.input.preset, 'pdh-follow');
+  assert.equal(job.input.capital, 40000);
+  assert.equal(job.input.maxStocksPerDay, namesFromCapital(40000));
+  assert.equal(job.input.maxStocksPerDay, 8);
+  assert.equal(job.input.crowdFilter, 'follow');
   resetJobs();
 });

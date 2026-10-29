@@ -1,0 +1,74 @@
+'use strict';
+
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const { namesFromCapital, pdhFollowCandidate, runPdhFollowBook } = require('./pdh-desk');
+
+function sessionBars(day, overlays = {}) {
+  const out = [];
+  for (let m = 9 * 60 + 15; m <= 15 * 60 + 15; m += 5) {
+    const t = `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+    const hit = overlays[t];
+    out.push(
+      hit
+        ? { t, day, o: hit.o, h: hit.h, l: hit.l, c: hit.c, v: hit.v || 1000 }
+        : { t, day, o: 100, h: 100.2, l: 99.8, c: 100.1, v: 1000 },
+    );
+  }
+  return out;
+}
+
+test('namesFromCapital is 1 per ₹2,000 and hard-caps at 8', () => {
+  assert.equal(namesFromCapital(1000), 1);
+  assert.equal(namesFromCapital(2000), 1);
+  assert.equal(namesFromCapital(4000), 2);
+  assert.equal(namesFromCapital(10000), 5);
+  assert.equal(namesFromCapital(16000), 8);
+  assert.equal(namesFromCapital(40000), 8);
+});
+
+test('pdh follow candidate is prior-day break + 09:45 follow and never live', () => {
+  const c = pdhFollowCandidate(10000);
+  assert.equal(c.family, 'pdh_break');
+  assert.equal(c.crowdFilter, 'follow');
+  assert.equal(c.rankBy, 'stopPct');
+  assert.equal(c.maxStocksPerDay, 5);
+  assert.equal(c.entryEnd, '14:30');
+  assert.equal(c.timeExit, '15:15');
+  assert.match(c.entry, /prior session/i);
+});
+
+test('runPdhFollowBook takes a prior-day high break on a long-crowd day', async () => {
+  const prev = '2026-10-15';
+  const day = '2026-10-16';
+  const prevBars = sessionBars(prev, {
+    '09:15': { o: 100, h: 101, l: 99.5, c: 100.8 },
+    '15:15': { o: 101, h: 101.2, l: 100.8, c: 101 },
+  });
+  const dayBars = sessionBars(day, {
+    '09:15': { o: 101, h: 101.4, l: 100.8, c: 101.3 },
+    '09:20': { o: 101.3, h: 101.5, l: 101.1, c: 101.4 },
+    '09:25': { o: 101.4, h: 101.6, l: 101.2, c: 101.5 },
+    '09:30': { o: 101.6, h: 102.4, l: 101.5, c: 102.3 },
+    '09:35': { o: 102.3, h: 102.5, l: 102.2, c: 102.4 },
+    '09:40': { o: 102.4, h: 102.6, l: 102.3, c: 102.5 },
+    '09:50': { o: 102.6, h: 103.4, l: 102.5, c: 103.3 },
+    '09:55': { o: 103.3, h: 103.5, l: 103.2, c: 103.4 },
+    '15:15': { o: 103.3, h: 103.5, l: 103.1, c: 103.4 },
+  });
+  const out = await runPdhFollowBook({
+    symbolBars: {
+      AAA: { [prev]: prevBars, [day]: dayBars },
+    },
+    capital: 10000,
+  });
+  assert.equal(out.simulated, true);
+  assert.equal(out.liveOrders, false);
+  assert.equal(out.family, 'pdh_break');
+  assert.equal(out.config.crowdFilter, 'follow');
+  assert.equal(out.config.maxStocksPerDay, 5);
+  assert.ok(out.trades.length >= 1);
+  assert.equal(out.trades[0].symbol, 'AAA');
+  assert.equal(out.trades[0].side, 'L');
+  assert.ok(out.dailyBooks.length);
+});
