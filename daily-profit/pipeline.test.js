@@ -51,6 +51,65 @@ test('walkSignal fills a long stop, charges the book, and never marks live', () 
   assert.ok(Number.isFinite(trade.netRs));
 });
 
+test('walkSignal locks 1R as TARGET and never marks live', () => {
+  const day = '2026-10-16';
+  const bars = sessionBars(day, {
+    '10:05': { o: 101.5, h: 101.6, l: 101.4, c: 101.55 },
+    '10:10': { o: 101.6, h: 104.5, l: 101.5, c: 104.2 },
+  });
+  const trade = walkSignal(
+    bars,
+    {
+      symbol: 'AAA',
+      day,
+      side: 'L',
+      signalT: '10:00',
+      entryPx: 101.5,
+      stopPx: 100.4,
+      reason: 'test',
+      family: 'pdh_break',
+    },
+    { capital: 10000, maxStocksPerDay: 1, sizing: 'risk', timeExit: '15:15', entryEnd: '14:30', targetR: 1 },
+  );
+  assert.ok(trade);
+  assert.equal(trade.exitReason, 'TARGET');
+  assert.ok(trade.promisedRs > 0);
+  assert.ok(trade.tgtPx > trade.entryPx);
+});
+
+test('walkSignal marks OPEN when the session is still running', () => {
+  const day = '2026-10-16';
+  const bars = sessionBars(day, {
+    '10:05': { o: 101.5, h: 101.6, l: 101.4, c: 101.55 },
+    '10:10': { o: 101.6, h: 101.8, l: 101.5, c: 101.7 },
+  }).filter((b) => b.t <= '10:10');
+  const trade = walkSignal(
+    bars,
+    {
+      symbol: 'AAA',
+      day,
+      side: 'L',
+      signalT: '10:00',
+      entryPx: 101.5,
+      stopPx: 100.4,
+      reason: 'test',
+      family: 'pdh_break',
+    },
+    {
+      capital: 670,
+      maxStocksPerDay: 1,
+      sizing: 'risk',
+      timeExit: '15:15',
+      entryEnd: '14:30',
+      targetR: 1,
+      allowOpen: true,
+    },
+  );
+  assert.ok(trade);
+  assert.equal(trade.exitReason, 'OPEN');
+  assert.equal(trade.exitT, '10:10');
+});
+
 test('search space is only prior-day follow and never enables live orders', () => {
   const list = generateCandidates({ capital: 10000, budget: 20 });
   assert.equal(list.length, 1);

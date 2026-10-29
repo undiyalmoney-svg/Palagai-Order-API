@@ -50,6 +50,7 @@ async function simulateDesk(symbolBars, candidate, capital) {
     targetR: candidate.targetR,
     slippage: candidate.slippage,
     buyPower: capital * 5,
+    allowOpen: !!candidate.allowOpen,
   };
   for (const [day, list] of Object.entries(byDay)) {
     const picked = pickDay(list, candidate.maxStocksPerDay);
@@ -85,11 +86,13 @@ function dailyBooks(trades, signals, days, capital) {
         exitReason: t.exitReason,
         entryPx: t.entryPx,
         stopPx: t.stopPx,
+        tgtPx: t.tgtPx,
         qty: t.qty,
         allocatedRs: t.allocatedRs || t.notionalRs,
         netRs: t.netRs,
         chargesRs: t.chargesRs,
-        riskRs: Math.round(Math.abs(t.entryPx - t.stopPx) * t.qty * 100) / 100,
+        riskRs: t.riskRs != null ? t.riskRs : Math.round(Math.abs(t.entryPx - t.stopPx) * t.qty * 100) / 100,
+        promisedRs: t.promisedRs || 0,
       })),
       skipped: daySigs.filter((s) => !dayTrades.some((t) => t.symbol === s.symbol)),
       trades: dayTrades.length,

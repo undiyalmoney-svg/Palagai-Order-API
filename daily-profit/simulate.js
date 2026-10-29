@@ -5,7 +5,7 @@
  */
 const { toMin } = require('../orb-backtest/engine');
 
-const ENGINE_VERSION = '1.3.158-pdh-follow';
+const ENGINE_VERSION = '1.3.159-live-lock';
 const RISK_FRACTION = 300 / 40000;
 const BUY_POWER_MULT = 5;
 const DEFAULT_SLIP = 0.0005;
@@ -94,21 +94,25 @@ function walkSignal(bars5, signal, cfg) {
     const slHit = side === 'L' ? b.l <= stopPx : b.h >= stopPx;
     const tgtHit = tgtPx != null && (side === 'L' ? b.h >= tgtPx : b.l <= tgtPx);
     if (slHit && tgtHit) {
-      return finish(signal, cfg, fill, fillT, qty, stopPx, b.t, 'SL', extreme, tgtPx);
+      return finish(signal, cfg, fill, fillT, qty, stopPx, b.t, 'SL', extreme, tgtPx, riskPx);
     }
-    if (slHit) return finish(signal, cfg, fill, fillT, qty, stopPx, b.t, 'SL', extreme, tgtPx);
-    if (tgtHit) return finish(signal, cfg, fill, fillT, qty, tgtPx, b.t, 'TARGET', extreme, tgtPx);
-    if (b.t === timeExit) return finish(signal, cfg, fill, fillT, qty, b.c, b.t, 'EOD', extreme, tgtPx);
+    if (slHit) return finish(signal, cfg, fill, fillT, qty, stopPx, b.t, 'SL', extreme, tgtPx, riskPx);
+    if (tgtHit) return finish(signal, cfg, fill, fillT, qty, tgtPx, b.t, 'TARGET', extreme, tgtPx, riskPx);
+    if (b.t === timeExit) return finish(signal, cfg, fill, fillT, qty, b.c, b.t, 'EOD', extreme, tgtPx, riskPx);
   }
   const last = rest[rest.length - 1] || after[after.length - 1];
-  return finish(signal, cfg, fill, fillT, qty, last.c, last.t, 'EOD', extreme, tgtPx);
+  const sessionDone = last && toMin(last.t) >= toMin(timeExit);
+  const reason = !sessionDone && cfg.allowOpen ? 'OPEN' : 'EOD';
+  return finish(signal, cfg, fill, fillT, qty, last.c, last.t, reason, extreme, tgtPx, riskPx);
 }
 
-function finish(signal, cfg, fill, fillT, qty, exitPx, exitT, reason, extreme, tgtPx) {
+function finish(signal, cfg, fill, fillT, qty, exitPx, exitT, reason, extreme, tgtPx, riskPx) {
   const side = signal.side;
   const pnl = (exitPx - fill) * qty * (side === 'L' ? 1 : -1);
   const chg = chargesRs(fill * qty, exitPx * qty);
   const fav = side === 'L' ? (extreme - fill) * qty : (fill - extreme) * qty;
+  const riskRs = roundPaise(Math.abs(riskPx) * qty);
+  const promisedRs = tgtPx != null ? roundPaise(Math.abs(tgtPx - fill) * qty) : 0;
   return {
     symbol: signal.symbol,
     day: signal.day,
@@ -131,6 +135,8 @@ function finish(signal, cfg, fill, fillT, qty, exitPx, exitT, reason, extreme, t
     signalT: signal.signalT,
     rankScore: signal.rankScore,
     allocatedRs: roundPaise(fill * qty),
+    riskRs,
+    promisedRs,
   };
 }
 

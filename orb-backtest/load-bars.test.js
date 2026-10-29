@@ -98,3 +98,35 @@ test('loadUniverseBars yields between batches so the event loop stays pollable',
   assert.ok(polls >= 2, `expected the event loop to tick during batched cache hits, got ${polls} polls in ${elapsed}ms`);
   db.close();
 });
+
+test('covering cache merges a missing fill day from fetchBars and skips the rest of Kite', async () => {
+  const db = openDatabase(':memory:');
+  const symbols = ['AAA', 'BBB'];
+  const inst = new Map();
+  for (const symbol of symbols) {
+    putCachedBars(db, symbol, '2026-10-13', '2026-10-28', { '2026-10-28': sessionBars('2026-10-28') });
+    inst.set(symbol, { instrumentToken: 1, tradingSymbol: symbol, exchange: 'NSE', instrumentType: 'EQ' });
+  }
+  let fetches = 0;
+  const loaded = await loadUniverseBars({
+    authorization: 'token unused',
+    from: '2026-10-22',
+    to: '2026-10-29',
+    db,
+    symbols,
+    batchSize: 10,
+    instrumentMap: inst,
+    fillDay: '2026-10-29',
+    paceMs: 0,
+    fetchBars: async (_auth, _token, from, to) => {
+      fetches += 1;
+      assert.equal(from, '2026-10-29');
+      assert.equal(to, '2026-10-29');
+      return { '2026-10-29': sessionBars('2026-10-29') };
+    },
+  });
+  assert.equal(loaded.cacheHits, 2);
+  assert.equal(fetches, 2);
+  assert.deepEqual(Object.keys(loaded.symbolBars.AAA).sort(), ['2026-10-28', '2026-10-29']);
+  db.close();
+});

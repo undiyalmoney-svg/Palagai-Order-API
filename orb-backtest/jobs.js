@@ -6,8 +6,17 @@ const { deskAuthorization } = require('../market-desk/desk-auth');
 const { sessionDate } = require('../research/time');
 const { acquire, release, currentLock, resetLock } = require('./lock');
 const { getDb } = require('./store');
+const kite = require('../services/kite-market');
 const { loadUniverseBars, parseNseEqMap } = require('./load-bars');
-const { clampCapital, namesFromCapital, deskConfig, runPdhFollowBook } = require('./pdh-desk');
+const {
+  clampCapital,
+  clampLiveCapital,
+  namesFromCapital,
+  deskConfig,
+  runPdhFollowBook,
+  LIVE_MAX_NAMES,
+  LIVE_TARGET_R,
+} = require('./pdh-desk');
 
 const jobs = new Map();
 let runningId = null;
@@ -19,6 +28,7 @@ function persistInput(from, to, capital) {
   return {
     from,
     to,
+    liveToday: false,
     preset: 'pdh-follow',
     family: cfg.family,
     capital: cfg.capital,
@@ -28,6 +38,32 @@ function persistInput(from, to, capital) {
     entryEnd: cfg.entryEnd,
     timeExit: cfg.timeExit,
     targetR: null,
+    sizing: cfg.sizing,
+  };
+}
+
+function addCalendarDays(day, delta) {
+  const ms = Date.parse(`${day}T12:00:00+05:30`) + delta * 86400000;
+  return sessionDate(new Date(ms));
+}
+
+function persistLiveInput(today) {
+  const from = addCalendarDays(today, -7);
+  const cfg = deskConfig(1, { liveLock: true });
+  return {
+    from,
+    to: today,
+    liveToday: true,
+    preset: 'pdh-follow-live-lock',
+    family: cfg.family,
+    capital: 0,
+    fundsRs: null,
+    maxStocksPerDay: LIVE_MAX_NAMES,
+    rankBy: cfg.rankBy,
+    crowdFilter: cfg.crowdFilter,
+    entryEnd: cfg.entryEnd,
+    timeExit: cfg.timeExit,
+    targetR: LIVE_TARGET_R,
     sizing: cfg.sizing,
   };
 }
@@ -69,6 +105,31 @@ async function runJob(job, req) {
         status: 400,
       });
     }
+    const liveToday = !!job.input.liveToday;
+    if (liveToday) {
+      job.progress = { phase: 'funds', done: 0, total: NIFTY_500.length, symbol: null };
+      job.updatedAt = new Date().toISOString();
+      let funds;
+      try {
+        funds = await kite.fetchUserMargins(authorization);
+      } catch {
+        throw Object.assign(
+          new Error('Could not read Kite funds. Refresh Token, then load live today again.'),
+          { status: 401 },
+        );
+      }
+      const cash = clampLiveCapital(funds && (funds.equityCash || funds.capitalRs));
+      if (!(cash > 0)) {
+        throw Object.assign(
+          new Error('Kite equity cash is empty. Live today sizes from real funds, not the backtest capital box.'),
+          { status: 400 },
+        );
+      }
+      job.input.capital = cash;
+      job.input.fundsRs = cash;
+      job.input.maxStocksPerDay = LIVE_MAX_NAMES;
+      job.input.targetR = LIVE_TARGET_R;
+    }
     job.progress = { phase: 'instruments', done: 0, total: NIFTY_500.length, symbol: null };
     job.updatedAt = new Date().toISOString();
 
@@ -79,6 +140,8 @@ async function runJob(job, req) {
       db: getDb(),
       shouldCancel: () => job.cancel,
       batchSize: 10,
+      fillDay: liveToday ? job.input.to : null,
+      alwaysRefreshFillDay: liveToday,
       onProgress: (p) => {
         job.progress = p;
         job.updatedAt = new Date().toISOString();
@@ -95,7 +158,12 @@ async function runJob(job, req) {
     }
 
     job.progress = { phase: 'simulate', done: loaded.withBars, total: loaded.requested, symbol: null };
-    const result = await runPdhFollowBook({ symbolBars: loaded.symbolBars, capital: job.input.capital });
+    const result = await runPdhFollowBook({
+      symbolBars: loaded.symbolBars,
+      capital: job.input.capital,
+      liveLock: liveToday,
+      fundsRs: liveToday ? job.input.fundsRs : null,
+    });
     result.universe = {
       requested: loaded.requested,
       resolved: loaded.resolved,
@@ -179,6 +247,39 @@ function startJob(req, body) {
   return publicJob(job);
 }
 
+function startLiveJob(req, _body) {
+  const active = listActive();
+  const other = currentLock();
+  if (active || other) {
+    const err = new Error('A historical backtest is already running. Wait for it to finish.');
+    err.status = 409;
+    err.jobId = (active && active.id) || other;
+    throw err;
+  }
+  const today = sessionDate(new Date());
+  const id = crypto.randomUUID();
+  const job = {
+    id,
+    status: 'running',
+    input: persistLiveInput(today),
+    progress: { phase: 'queued', done: 0, total: NIFTY_500.length, symbol: null },
+    warnings: [],
+    missing: [],
+    result: null,
+    error: null,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    cancel: false,
+  };
+  jobs.set(id, job);
+  runningId = id;
+  acquire(id);
+  setImmediate(() => {
+    void runJob(job, req);
+  });
+  return publicJob(job);
+}
+
 function getJob(id) {
   return publicJob(jobs.get(String(id || '')));
 }
@@ -191,6 +292,7 @@ function resetJobs() {
 
 module.exports = {
   startJob,
+  startLiveJob,
   getJob,
   listActive,
   publicJob,

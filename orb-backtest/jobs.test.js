@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { parseNseEqMap, startJob, resetJobs, NIFTY_50_TOKEN, namesFromCapital } = require('./jobs');
+const { parseNseEqMap, startJob, startLiveJob, resetJobs, NIFTY_50_TOKEN, namesFromCapital } = require('./jobs');
 
 const NSE_CSV = `instrument_token,exchange_token,tradingsymbol,name,last_price,expiry,strike,tick_size,lot_size,instrument_type,segment,exchange
 738561,2885,RELIANCE,RELIANCE,0,,,,1,EQ,NSE,NSE
@@ -72,5 +72,21 @@ test('₹40k capital auto-trades 8 names and ignores an old maxStocks field', ()
   assert.equal(job.input.maxStocksPerDay, namesFromCapital(40000));
   assert.equal(job.input.maxStocksPerDay, 8);
   assert.equal(job.input.crowdFilter, 'follow');
+  resetJobs();
+});
+
+test('startLiveJob is 1 name, 1R lock, Kite-cash sized, and never live orders', () => {
+  resetJobs();
+  const job = startLiveJob({ headers: {} }, { capital: 100000 });
+  assert.equal(job.status, 'running');
+  assert.equal(job.simulated, true);
+  assert.equal(job.liveOrders, false);
+  assert.equal(job.input.liveToday, true);
+  assert.equal(job.input.preset, 'pdh-follow-live-lock');
+  assert.equal(job.input.family, 'pdh_break');
+  assert.equal(job.input.maxStocksPerDay, 1);
+  assert.equal(job.input.targetR, 1);
+  assert.equal(job.input.capital, 0);
+  assert.notEqual(job.input.capital, 100000);
   resetJobs();
 });

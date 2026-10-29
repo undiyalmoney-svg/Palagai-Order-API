@@ -78,6 +78,19 @@ test('orb-backtest health is public; run/universe/jobs need a site user', async 
     assert.equal(badDiscover.status, 400);
     const badDiscoverBody = await badDiscover.json();
     assert.equal(badDiscoverBody.status, 'error');
+
+    const live = await fetch(`${base}/orb-backtest/live-today`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ capital: 100000 }),
+    });
+    assert.equal(live.status, 202);
+    const liveBody = await live.json();
+    assert.equal(liveBody.liveOrders, false);
+    assert.equal(liveBody.input.liveToday, true);
+    assert.equal(liveBody.input.maxStocksPerDay, 1);
+    assert.equal(liveBody.input.targetR, 1);
+    assert.equal(liveBody.input.capital, 0);
   } finally {
     await new Promise((r) => server.close(r));
     resetJobs();

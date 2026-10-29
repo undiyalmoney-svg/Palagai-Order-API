@@ -6,6 +6,7 @@ const jobs = require('./jobs');
 const discoverJobs = require('./discover/jobs');
 const { NIFTY_500 } = require('./universe');
 const { generateCandidates } = require('./discover/candidates');
+const { ENGINE_VERSION } = require('./pdh-desk');
 
 function createOrbBacktestRouter({ auth = siteAuth } = {}) {
   const { requireSiteUser } = auth;
@@ -13,7 +14,13 @@ function createOrbBacktestRouter({ auth = siteAuth } = {}) {
   const guard = [requireSiteUser];
 
   router.get('/health', (_req, res) => {
-    res.json({ status: 'ok', module: 'orb-backtest', universe: NIFTY_500.length, liveOrders: false });
+    res.json({
+      status: 'ok',
+      module: 'orb-backtest',
+      universe: NIFTY_500.length,
+      liveOrders: false,
+      engineVersion: ENGINE_VERSION,
+    });
   });
 
   router.get('/universe', ...guard, (_req, res) => {
@@ -23,6 +30,19 @@ function createOrbBacktestRouter({ auth = siteAuth } = {}) {
   router.post('/run', ...guard, (req, res) => {
     try {
       const job = jobs.startJob(req, req.body || {});
+      res.status(202).json({ status: 'ok', ...job });
+    } catch (err) {
+      res.status(err.status || 500).json({
+        status: 'error',
+        message: err.message,
+        jobId: err.jobId || null,
+      });
+    }
+  });
+
+  router.post('/live-today', ...guard, (req, res) => {
+    try {
+      const job = jobs.startLiveJob(req, req.body || {});
       res.status(202).json({ status: 'ok', ...job });
     } catch (err) {
       res.status(err.status || 500).json({

@@ -38,6 +38,17 @@ test('pdh follow candidate is prior-day break + 09:45 follow and never live', ()
   assert.match(c.entry, /prior session/i);
 });
 
+test('live lock candidate is 1 name, 1R, and never live orders', () => {
+  const c = pdhFollowCandidate(670, { liveLock: true });
+  assert.equal(c.family, 'pdh_break');
+  assert.equal(c.maxStocksPerDay, 1);
+  assert.equal(c.targetR, 1);
+  assert.equal(c.allowOpen, true);
+  assert.equal(c.capital, 670);
+  assert.equal(c.id, 'pdh-follow-live-lock');
+  assert.match(c.rules.target, /not a guaranteed/i);
+});
+
 test('runPdhFollowBook takes a prior-day high break on a long-crowd day', async () => {
   const prev = '2026-10-15';
   const day = '2026-10-16';
@@ -71,4 +82,45 @@ test('runPdhFollowBook takes a prior-day high break on a long-crowd day', async 
   assert.equal(out.trades[0].symbol, 'AAA');
   assert.equal(out.trades[0].side, 'L');
   assert.ok(out.dailyBooks.length);
+});
+
+test('live lock book uses 1R, marks OPEN before 15:15, and never places orders', async () => {
+  const prev = '2026-10-15';
+  const day = '2026-10-16';
+  const prevBars = sessionBars(prev, {
+    '09:15': { o: 100, h: 101, l: 99.5, c: 100.8 },
+    '15:15': { o: 101, h: 101.2, l: 100.8, c: 101 },
+  });
+  const dayBars = sessionBars(day, {
+    '09:15': { o: 101, h: 101.4, l: 100.8, c: 101.3 },
+    '09:20': { o: 101.3, h: 101.5, l: 101.1, c: 101.4 },
+    '09:25': { o: 101.4, h: 101.6, l: 101.2, c: 101.5 },
+    '09:30': { o: 101.6, h: 102.4, l: 101.5, c: 102.3 },
+    '09:35': { o: 102.3, h: 102.5, l: 102.2, c: 102.4 },
+    '09:40': { o: 102.4, h: 102.6, l: 102.3, c: 102.5 },
+    '09:50': { o: 102.6, h: 103.4, l: 102.5, c: 103.3 },
+    '09:55': { o: 103.3, h: 103.5, l: 103.2, c: 103.4 },
+    '10:00': { o: 103.4, h: 103.5, l: 103.2, c: 103.45 },
+    '10:05': { o: 103.4, h: 103.6, l: 103.3, c: 103.5 },
+    '10:10': { o: 103.5, h: 103.7, l: 103.4, c: 103.6 },
+  }).filter((b) => b.t <= '10:10');
+  const out = await runPdhFollowBook({
+    symbolBars: {
+      AAA: { [prev]: prevBars, [day]: dayBars },
+    },
+    capital: 670,
+    liveLock: true,
+    fundsRs: 670,
+  });
+  assert.equal(out.simulated, true);
+  assert.equal(out.liveOrders, false);
+  assert.equal(out.config.targetR, 1);
+  assert.equal(out.config.maxStocksPerDay, 1);
+  assert.equal(out.config.liveLock, true);
+  assert.ok(out.promised);
+  assert.equal(out.promised.guaranteed, false);
+  assert.equal(out.promised.liveOrders, false);
+  assert.equal(out.promised.fundsRs, 670);
+  assert.ok(out.trades.length >= 1);
+  assert.equal(out.trades[0].exitReason, 'OPEN');
 });
