@@ -2,7 +2,7 @@
 
 const store = require('./store');
 const worker = require('./worker');
-const { phraseOk, PHRASE } = require('./orders');
+const { confirmOk } = require('./orders');
 
 function kiteHeader(req) {
   return req.headers['x-kite-authorization'] || req.headers['x-kite-authorisation'] || '';
@@ -15,17 +15,16 @@ function attachLiveMoneyRoutes(router, guard) {
       status: 'ok',
       liveOrders: state.enabled === true,
       money: store.publicView(state),
-      phrase: PHRASE,
     });
   });
 
   router.post('/live-today/start', ...guard, async (req, res, next) => {
     try {
-      if (!phraseOk(req.body?.phrase)) {
+      if (!confirmOk(req.body)) {
         res.status(400).json({
           status: 'error',
           liveOrders: false,
-          message: `Type ${PHRASE} to place real NSE MIS orders. Auto SL-M and auto 1R / 15:15 exits are armed only after that.`,
+          message: 'Tick the box to place real NSE MIS orders. Auto SL-M and auto 1R / 15:15 exits are armed only after that.',
         });
         return;
       }

@@ -203,7 +203,7 @@ test('store stays disarmed until Start live money', () => {
   assert.equal(store.dropFill(next, 'RELIANCE').fills.length, 0);
 });
 
-test('live money start needs START LIVE MONEY and stop reports liveOrders false', async () => {
+test('live money start needs the confirm checkbox and stop reports liveOrders false', async () => {
   fs.rmSync(process.env.PDH_LIVE_STATE, { force: true });
   const app = express();
   app.use(express.json());
@@ -226,19 +226,18 @@ test('live money start needs START LIVE MONEY and stop reports liveOrders false'
     const statusBody = await status.json();
     assert.equal(status.status, 200);
     assert.equal(statusBody.liveOrders, false);
-    assert.equal(statusBody.phrase, 'START LIVE MONEY');
 
     const bad = await fetch(`${base}/orb-backtest/live-today/start`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ phrase: 'go' }),
+      body: JSON.stringify({ confirm: false }),
     });
     assert.equal(bad.status, 400);
 
     const noKite = await fetch(`${base}/orb-backtest/live-today/start`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ phrase: 'START LIVE MONEY' }),
+      body: JSON.stringify({ confirm: true }),
     });
     assert.equal(noKite.status, 400);
 
@@ -248,7 +247,7 @@ test('live money start needs START LIVE MONEY and stop reports liveOrders false'
         'content-type': 'application/json',
         'x-kite-authorization': 'token key:secret',
       },
-      body: JSON.stringify({ phrase: 'START LIVE MONEY' }),
+      body: JSON.stringify({ confirm: true }),
     });
     const startBody = await start.json();
     assert.equal(start.status, 200);

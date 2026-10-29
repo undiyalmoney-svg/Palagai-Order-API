@@ -231,6 +231,11 @@ function phraseOk(value) {
   return String(value || '').trim() === PHRASE;
 }
 
+function confirmOk(body) {
+  if (body && body.confirm === true) return true;
+  return phraseOk(body?.phrase);
+}
+
 module.exports = {
   PHRASE,
   TAG,
@@ -253,5 +258,6 @@ module.exports = {
   flattenFill,
   ensureStop,
   phraseOk,
+  confirmOk,
   roundToTick,
 };
