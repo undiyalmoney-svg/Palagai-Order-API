@@ -33,6 +33,21 @@ test('covering cache reuses a wider pull and slices to the requested days', () =
   db.close();
 });
 
+test('covering cache merges overlapping chunks when no single row covers the window', () => {
+  const db = openDatabase(':memory:');
+  putCachedBars(db, 'TCS', '2026-08-31', '2026-09-21', {
+    '2026-09-15': dayBars('2026-09-15', 90),
+    '2026-09-21': dayBars('2026-09-21', 91),
+  });
+  putCachedBars(db, 'TCS', '2026-09-22', '2026-10-27', {
+    '2026-09-22': dayBars('2026-09-22', 92),
+    '2026-10-16': dayBars('2026-10-16', 95),
+  });
+  const merged = getCachedBarsCovering(db, 'TCS', '2026-09-14', '2026-10-16');
+  assert.deepEqual(Object.keys(merged).sort(), ['2026-09-15', '2026-09-21', '2026-09-22', '2026-10-16']);
+  db.close();
+});
+
 test('sliceBars returns null when the window has no session days', () => {
   assert.equal(sliceBars({ '2026-10-16': dayBars('2026-10-16') }, '2026-09-01', '2026-09-30'), null);
 });

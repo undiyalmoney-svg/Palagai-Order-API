@@ -78,7 +78,7 @@ function getCachedBars(db, symbol, from, to) {
   }
 }
 
-/** Reuse a wider cached pull (discovery often stores 60-day chunks). */
+/** Reuse any cached pull that overlaps the window, including wider 60-day chunks. */
 function getCachedBarsCovering(db, symbol, from, to) {
   const exact = getCachedBars(db, symbol, from, to);
   if (exact) return exact;
@@ -86,18 +86,20 @@ function getCachedBarsCovering(db, symbol, from, to) {
     .prepare(
       `SELECT from_day, to_day, bars_json FROM bar_cache
        WHERE symbol = ? AND from_day <= ? AND to_day >= ?
-       ORDER BY from_day DESC`,
+       ORDER BY from_day ASC`,
     )
-    .all(String(symbol).toUpperCase(), from, to);
+    .all(String(symbol).toUpperCase(), to, from);
+  const merged = {};
   for (const row of rows) {
     try {
       const sliced = sliceBars(JSON.parse(row.bars_json), from, to);
-      if (sliced) return sliced;
+      if (!sliced) continue;
+      for (const [day, list] of Object.entries(sliced)) merged[day] = list;
     } catch {
-      /* try next covering row */
+      /* try next overlapping row */
     }
   }
-  return null;
+  return Object.keys(merged).length ? merged : null;
 }
 
 function putCachedBars(db, symbol, from, to, barsByDay) {
