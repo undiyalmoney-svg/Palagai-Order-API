@@ -438,9 +438,12 @@ test('crude oil token comes from the front-month MCX future', async () => {
   assert.equal(hit.instrumentToken, 222);
   const feed = new KiteFeed({ instruments: [{ symbol: 'CRUDEOILM', exchange: 'MCX', instrumentToken: 0 }] });
   feed.loadCsv = async () => csv;
-  await feed.ensureTokens('token k:t');
+  await feed.ensureTokens('token k:t', false, new Date('2026-10-13T00:00:00+05:30'));
   assert.equal(feed.instruments[0].instrumentToken, 111);
   assert.equal(feed.instruments[0].contractSymbol, 'CRUDEOILM26OCTFUT');
+  await feed.ensureTokens('token k:t', true, new Date('2026-10-17T00:00:00+05:30'));
+  assert.equal(feed.instruments[0].instrumentToken, 222);
+  assert.equal(feed.instruments[0].contractSymbol, 'CRUDEOILM26NOVFUT');
 });
 
 test('pull uses REST last price when the ticker has no ticks yet', async () => {

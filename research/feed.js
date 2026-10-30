@@ -237,14 +237,14 @@ class KiteFeed {
     return rows;
   }
 
-  async ensureTokens(authorization, force = false) {
+  async ensureTokens(authorization, force = false, asOf = new Date()) {
     for (const inst of this.instruments) {
       const hasToken = Number(inst.instrumentToken) > 0;
       const crude = inst.exchange === 'MCX' || /CRUDE/i.test(inst.symbol);
       if (hasToken && !(crude && force)) continue;
       if (!crude) continue;
       const csv = await this.loadCsv(authorization, 'MCX');
-      const hit = resolveCrudeContract(csv);
+      const hit = resolveCrudeContract(csv, asOf);
       if (!hit || !hit.instrumentToken) continue;
       inst.instrumentToken = hit.instrumentToken;
       inst.contractSymbol = hit.tradingSymbol;

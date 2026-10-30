@@ -43,6 +43,29 @@ function longCrowdDay(dayOverlays) {
   };
 }
 
+function shortCrowdDay(dayOverlays) {
+  const prev = '2026-10-15';
+  const day = '2026-10-16';
+  const prevBars = sessionBars(prev, {
+    '09:15': { o: 100, h: 100.5, l: 99, c: 99.2 },
+    '15:15': { o: 99, h: 99.2, l: 98.8, c: 99 },
+  });
+  const first15 = {
+    '09:15': { o: 99, h: 99.2, l: 98.6, c: 98.7 },
+    '09:20': { o: 98.7, h: 98.9, l: 98.5, c: 98.6 },
+    '09:25': { o: 98.6, h: 98.8, l: 98.4, c: 98.5 },
+    '09:30': { o: 98.4, h: 98.5, l: 97.6, c: 97.7 },
+    '09:35': { o: 97.7, h: 97.8, l: 97.5, c: 97.6 },
+    '09:40': { o: 97.6, h: 97.7, l: 97.4, c: 97.5 },
+  };
+  return {
+    prev,
+    day,
+    bars: sessionBars(day, { ...first15, ...dayOverlays }),
+    prevBars,
+  };
+}
+
 function istAt(day, hm) {
   const [h, m] = hm.split(':').map(Number);
   return new Date(Date.parse(`${day}T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:05+05:30`));
@@ -223,6 +246,62 @@ test('date range first session matches live once lookback bars are present', asy
   assert.equal(hist.trades[0].symbol, 'AAA');
   assert.equal(hist.trades[0].side, liveFills[0].side);
   assert.equal(hist.dailyBooks.length, 1);
+});
+
+test('live scan and historical PDH emit the same first-print short signals', () => {
+  const row = shortCrowdDay({
+    '09:50': { o: 97.4, h: 97.5, l: 96.6, c: 96.7 },
+  });
+  const symbolBars = { AAA: { [row.prev]: row.prevBars, [row.day]: row.bars } };
+  const candidate = pdhFollowCandidate(10000);
+  const fromSignals = pdhSignalsForDay(symbolBars, row.day, candidate);
+  const fromLive = scan.pdhSignalsForDay(symbolBars, row.day, candidate);
+  assert.deepEqual(fromSignals, fromLive);
+  assert.equal(fromSignals[0].symbol, 'AAA');
+  assert.equal(fromSignals[0].side, 'S');
+  assert.equal(fromSignals[0].signalT, '09:50');
+  assert.equal(fromSignals[0].stopPx, 98.8);
+});
+
+test('One day short 1R lock matches live subsequentResolved TARGET', async () => {
+  const row = shortCrowdDay({
+    '09:50': { o: 97.4, h: 97.5, l: 96.6, c: 96.7 },
+    '09:55': { o: 96.7, h: 96.9, l: 96.5, c: 96.6 },
+    '10:00': { o: 96.6, h: 96.8, l: 92, c: 92.5 },
+    '15:15': { o: 93, h: 93.2, l: 92.8, c: 93 },
+  });
+  const symbolBars = { AAA: { [row.prev]: row.prevBars, [row.day]: row.bars } };
+  const capital = 10000;
+  const liveFills = replayLiveFills(symbolBars, row.day, capital);
+  const hist = await histBook(symbolBars, capital, row.day);
+  assert.equal(liveFills.length, 1);
+  assert.equal(liveFills[0].side, 'S');
+  assert.equal(hist.trades.length, 1);
+  assert.equal(hist.trades[0].symbol, liveFills[0].symbol);
+  assert.equal(hist.trades[0].side, 'S');
+  assert.equal(hist.trades[0].entryPx, Math.round(liveFills[0].fillPx * 100) / 100);
+  assert.equal(hist.trades[0].stopPx, Math.round(liveFills[0].stopPx * 100) / 100);
+  assert.equal(hist.trades[0].qty, liveFills[0].qty);
+  assert.equal(hist.trades[0].exitReason, 'TARGET');
+  assert.equal(liveExit(symbolBars, liveFills[0], row.day), 'TARGET');
+});
+
+test('One day short stop matches live subsequentResolved SL', async () => {
+  const row = shortCrowdDay({
+    '09:50': { o: 97.4, h: 97.5, l: 96.6, c: 96.7 },
+    '09:55': { o: 96.7, h: 99.1, l: 96.5, c: 99 },
+    '15:15': { o: 99, h: 99.2, l: 98.8, c: 99 },
+  });
+  const symbolBars = { AAA: { [row.prev]: row.prevBars, [row.day]: row.bars } };
+  const capital = 10000;
+  const liveFills = replayLiveFills(symbolBars, row.day, capital);
+  const hist = await histBook(symbolBars, capital, row.day);
+  assert.equal(liveFills.length, 1);
+  assert.equal(liveFills[0].side, 'S');
+  assert.equal(hist.trades.length, 1);
+  assert.equal(hist.trades[0].side, 'S');
+  assert.equal(hist.trades[0].exitReason, 'SL');
+  assert.equal(liveExit(symbolBars, liveFills[0], row.day), 'SL');
 });
 
 test('Live today clip and One day of today report the same session window', () => {
