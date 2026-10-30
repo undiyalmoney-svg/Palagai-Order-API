@@ -3,14 +3,14 @@
  *
  * Hunt (CRUDEOILM 5m 2026-05-21 → 2026-10-30, ₹50/RT, 1 lot ₹10/pt):
  *   TP 30 · scratch 8 · first-bar smell · day lock 20 · week lock 40
- *   15 weeks · 100% green · ₹305/week · worst +₹110 · 0 hard-SL hits.
+ *   Clock: skip 09:00 IST chop. 10:00–23:00 · ₹365/week vs ₹305 all-session.
  * Not a guaranteed profit.
  */
 'use strict';
 
 const DNA = {
   profileId: 'weekly-bank-sc8',
-  entryStart: '09:00',
+  entryStart: '10:00',
   entryEnd: '23:00',
   flatten: '23:10',
   stopPts: 20,
@@ -33,7 +33,7 @@ const DNA = {
   tickSize: 1,
 };
 
-const ENGINE_VERSION = '1.3.169-weekly-bank';
+const ENGINE_VERSION = '1.3.170-win-clock';
 
 function toMin(hhmm) {
   const [h, m] = String(hhmm || '').split(':').map(Number);

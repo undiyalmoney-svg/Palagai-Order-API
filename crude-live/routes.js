@@ -73,7 +73,7 @@ function createCrudeLiveRouter({ auth = siteAuth } = {}) {
       state.userId = req.user?.id || state.userId;
       state.lastError = null;
       state.lastMessage =
-        'Live Crude Mini armed. 1 lot CRUDEOILM FUT. Entries 09:00–23:00 IST. Next contract on expiry day. Not a guaranteed profit.';
+        'Live Crude Mini armed. 1 lot CRUDEOILM FUT. Entries 10:00–23:00 IST. Next contract on expiry day. Not a guaranteed profit.';
       if (header && state.userId) worker.captureAuth(state.userId, header);
       state.sessionOk = true;
       store.save(state);

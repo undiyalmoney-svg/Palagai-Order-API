@@ -1,6 +1,6 @@
 /**
  * All-session Crude Mini PDHL scan on closed 5-minute bars.
- * Signal in 09:00–23:00, next-bar confirm, flatten 23:10.
+ * Signal in 10:00–23:00, next-bar confirm, flatten 23:10.
  */
 'use strict';
 

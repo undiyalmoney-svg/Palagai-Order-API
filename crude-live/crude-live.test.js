@@ -44,10 +44,10 @@ function session(day, overlays = {}) {
 }
 
 test('DNA is weekly-bank: TP 30, scratch 8, day lock 20, week lock 40', () => {
-  assert.equal(DNA.entryStart, '09:00');
+  assert.equal(DNA.entryStart, '10:00');
   assert.equal(DNA.entryEnd, '23:00');
   assert.equal(DNA.flatten, '23:10');
-  assert.equal(toMin(DNA.entryStart), 9 * 60);
+  assert.equal(toMin(DNA.entryStart), 10 * 60);
   assert.equal(DNA.stopPts, 20);
   assert.equal(DNA.scratchPts, 8);
   assert.equal(DNA.smellFirstBar, true);
@@ -86,7 +86,7 @@ test('expiry day rolls to the next CRUDEOILM future and never keeps the dying mo
   assert.equal(none, null);
 });
 
-test('a 09:00 prior-day close is eligible after next-bar confirm — not evening-only', () => {
+test('skips the 09:00 wash-out; a 10:00 prior-day close is eligible after next-bar confirm', () => {
   const prev = '2026-10-15';
   const day = '2026-10-16';
   const bars = [
@@ -97,27 +97,32 @@ test('a 09:00 prior-day close is eligible after next-bar confirm — not evening
     ...session(day, {
       '09:00': { o: 5198, h: 5210, l: 5196, c: 5208 },
       '09:05': { o: 5209, h: 5218, l: 5208, c: 5216 },
+      '10:00': { o: 5198, h: 5210, l: 5196, c: 5208 },
+      '10:05': { o: 5209, h: 5218, l: 5208, c: 5216 },
     }),
   ];
 
   const tooEarly = scan.nextAction({ bars, now: istAt(day, '08:50') });
   assert.equal(tooEarly.action === 'enter', false);
 
-  const signal = scan.nextAction({ bars, now: istAt(day, '09:05') });
+  const wash = scan.nextAction({ bars, now: istAt(day, '09:10') });
+  assert.equal(wash.action, 'outside');
+
+  const signal = scan.nextAction({ bars, now: istAt(day, '10:05') });
   assert.equal(signal.action, 'pending');
-  assert.equal(signal.pending.signalT, '09:00');
+  assert.equal(signal.pending.signalT, '10:00');
   assert.equal(signal.pending.dir, 1);
 
   const forming = scan.nextAction({
     bars,
-    now: istAt(day, '09:07'),
+    now: istAt(day, '10:07'),
     pending: signal.pending,
   });
   assert.equal(forming.action, 'wait-confirm');
 
   const fill = scan.nextAction({
     bars,
-    now: istAt(day, '09:10'),
+    now: istAt(day, '10:10'),
     pending: signal.pending,
   });
   assert.equal(fill.action, 'enter');
@@ -125,7 +130,7 @@ test('a 09:00 prior-day close is eligible after next-bar confirm — not evening
   assert.equal(fill.fillPx, 5209);
   assert.equal(fill.stopPx, 5189);
   assert.equal(fill.targetPx, 5239);
-  assert.equal(fill.signalT, '09:00');
+  assert.equal(fill.signalT, '10:00');
 });
 
 test('skips a wild prior day and banks the week at +40 pts', () => {
@@ -137,11 +142,11 @@ test('skips a wild prior day and banks the week at +40 pts', () => {
       '23:00': { o: 5400, h: 5450, l: 5000, c: 5300 },
     }),
     ...session(day, {
-      '09:00': { o: 5300, h: 5460, l: 5290, c: 5455 },
-      '09:05': { o: 5456, h: 5470, l: 5455, c: 5468 },
+      '10:00': { o: 5300, h: 5460, l: 5290, c: 5455 },
+      '10:05': { o: 5456, h: 5470, l: 5455, c: 5468 },
     }),
   ];
-  const skipped = scan.nextAction({ bars: wild, now: istAt(day, '09:10') });
+  const skipped = scan.nextAction({ bars: wild, now: istAt(day, '10:10') });
   assert.equal(skipped.action, 'wild-prev');
 
   const locked = scan.nextAction({
@@ -161,12 +166,12 @@ test('confirm failure clears the pending signal', () => {
       '23:00': { o: 5190, h: 5200, l: 5100, c: 5180 },
     }),
     ...session(day, {
-      '09:00': { o: 5198, h: 5210, l: 5196, c: 5208 },
-      '09:05': { o: 5209, h: 5210, l: 5190, c: 5192 },
+      '10:00': { o: 5198, h: 5210, l: 5196, c: 5208 },
+      '10:05': { o: 5209, h: 5210, l: 5190, c: 5192 },
     }),
   ];
-  const pending = { dir: 1, sig: 5208, signalT: '09:00' };
-  const rejected = scan.nextAction({ bars, now: istAt(day, '09:10'), pending });
+  const pending = { dir: 1, sig: 5208, signalT: '10:00' };
+  const rejected = scan.nextAction({ bars, now: istAt(day, '10:10'), pending });
   assert.equal(rejected.action, 'reject-confirm');
   assert.equal(rejected.pending, null);
 });
@@ -244,7 +249,7 @@ test('live money start needs the confirm checkbox and stop reports liveOrders fa
     const healthBody = await health.json();
     assert.equal(health.status, 200);
     assert.equal(healthBody.liveOrders, false);
-    assert.equal(healthBody.dna.entryStart, '09:00');
+    assert.equal(healthBody.dna.entryStart, '10:00');
 
     const status = await fetch(`${base}/crude-live/status`);
     const statusBody = await status.json();
@@ -277,7 +282,7 @@ test('live money start needs the confirm checkbox and stop reports liveOrders fa
     const startBody = await start.json();
     assert.equal(start.status, 200);
     assert.equal(startBody.liveOrders, true);
-    assert.match(startBody.money.lastMessage, /09:00–23:00|next contract/i);
+    assert.match(startBody.money.lastMessage, /10:00–23:00|next contract/i);
 
     const stop = await fetch(`${base}/crude-live/stop`, { method: 'POST' });
     const stopBody = await stop.json();
