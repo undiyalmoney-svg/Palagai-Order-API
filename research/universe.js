@@ -4,6 +4,8 @@
  * Research paper books — the same four the Charts desk watches.
  * These are index / futures prices, not the 50 cash shares.
  */
+const { sessionDate } = require('./time');
+
 const UNIVERSE_DATE = '2026-10-13';
 
 const INDEX_BOOKS = [
@@ -101,10 +103,9 @@ function splitCsvLine(line) {
   return out;
 }
 
-/** Front-month MCX Crude oil mini future from a Kite instruments dump. */
+/** Next MCX Crude oil mini future. Skips the contract that expires today. */
 function resolveCrudeContract(csv, asOf = new Date()) {
-  const today = new Date(asOf);
-  today.setHours(0, 0, 0, 0);
+  const today = sessionDate(asOf);
   const rows = [];
   for (const line of String(csv || '').split(/\r?\n/).slice(1)) {
     if (!line) continue;
@@ -114,17 +115,18 @@ function resolveCrudeContract(csv, asOf = new Date()) {
     const type = String(cols[9] || '').toUpperCase();
     const exchange = String(cols[11] || '').toUpperCase();
     if (exchange !== 'MCX' || type !== 'FUT' || !symbol.startsWith('CRUDEOILM')) continue;
+    const expiry = String(cols[5] || '').trim().slice(0, 10);
     rows.push({
       instrumentToken: Number(cols[0]) || 0,
       tradingSymbol: String(cols[2] || '').trim(),
-      expiry: String(cols[5] || '').trim(),
+      expiry,
       tickSize: Number(cols[7]) || 0.1,
       lotSize: Number(cols[8]) || 1,
     });
   }
-  rows.sort((a, b) => new Date(a.expiry || 0) - new Date(b.expiry || 0));
-  const next = rows.find((row) => !row.expiry || new Date(row.expiry) > today);
-  return next || rows[0] || null;
+  rows.sort((a, b) => String(a.expiry).localeCompare(String(b.expiry)));
+  const next = rows.find((row) => !row.expiry || row.expiry > today);
+  return next || rows.find((row) => !row.expiry || row.expiry >= today) || rows[0] || null;
 }
 
 /** @deprecated stock scan list — kept so old tests/import paths do not break. */

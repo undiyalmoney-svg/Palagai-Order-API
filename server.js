@@ -7,6 +7,7 @@ const { startResearchSupervisor } = require('./research/instance');
 const { start: startChartsProtect } = require('./charts-protect/worker');
 const { start: startSlBuddy } = require('./sl-buddy/worker');
 const { start: startPdhLive } = require('./pdh-live/worker');
+const { start: startCrudeLive } = require('./crude-live/worker');
 const { applyMarketDeskAuth } = require('./market-desk/instance');
 
 async function boot() {
@@ -82,6 +83,21 @@ async function boot() {
       },
     });
     startPdhLive({
+      getAuthorization: async (userId) => {
+        if (!userId) return null;
+        return getMomentumApp().momentum.sessions.authorization(userId);
+      },
+      saveAuthorization: (userId, apiKey, accessToken) => {
+        if (!userId || !apiKey || !accessToken) return false;
+        try {
+          getMomentumApp().momentum.sessions.save(userId, apiKey, accessToken);
+          return true;
+        } catch {
+          return false;
+        }
+      },
+    });
+    startCrudeLive({
       getAuthorization: async (userId) => {
         if (!userId) return null;
         return getMomentumApp().momentum.sessions.authorization(userId);

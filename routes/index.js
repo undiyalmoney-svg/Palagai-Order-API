@@ -11,6 +11,7 @@ const { getHeatmapRouter } = require('../heatmap/instance');
 const { getMarketDeskRouter } = require('../market-desk/instance');
 const { createOrbBacktestRouter } = require('../orb-backtest/routes');
 const { createDailyProfitRouter } = require('../daily-profit/routes');
+const { createCrudeLiveRouter } = require('../crude-live/routes');
 
 const router = express.Router();
 
@@ -78,5 +79,12 @@ function dailyProfitHandler(req, res, next) {
   return dailyProfitRouter(req, res, next);
 }
 router.use('/daily-profit', dailyProfitHandler);
+
+let crudeLiveRouter = null;
+function crudeLiveHandler(req, res, next) {
+  if (!crudeLiveRouter) crudeLiveRouter = createCrudeLiveRouter();
+  return crudeLiveRouter(req, res, next);
+}
+router.use('/crude-live', crudeLiveHandler);
 
 module.exports = router;

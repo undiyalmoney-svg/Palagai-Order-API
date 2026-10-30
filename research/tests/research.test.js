@@ -427,20 +427,24 @@ test('ensure stores the four Charts books and marks leftover cash shares ineligi
   assert.match(status.selection.kind, /index/i);
 });
 
-test('crude oil token comes from the front-month MCX future', async () => {
+test('crude oil token rolls to the next MCX future on expiry day', async () => {
   const csv = [
     'instrument_token,exchange_token,tradingsymbol,name,last_price,expiry,strike,tick_size,lot_size,instrument_type,segment,exchange',
     '111,0,CRUDEOILM26OCTFUT,CRUDEOILM,0,2026-10-16,0,1,1,FUT,MCX-FUT,MCX',
     '222,0,CRUDEOILM26NOVFUT,CRUDEOILM,0,2026-11-17,0,1,1,FUT,MCX-FUT,MCX',
   ].join('\n');
-  const hit = resolveCrudeContract(csv, new Date('2026-10-17T00:00:00+05:30'));
-  assert.equal(hit.tradingSymbol, 'CRUDEOILM26NOVFUT');
-  assert.equal(hit.instrumentToken, 222);
+  const before = resolveCrudeContract(csv, new Date('2026-10-15T18:00:00+05:30'));
+  assert.equal(before.tradingSymbol, 'CRUDEOILM26OCTFUT');
+  const expiryDay = resolveCrudeContract(csv, new Date('2026-10-16T09:05:00+05:30'));
+  assert.equal(expiryDay.tradingSymbol, 'CRUDEOILM26NOVFUT');
+  assert.equal(expiryDay.instrumentToken, 222);
+  const after = resolveCrudeContract(csv, new Date('2026-10-17T00:00:00+05:30'));
+  assert.equal(after.tradingSymbol, 'CRUDEOILM26NOVFUT');
   const feed = new KiteFeed({ instruments: [{ symbol: 'CRUDEOILM', exchange: 'MCX', instrumentToken: 0 }] });
   feed.loadCsv = async () => csv;
   await feed.ensureTokens('token k:t');
-  assert.equal(feed.instruments[0].instrumentToken, 111);
-  assert.equal(feed.instruments[0].contractSymbol, 'CRUDEOILM26OCTFUT');
+  assert.equal(feed.instruments[0].instrumentToken, 222);
+  assert.equal(feed.instruments[0].contractSymbol, 'CRUDEOILM26NOVFUT');
 });
 
 test('pull uses REST last price when the ticker has no ticks yet', async () => {
