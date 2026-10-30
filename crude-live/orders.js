@@ -154,7 +154,17 @@ async function flattenFill(kite, authorization, fill, reason) {
   const posRes = await kite.getPositions(authorization);
   const qty = Math.abs(signedQty(asPositions(posRes), fill.instrument));
   const label =
-    reason === 'TARGET' ? `TP ${DNA.targetPts}` : reason === 'EOD' ? DNA.flatten : reason === 'STOP' ? 'Stop flatten' : 'Stop';
+    reason === 'TARGET'
+      ? `TP ${DNA.targetPts}`
+      : reason === 'SCRATCH'
+        ? `Scratch ${DNA.scratchPts}`
+        : reason === 'SMELL'
+          ? 'Smell exit'
+          : reason === 'EOD'
+            ? DNA.flatten
+            : reason === 'STOP'
+              ? 'Stop flatten'
+              : 'Stop';
   if (!(qty > 0)) {
     return { ok: true, alreadyFlat: true, message: `${label} — already flat on ${fill.instrument}. ${extras.join(' ')}`.trim() };
   }

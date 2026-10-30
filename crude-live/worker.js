@@ -3,7 +3,7 @@
  *
  * Instrument: next MCX CRUDEOILM FUT (skips the contract that expires today).
  * Entry: 1 lot MIS MARKET after PDHL + next-bar confirm, 09:00–23:00 IST.
- * Stop: SL-M 20 pts. Exit: software TP 40 pts or flatten 23:10.
+ * Stop: SL-M 20 pts hard floor. Software scratch 8 pts or first-bar smell, TP 30, flatten 23:10.
  */
 'use strict';
 
@@ -206,7 +206,8 @@ async function tickExits(now = new Date()) {
       }
       const working = { ...fill, qty: Math.abs(qty) };
       const last = orders.lastPrice(positions, quotes, working);
-      const decision = scan.decideExit({ fill: working, lastPx: last, now });
+      const smellBar = scan.firstBarAfter(cache.bars, sessionDate(now), working.confirmT);
+      const decision = scan.decideExit({ fill: working, lastPx: last, now, smellBar });
       if (decision.action === 'flatten') {
         const result = await orders.flattenFill(kite, authorization, working, decision.reason);
         state.lastMessage = result.message;

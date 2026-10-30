@@ -13,6 +13,8 @@ const {
   confirmDir,
   weekShouldStandDown,
   dayShouldStandDown,
+  shouldScratch,
+  smellAgainst,
 } = require('./dna');
 
 function barClock(iso) {
@@ -75,14 +77,21 @@ function levels(side, fillPx) {
   return {
     stopPx: fill - dir * DNA.stopPts,
     targetPx: fill + dir * DNA.targetPts,
+    scratchPx: DNA.scratchPts > 0 ? fill - dir * DNA.scratchPts : null,
   };
 }
 
-function decideExit({ fill, lastPx, now }) {
+function decideExit({ fill, lastPx, now, smellBar = null }) {
   if (!fill) return { action: 'flat' };
   if (pastFlatten(now)) return { action: 'flatten', reason: 'EOD' };
   const last = Number(lastPx);
   if (!(last > 0)) return { action: 'hold' };
+  if (shouldScratch(fill.side, fill.entry, last)) {
+    return { action: 'flatten', reason: 'SCRATCH' };
+  }
+  if (DNA.smellFirstBar && smellBar && smellAgainst(fill.side, fill.entry, smellBar.close)) {
+    return { action: 'flatten', reason: 'SMELL' };
+  }
   const stop = Number(fill.stop);
   const target = Number(fill.target);
   if (fill.side === 'S') {
@@ -93,6 +102,15 @@ function decideExit({ fill, lastPx, now }) {
     if (target > 0 && last >= target) return { action: 'flatten', reason: 'TARGET' };
   }
   return { action: 'hold' };
+}
+
+/** First closed 5m bar whose clock is after the confirm/fill bar. */
+function firstBarAfter(bars, day, confirmT) {
+  if (!confirmT) return null;
+  const start = toMin(confirmT);
+  const same = (bars || []).filter((b) => b.day === day && toMin(b.t) > start);
+  same.sort((a, b) => toMin(a.t) - toMin(b.t));
+  return same[0] || null;
 }
 
 function nextAction({
@@ -204,5 +222,6 @@ module.exports = {
   pastFlatten,
   levels,
   decideExit,
+  firstBarAfter,
   nextAction,
 };

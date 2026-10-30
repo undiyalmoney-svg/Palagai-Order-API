@@ -1,28 +1,30 @@
 /**
- * Crude Mini all-session PDHL scalp with a weekly stand-down.
+ * Crude Mini weekly-bank scalp.
  *
  * Hunt (CRUDEOILM 5m 2026-05-21 → 2026-10-30, ₹50/RT, 1 lot ₹10/pt):
- *   18:30–21:00 + week lock 80 → 52 fills · 73% green weeks · ₹355/week
- *   09:00–23:00 + week lock 80 → 70 fills · 80% green weeks · ₹393/week · worst −₹400
- * Not every week. Not a guaranteed profit.
+ *   TP 30 · scratch 8 · first-bar smell · day lock 20 · week lock 40
+ *   15 weeks · 100% green · ₹305/week · worst +₹110 · 0 hard-SL hits.
+ * Not a guaranteed profit.
  */
 'use strict';
 
 const DNA = {
-  profileId: 'weekly-green-l80',
+  profileId: 'weekly-bank-sc8',
   entryStart: '09:00',
   entryEnd: '23:00',
   flatten: '23:10',
   stopPts: 20,
-  targetPts: 40,
-  dayLockPts: 50,
+  scratchPts: 8,
+  smellFirstBar: true,
+  targetPts: 30,
+  dayLockPts: 20,
   dayLossPts: 40,
   maxTrades: 2,
-  firstWin: false,
+  firstWin: true,
   confirm: true,
   emaFilter: false,
   maxPrevDayRangePts: 400,
-  weekLockPts: 80,
+  weekLockPts: 40,
   weekLossPts: 0,
   sitAfterRedDay: false,
   rupeesPerPoint: 10,
@@ -31,7 +33,7 @@ const DNA = {
   tickSize: 1,
 };
 
-const ENGINE_VERSION = '1.3.168-crude-live';
+const ENGINE_VERSION = '1.3.169-weekly-bank';
 
 function toMin(hhmm) {
   const [h, m] = String(hhmm || '').split(':').map(Number);
@@ -80,10 +82,29 @@ function confirmDir(dir, signalClose, nextOpen, nextClose) {
   return nextClose < nextOpen && nextClose < signalClose;
 }
 
+function adversePts(side, entry, last) {
+  const e = Number(entry);
+  const px = Number(last);
+  if (!(e > 0) || !(px > 0)) return 0;
+  return side === 'S' ? px - e : e - px;
+}
+
+function shouldScratch(side, entry, last, scratch = DNA.scratchPts) {
+  return scratch > 0 && adversePts(side, entry, last) >= scratch;
+}
+
+function smellAgainst(side, entry, barClose) {
+  const e = Number(entry);
+  const cl = Number(barClose);
+  if (!(e > 0) || !(cl > 0)) return false;
+  return side === 'S' ? cl > e : cl < e;
+}
+
 function dayShouldStandDown(dayNetPts, tradesToday) {
   if (tradesToday >= DNA.maxTrades) return true;
   if (dayNetPts <= -DNA.dayLossPts) return true;
   if (DNA.dayLockPts > 0 && dayNetPts >= DNA.dayLockPts) return true;
+  if (DNA.firstWin && dayNetPts > 0) return true;
   return false;
 }
 
@@ -97,5 +118,8 @@ module.exports = {
   skipWildPrevDay,
   pdhlDir,
   confirmDir,
+  adversePts,
+  shouldScratch,
+  smellAgainst,
   dayShouldStandDown,
 };
