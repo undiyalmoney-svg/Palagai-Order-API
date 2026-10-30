@@ -1,6 +1,6 @@
 /**
- * All-session Crude Mini PDHL scan on closed 5-minute bars.
- * Signal in 10:00–23:00, next-bar confirm, flatten 23:10.
+ * Daily-min Crude Mini scan on closed 5-minute bars.
+ * PDHL, 10:00–11:00 OR fade, or 6-bar trap. Signal 10:00–23:00, confirm, flatten 23:10.
  */
 'use strict';
 
@@ -8,8 +8,7 @@ const { minutesOfDay, sessionDate } = require('../research/time');
 const {
   DNA,
   toMin,
-  skipWildPrevDay,
-  pdhlDir,
+  entryDir,
   confirmDir,
   weekShouldStandDown,
   dayShouldStandDown,
@@ -105,6 +104,22 @@ function decideExit({ fill, lastPx, now, smellBar = null }) {
 }
 
 /** First closed 5m bar whose clock is after the confirm/fill bar. */
+function sessionOr(bars) {
+  const subset = (bars || []).filter((b) => {
+    const m = toMin(b.t);
+    return m >= toMin(DNA.orStart) && m <= toMin(DNA.orEnd);
+  });
+  if (!subset.length) return null;
+  return { high: Math.max(...subset.map((b) => b.h)), low: Math.min(...subset.map((b) => b.l)) };
+}
+
+function swingHL(bars, lastT, lb = DNA.trapLookback) {
+  const prior = (bars || []).filter((b) => toMin(b.t) < toMin(lastT));
+  const slice = prior.slice(-Number(lb) || 6);
+  if (slice.length < 3) return null;
+  return { high: Math.max(...slice.map((b) => b.h)), low: Math.min(...slice.map((b) => b.l)) };
+}
+
 function firstBarAfter(bars, day, confirmT) {
   if (!confirmT) return null;
   const start = toMin(confirmT);
@@ -136,19 +151,15 @@ function nextAction({
   const day = sessionDate(now);
   const closed = closedBars(bars, now).filter((b) => b.day === day);
   const hl = prevSessionHl(bars, day);
-  if (!hl) return { action: 'no-prev', message: 'Waiting for yesterday’s high and low.' };
-  if (skipWildPrevDay(hl.high, hl.low)) {
-    return {
-      action: 'wild-prev',
-      message: `Yesterday range ${Math.round(hl.high - hl.low)} pts > ${DNA.maxPrevDayRangePts}. Sitting out.`,
-      prev: hl,
-    };
+  if (!hl) {
+    const earlyOr = sessionOr(closed);
+    if (!earlyOr) return { action: 'no-prev', message: 'Waiting for yesterday’s high and low.' };
   }
 
   if (pending && pending.signalT) {
     const next = closed.find((b) => toMin(b.t) > toMin(pending.signalT));
     if (!next) {
-      return { action: 'wait-confirm', pending, prev: hl, message: `Confirming ${pending.signalT} PDHL.` };
+      return { action: 'wait-confirm', pending, prev: hl, message: `Confirming ${pending.signalT}.` };
     }
     const dir = pending.dir === -1 || pending.dir === 'S' ? -1 : 1;
     if (!confirmDir(dir, pending.sig, next.o, next.c)) {
@@ -187,16 +198,30 @@ function nextAction({
   }).pop();
   if (!last) return { action: 'waiting', prev: hl, message: 'Waiting for a closed 5-minute bar.' };
 
-  const dir = pdhlDir(last.c, last.o, hl.high, hl.low);
+  const orb = sessionOr(closed);
+  const swing = swingHL(closed, last.t);
+  const dir = entryDir(
+    last.c,
+    last.o,
+    last.h,
+    last.l,
+    hl?.high || 0,
+    hl?.low || 0,
+    orb?.high || 0,
+    orb?.low || 0,
+    swing?.high || 0,
+    swing?.low || 0,
+    toMin(last.t),
+  );
   if (!dir) {
-    return { action: 'waiting', prev: hl, lastT: last.t, message: `Watching ${last.t}. No PDHL close.` };
+    return { action: 'waiting', prev: hl, lastT: last.t, message: `Watching ${last.t}. No daily-min close.` };
   }
   if (DNA.confirm) {
     return {
       action: 'pending',
       pending: { dir, sig: last.c, signalT: last.t },
       prev: hl,
-      message: `PDHL ${dir === 1 ? 'long' : 'short'} at ${last.t} — waiting next bar confirm.`,
+      message: `Daily-min ${dir === 1 ? 'long' : 'short'} at ${last.t} — waiting next bar confirm.`,
     };
   }
   const side = dir === -1 ? 'S' : 'L';
@@ -210,7 +235,7 @@ function nextAction({
     signalT: last.t,
     confirmT: last.t,
     prev: hl,
-    message: `PDHL ${side === 'S' ? 'short' : 'long'} @ ${last.c}`,
+    message: `Daily-min ${side === 'S' ? 'short' : 'long'} @ ${last.c}`,
   };
 }
 
@@ -218,6 +243,8 @@ module.exports = {
   barsFromKite,
   closedBars,
   prevSessionHl,
+  sessionOr,
+  swingHL,
   inEntryWindow,
   pastFlatten,
   levels,

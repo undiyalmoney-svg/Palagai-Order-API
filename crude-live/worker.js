@@ -2,8 +2,8 @@
  * Crude Mini live money worker — idle until Start live money.
  *
  * Instrument: next MCX CRUDEOILM FUT (skips the contract that expires today).
- * Entry: 1 lot MIS MARKET after PDHL + next-bar confirm, 10:00–23:00 IST.
- * Stop: SL-M 20 pts hard floor. Software scratch 8 pts or first-bar smell, TP 30, flatten 23:10.
+ * Entry: 1 lot MIS MARKET after PDHL / OR fade / trap + next-bar confirm, 10:00–23:00 IST.
+ * Stop: SL-M 20 pts hard floor. Software scratch 10 pts or first-bar smell, TP 25 (₹200), flatten 23:10.
  */
 'use strict';
 

@@ -1,22 +1,24 @@
 /**
- * Crude Mini weekly-bank scalp.
+ * Crude Mini daily-min scalp.
  *
  * Hunt (CRUDEOILM 5m 2026-05-21 → 2026-10-30, ₹50/RT, 1 lot ₹10/pt):
- *   TP 30 · scratch 8 · first-bar smell · day lock 20 · week lock 40
- *   Clock: skip 09:00 IST chop. 10:00–23:00 · ₹365/week vs ₹305 all-session.
- * Not a guaranteed profit.
+ *   PDHL + 10:00–11:00 OR fade + 6-bar trap. TP 25 · scratch 10 · first-bar smell.
+ *   Day lock 20 / first win. Week lock off so every session can still hunt ₹150–200.
+ *   Sample: 43/74 full-session days hit ₹150+ (58%). Not a guaranteed daily ₹150.
  */
 'use strict';
 
 const DNA = {
-  profileId: 'weekly-bank-sc8',
+  profileId: 'daily-min-sc10',
   entryStart: '10:00',
   entryEnd: '23:00',
   flatten: '23:10',
+  orStart: '10:00',
+  orEnd: '11:00',
   stopPts: 20,
-  scratchPts: 8,
+  scratchPts: 10,
   smellFirstBar: true,
-  targetPts: 30,
+  targetPts: 25,
   dayLockPts: 20,
   dayLossPts: 40,
   maxTrades: 2,
@@ -24,16 +26,20 @@ const DNA = {
   confirm: true,
   emaFilter: false,
   maxPrevDayRangePts: 400,
-  weekLockPts: 40,
+  weekLockPts: 0,
   weekLossPts: 0,
   sitAfterRedDay: false,
+  trapPiercePts: 8,
+  trapLookback: 6,
+  orMinWidthPts: 12,
+  orMaxWidthPts: 220,
   rupeesPerPoint: 10,
   chargeRs: 50,
   qty: 1,
   tickSize: 1,
 };
 
-const ENGINE_VERSION = '1.3.170-win-clock';
+const ENGINE_VERSION = '1.3.171-daily-min';
 
 function toMin(hhmm) {
   const [h, m] = String(hhmm || '').split(':').map(Number);
@@ -77,6 +83,42 @@ function pdhlDir(close, open, pdh, pdl) {
   return 0;
 }
 
+function orbFadeDir(
+  close,
+  open,
+  high,
+  low,
+  orHigh,
+  orLow,
+  barMin,
+  orEndMin = toMin(DNA.orEnd),
+  minW = DNA.orMinWidthPts,
+  maxW = DNA.orMaxWidthPts,
+) {
+  if (barMin <= orEndMin) return 0;
+  const width = orHigh - orLow;
+  if (!(width >= minW) || width > maxW) return 0;
+  if (high > orHigh && close < orHigh && close < open) return -1;
+  if (low < orLow && close > orLow && close > open) return 1;
+  return 0;
+}
+
+function trapDir(close, open, high, low, swingHigh, swingLow, pierce = DNA.trapPiercePts) {
+  if (!(swingHigh > 0) || !(swingLow > 0)) return 0;
+  if (low < swingLow - pierce && close > swingLow && close > open) return 1;
+  if (high > swingHigh + pierce && close < swingHigh && close < open) return -1;
+  return 0;
+}
+
+function entryDir(close, open, high, low, pdh, pdl, orHigh, orLow, swingHigh, swingLow, barMin) {
+  const pdhl = skipWildPrevDay(pdh, pdl) ? 0 : pdhlDir(close, open, pdh, pdl);
+  return (
+    pdhl ||
+    orbFadeDir(close, open, high, low, orHigh, orLow, barMin) ||
+    trapDir(close, open, high, low, swingHigh, swingLow)
+  );
+}
+
 function confirmDir(dir, signalClose, nextOpen, nextClose) {
   if (dir === 1) return nextClose > nextOpen && nextClose > signalClose;
   return nextClose < nextOpen && nextClose < signalClose;
@@ -117,6 +159,9 @@ module.exports = {
   prevDayRangePts,
   skipWildPrevDay,
   pdhlDir,
+  orbFadeDir,
+  trapDir,
+  entryDir,
   confirmDir,
   adversePts,
   shouldScratch,

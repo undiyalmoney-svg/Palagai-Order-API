@@ -43,24 +43,26 @@ function session(day, overlays = {}) {
   return out;
 }
 
-test('DNA is weekly-bank: TP 30, scratch 8, day lock 20, week lock 40', () => {
+test('DNA is daily-min: TP 25, scratch 10, day lock 20, no week sit', () => {
+  assert.equal(DNA.profileId, 'daily-min-sc10');
   assert.equal(DNA.entryStart, '10:00');
   assert.equal(DNA.entryEnd, '23:00');
   assert.equal(DNA.flatten, '23:10');
   assert.equal(toMin(DNA.entryStart), 10 * 60);
   assert.equal(DNA.stopPts, 20);
-  assert.equal(DNA.scratchPts, 8);
+  assert.equal(DNA.scratchPts, 10);
   assert.equal(DNA.smellFirstBar, true);
-  assert.equal(DNA.targetPts, 30);
+  assert.equal(DNA.targetPts, 25);
   assert.equal(DNA.dayLockPts, 20);
   assert.equal(DNA.firstWin, true);
   assert.equal(DNA.maxTrades, 2);
   assert.equal(DNA.confirm, true);
-  assert.equal(DNA.weekLockPts, 40);
+  assert.equal(DNA.weekLockPts, 0);
   assert.equal(DNA.qty, 1);
+  assert.equal(DNA.targetPts * DNA.rupeesPerPoint - DNA.chargeRs, 200);
   assert.equal(weekMonday('2026-08-19'), '2026-08-17');
   assert.equal(weekShouldStandDown(39), false);
-  assert.equal(weekShouldStandDown(40), true);
+  assert.equal(weekShouldStandDown(40), false);
 });
 
 test('expiry day rolls to the next CRUDEOILM future and never keeps the dying month', () => {
@@ -129,11 +131,11 @@ test('skips the 09:00 wash-out; a 10:00 prior-day close is eligible after next-b
   assert.equal(fill.side, 'L');
   assert.equal(fill.fillPx, 5209);
   assert.equal(fill.stopPx, 5189);
-  assert.equal(fill.targetPx, 5239);
+  assert.equal(fill.targetPx, 5234);
   assert.equal(fill.signalT, '10:00');
 });
 
-test('skips a wild prior day and banks the week at +40 pts', () => {
+test('wild yesterday blocks PDHL only; a green week does not sit later days', () => {
   const prev = '2026-10-15';
   const day = '2026-10-16';
   const wild = [
@@ -142,19 +144,49 @@ test('skips a wild prior day and banks the week at +40 pts', () => {
       '23:00': { o: 5400, h: 5450, l: 5000, c: 5300 },
     }),
     ...session(day, {
-      '10:00': { o: 5300, h: 5460, l: 5290, c: 5455 },
-      '10:05': { o: 5456, h: 5470, l: 5455, c: 5468 },
+      '10:00': { o: 5150, h: 5152, l: 5148, c: 5151 },
     }),
   ];
-  const skipped = scan.nextAction({ bars: wild, now: istAt(day, '10:10') });
-  assert.equal(skipped.action, 'wild-prev');
+  const still = scan.nextAction({ bars: wild, now: istAt(day, '10:10') });
+  assert.notEqual(still.action, 'wild-prev');
+  assert.notEqual(still.action, 'week-lock');
 
-  const locked = scan.nextAction({
-    bars: session(day),
+  const later = scan.nextAction({
+    bars: [...session(prev), ...session(day)],
     now: istAt(day, '20:00'),
     weekNetPts: 40,
   });
-  assert.equal(locked.action, 'week-lock');
+  assert.notEqual(later.action, 'week-lock');
+});
+
+test('fades a poke back into the 10:00–11:00 range after next-bar confirm', () => {
+  const prev = '2026-10-15';
+  const day = '2026-10-16';
+  const bars = [
+    ...session(prev, {
+      '09:00': { o: 5100, h: 5200, l: 5100, c: 5150 },
+      '23:00': { o: 5190, h: 5200, l: 5100, c: 5180 },
+    }),
+    ...session(day, {
+      '10:00': { o: 5190, h: 5210, l: 5190, c: 5200 },
+      '11:05': { o: 5212, h: 5218, l: 5204, c: 5206 },
+      '11:10': { o: 5205, h: 5206, l: 5196, c: 5198 },
+    }),
+  ];
+  const signal = scan.nextAction({ bars, now: istAt(day, '11:10') });
+  assert.equal(signal.action, 'pending');
+  assert.equal(signal.pending.signalT, '11:05');
+  assert.equal(signal.pending.dir, -1);
+
+  const fill = scan.nextAction({
+    bars,
+    now: istAt(day, '11:15'),
+    pending: signal.pending,
+  });
+  assert.equal(fill.action, 'enter');
+  assert.equal(fill.side, 'S');
+  assert.equal(fill.fillPx, 5205);
+  assert.equal(fill.targetPx, 5180);
 });
 
 test('confirm failure clears the pending signal', () => {
@@ -176,14 +208,14 @@ test('confirm failure clears the pending signal', () => {
   assert.equal(rejected.pending, null);
 });
 
-test('flatten at 23:10, scratch 8 pts before the 20-pt SL, and MCX MIS is 1 lot', () => {
-  const fill = { instrument: 'CRUDEOILM26NOVFUT', exchange: 'MCX', side: 'L', qty: 1, entry: 5200, stop: 5180, target: 5230 };
+test('flatten at 23:10, scratch 10 pts before the 20-pt SL, and MCX MIS is 1 lot', () => {
+  const fill = { instrument: 'CRUDEOILM26NOVFUT', exchange: 'MCX', side: 'L', qty: 1, entry: 5200, stop: 5180, target: 5225 };
   const eod = scan.decideExit({ fill, lastPx: 5210, now: istAt('2026-10-16', '23:10') });
   assert.equal(eod.action, 'flatten');
   assert.equal(eod.reason, 'EOD');
-  const hold = scan.decideExit({ fill, lastPx: 5193, now: istAt('2026-10-16', '20:00') });
+  const hold = scan.decideExit({ fill, lastPx: 5191, now: istAt('2026-10-16', '20:00') });
   assert.equal(hold.action, 'hold');
-  const scratch = scan.decideExit({ fill, lastPx: 5192, now: istAt('2026-10-16', '20:00') });
+  const scratch = scan.decideExit({ fill, lastPx: 5190, now: istAt('2026-10-16', '20:00') });
   assert.equal(scratch.action, 'flatten');
   assert.equal(scratch.reason, 'SCRATCH');
   const smell = scan.decideExit({
