@@ -8,7 +8,8 @@
 'use strict';
 
 const { kiteService } = require('../services/kite.service');
-const { fetchQuoteLtp, fetchHistorical5m, fetchInstrumentsCsv } = require('../services/kite-market');
+const { fetchQuoteLtp, fetchHistorical5m, fetchInstrumentsCsv, fetchUserMargins } = require('../services/kite-market');
+const { futOpenBlock, isMarginReject } = require('./margin');
 const { sessionDate } = require('../research/time');
 const { DNA } = require('./dna');
 const { resolveNextCrudeMiniFut } = require('./contract');
@@ -133,14 +134,34 @@ async function placeEntry(authorization, state, picked, now) {
     state.lastError = `Could not size ${contract.tradingSymbol}`;
     return state;
   }
+  try {
+    const funds = await fetchUserMargins(authorization);
+    const block = futOpenBlock(funds.commodityCash);
+    if (block) {
+      state.enabled = false;
+      state.pending = null;
+      state.lastError = block;
+      state.lastMessage = block;
+      return state;
+    }
+  } catch {
+    // Still try the order; a margin reject below stands down.
+  }
   const placed = await kite.placeOrder(authorization, 'regular', fields);
   const body = orders.kiteBody(placed);
   const http = placed.status || 0;
   const orderId = body.data?.order_id || null;
   const ok = http < 400 && (body.status === 'success' || orderId);
   if (!ok) {
-    state.lastError = body.message || `Entry failed on ${contract.tradingSymbol}`;
-    state.lastMessage = state.lastError;
+    const message = body.message || `Entry failed on ${contract.tradingSymbol}`;
+    state.lastError = message;
+    state.lastMessage = message;
+    if (isMarginReject(message)) {
+      state.enabled = false;
+      state.pending = null;
+      state.lastMessage =
+        `${message} Crude Mini FUT needs more than ₹14,000 free (NRML ~₹31,000). Standing down. Cheap CE/PE is the ₹14k plan on Test.`;
+    }
     return state;
   }
   const fillPx = await readFillPrice(authorization, orderId, picked.fillPx);

@@ -6,6 +6,8 @@ const store = require('./store');
 const worker = require('./worker');
 const { confirmOk } = require('./orders');
 const { DNA, ENGINE_VERSION } = require('./dna');
+const { fetchUserMargins } = require('../services/kite-market');
+const { futOpenBlock } = require('./margin');
 
 function kiteHeader(req) {
   return req.headers['x-kite-authorization'] || req.headers['x-kite-authorisation'] || '';
@@ -67,6 +69,27 @@ function createCrudeLiveRouter({ auth = siteAuth } = {}) {
           message: 'Connect Kite on Token first. Live money needs a live access token.',
         });
         return;
+      }
+      try {
+        const funds = await fetchUserMargins(header);
+        const block = futOpenBlock(funds.commodityCash);
+        if (block) {
+          const state = store.load();
+          state.enabled = false;
+          state.pending = null;
+          state.lastError = block;
+          state.lastMessage = block;
+          store.save(state);
+          res.status(400).json({
+            status: 'error',
+            liveOrders: false,
+            message: block,
+            money: store.publicView(state),
+          });
+          return;
+        }
+      } catch {
+        // Test / stale token — worker still refuses a short-cash order.
       }
       const state = store.load();
       state.enabled = true;

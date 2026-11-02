@@ -12,6 +12,7 @@ const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'crude-live-'));
 process.env.CRUDE_LIVE_STATE = path.join(dir, 'state.json');
 
 const { DNA, toMin, weekMonday, weekShouldStandDown } = require('./dna');
+const { CRUDE_FUT_NRML_RS, CRUDE_FUT_MIN_FREE_RS, futOpenBlock, isMarginReject } = require('./margin');
 const { resolveNextCrudeMiniFut } = require('./contract');
 const scan = require('./scan');
 const orders = require('./orders');
@@ -42,6 +43,16 @@ function session(day, overlays = {}) {
   }
   return out;
 }
+
+test('refuses Crude Mini FUT when free commodity cash is only ₹14k', () => {
+  assert.equal(CRUDE_FUT_NRML_RS, 31_000);
+  assert.equal(CRUDE_FUT_MIN_FREE_RS, 20_000);
+  assert.match(futOpenBlock(14_000), /more than ₹14,000/);
+  assert.match(futOpenBlock(14_000), /CE\/PE/);
+  assert.equal(futOpenBlock(31_000), null);
+  assert.equal(isMarginReject('RMS: Insufficient margin, required ₹14000'), true);
+  assert.equal(isMarginReject('Entry filled'), false);
+});
 
 test('DNA is daily-min: TP 25, scratch 10, day lock 20, no week sit', () => {
   assert.equal(DNA.profileId, 'daily-min-sc10');
