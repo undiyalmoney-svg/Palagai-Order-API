@@ -37,6 +37,17 @@ function createCrudeLiveRouter({ auth = siteAuth } = {}) {
         state.userId = req.user?.id || state.userId;
         if (state.userId) worker.captureAuth(state.userId, header);
         await worker.refreshContract(header);
+        try {
+          const funds = await fetchUserMargins(header);
+          const next = store.load();
+          next.funds = { ...funds, fetchedAt: new Date().toISOString() };
+          store.save(next);
+        } catch (err) {
+          const next = store.load();
+          next.funds = next.funds || null;
+          next.lastError = next.lastError || err.message || String(err);
+          store.save(next);
+        }
       }
       const state = store.load();
       res.json({

@@ -268,6 +268,22 @@ test('store stays disarmed across a new IST day and keeps the week net', () => {
   assert.equal(store.publicView(next).guaranteed, false);
 });
 
+test('public view reports last Kite equity and commodity cash', () => {
+  fs.rmSync(process.env.CRUDE_LIVE_STATE, { force: true });
+  const state = store.load(istAt('2026-11-02', '12:00'));
+  state.funds = {
+    equityCash: 14085,
+    commodityCash: 0,
+    equityNet: 14085,
+    commodityNet: 0,
+    fetchedAt: '2026-11-02T06:35:00.000Z',
+  };
+  store.save(state);
+  const view = store.publicView(store.load(istAt('2026-11-02', '12:00')));
+  assert.equal(view.funds.equityCash, 14085);
+  assert.equal(view.funds.commodityCash, 0);
+});
+
 test('live money start needs the confirm checkbox and stop reports liveOrders false', async () => {
   fs.rmSync(process.env.CRUDE_LIVE_STATE, { force: true });
   const app = express();

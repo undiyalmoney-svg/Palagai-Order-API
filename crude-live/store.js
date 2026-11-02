@@ -30,6 +30,7 @@ function empty(date) {
     lastError: null,
     lastMessage: null,
     sessionOk: false,
+    funds: null,
   };
 }
 
@@ -160,6 +161,15 @@ function publicView(state) {
     lastError: state.lastError,
     lastMessage: state.lastMessage,
     sessionOk: state.sessionOk === true,
+    funds: state.funds
+      ? {
+          equityCash: Math.round(Number(state.funds.equityCash) || 0),
+          commodityCash: Math.round(Number(state.funds.commodityCash) || 0),
+          equityNet: Math.round(Number(state.funds.equityNet) || 0),
+          commodityNet: Math.round(Number(state.funds.commodityNet) || 0),
+          fetchedAt: state.funds.fetchedAt || null,
+        }
+      : null,
     dropletWatching: true,
     dropletPlacing: state.enabled === true && state.sessionOk === true,
     guaranteed: false,
