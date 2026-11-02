@@ -18,8 +18,12 @@ function parseCsvLine(line) {
   return out;
 }
 
-/** Keep only NIFTY / BANKNIFTY futures and options from the NFO dump. */
-function parseInstruments(csv) {
+/**
+ * Keep futures and options for the configured underlyings from one exchange dump.
+ * `names` are the Kite `name` values (NIFTY, BANKNIFTY, SENSEX, CRUDEOILM); CRUDEOIL (big) is deliberately excluded.
+ */
+function parseInstruments(csv, names = Object.keys(config.groups)) {
+  const want = new Set(names);
   const lines = csv.split('\n');
   const head = parseCsvLine(lines[0].trim());
   const ix = Object.fromEntries(head.map((h, i) => [h, i]));
@@ -28,7 +32,7 @@ function parseInstruments(csv) {
     if (!lines[i]) continue;
     const c = parseCsvLine(lines[i]);
     const name = (c[ix.name] || '').replace(/"/g, '');
-    if (name !== 'NIFTY' && name !== 'BANKNIFTY') continue;
+    if (!want.has(name)) continue;
     const type = c[ix.instrument_type];
     if (type !== 'FUT' && type !== 'CE' && type !== 'PE') continue;
     rows.push({
@@ -39,6 +43,7 @@ function parseInstruments(csv) {
       expiry: c[ix.expiry],
       strike: Number(c[ix.strike]),
       lotSize: Number(c[ix.lot_size]),
+      exchange: c[ix.exchange],
     });
   }
   return rows;
@@ -49,42 +54,42 @@ function sortedExpiries(rows, underlying, kind, onOrAfter) {
 }
 
 /**
- * Contracts that matter on `date`:
+ * Contracts that matter on `date` for one underlying:
  *  - futures: the two nearest expiries (front + next) so the roll is visible
  *  - option expiries: the nearest expiry, plus the next one on the nearest expiry's own day
  */
-function chooseContracts(rows, date) {
-  const out = {};
-  for (const name of Object.keys(config.indices)) {
-    const futExp = sortedExpiries(rows, name, 'FUT', date).slice(0, 2);
-    const futs = futExp.map((e) => rows.find((r) => r.underlying === name && r.kind === 'FUT' && r.expiry === e)).filter(Boolean);
-    const optExp = sortedExpiries(rows, name, 'CE', date);
-    const expiries = optExp.length && optExp[0] === date ? optExp.slice(0, 2) : optExp.slice(0, 1);
-    out[name] = { futs, optionExpiries: expiries };
-  }
-  return out;
+function chooseContracts(rows, date, name) {
+  const futExp = sortedExpiries(rows, name, 'FUT', date).slice(0, 2);
+  const futs = futExp.map((e) => rows.find((r) => r.underlying === name && r.kind === 'FUT' && r.expiry === e)).filter(Boolean);
+  const optExp = sortedExpiries(rows, name, 'CE', date);
+  const expiries = optExp.length && optExp[0] === date ? optExp.slice(0, 2) : optExp.slice(0, 1);
+  return { futs, optionExpiries: expiries };
 }
 
-function atmStrike(spot, step) {
-  return Math.round(spot / step) * step;
+function atmStrike(ref, step) {
+  return Math.round(ref / step) * step;
 }
 
-/** ATM +/- n strikes, CE and PE, for each chosen expiry. */
-function optionsAround(rows, name, expiries, spot) {
-  const step = config.indices[name].step;
-  const atm = atmStrike(spot, step);
-  const want = [];
-  for (let k = -config.strikesEachSide; k <= config.strikesEachSide; k += 1) want.push([atm + k * step, k]);
+/** The future that prices an option expiry: the nearest future expiring on or after the option expiry. */
+function underlyingFutureFor(futs, optionExpiry) {
+  return futs.find((f) => f.expiry >= optionExpiry) || futs[futs.length - 1] || null;
+}
+
+/** ATM +/- n strikes, CE and PE, for each chosen expiry. `ref` is a function expiry -> reference price. */
+function optionsAround(rows, name, expiries, refFor, step) {
   const out = [];
   for (const expiry of expiries) {
-    for (const [strike, rel] of want) {
+    const ref = refFor(expiry);
+    if (!ref) continue;
+    const atm = atmStrike(ref, step);
+    for (let k = -config.strikesEachSide; k <= config.strikesEachSide; k += 1) {
       for (const kind of ['CE', 'PE']) {
-        const r = rows.find((x) => x.underlying === name && x.kind === kind && x.expiry === expiry && x.strike === strike);
-        if (r) out.push({ ...r, rel });
+        const r = rows.find((x) => x.underlying === name && x.kind === kind && x.expiry === expiry && x.strike === atm + k * step);
+        if (r) out.push({ ...r, rel: k, refPrice: ref });
       }
     }
   }
   return out;
 }
 
-module.exports = { parseInstruments, chooseContracts, optionsAround, atmStrike, parseCsvLine };
+module.exports = { parseInstruments, chooseContracts, optionsAround, atmStrike, parseCsvLine, underlyingFutureFor };

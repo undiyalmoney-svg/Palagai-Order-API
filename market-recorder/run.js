@@ -39,7 +39,7 @@ async function main() {
   const rec = new Recorder(db, { getAuth: () => { const a = currentAuth(); return a ? { header: a.header } : null; } });
   log.info('recorder started', { version: config.RECORDER_VERSION, dir: config.dir, pid: process.pid });
 
-  let summarizedFor = null;
+  const summarized = new Set();
   let prevLevelsFor = null;
   let lastStatus = null;
 
@@ -57,11 +57,24 @@ async function main() {
             prevLevelsFor = today;
           }
         }
-      } else if (istMinutesOfDay(now) > config.windowEndMin && summarizedFor !== today && istWeekday(now) >= 1 && istWeekday(now) <= 5) {
-        const s = writeSummary(db, today);
-        raw.compressOld(today);
-        log.info('daily summary', { date: today, status: s.status, missing_pct: s.missing_pct, rows: s.rows, disk_free_mb: s.disk_free_mb });
-        summarizedFor = today;
+      }
+      if (istWeekday(now) >= 1 && istWeekday(now) <= 5) {
+        const m = istMinutesOfDay(now);
+        for (const [name, g] of Object.entries(config.groups)) {
+          const key = `${today}|${name}`;
+          if (m > g.session[1] && !summarized.has(key)) {
+            const s = writeSummary(db, today, [name], `.${name}`);
+            raw.compressOld(today);
+            const gs = s.groups[name];
+            log.info('group summary', { date: today, group: name, status: gs.status, missing_pct: gs.missing_pct, rows: s.rows, disk_free_mb: s.disk_free_mb, days_left: s.projected_trading_days_left });
+            summarized.add(key);
+          }
+        }
+        if (m > config.windowEndMin && !summarized.has(`${today}|ALL`)) {
+          const s = writeSummary(db, today);
+          log.info('daily summary', { date: today, status: s.status, rows: s.rows, disk_free_mb: s.disk_free_mb, days_left: s.projected_trading_days_left });
+          summarized.add(`${today}|ALL`);
+        }
       }
       heartbeat({ lastStatus, inWindow: rec.inWindow(now), authFailedAt: rec.authFailedAt });
     } catch (e) {

@@ -16,7 +16,7 @@ try {
 }
 const db = open(config.dbFile);
 const s = summarize(db, date);
-const { per_instrument: _omit, ...short } = s;
-console.log(JSON.stringify({ heartbeat: hb, summary: short, instruments: s.per_instrument.length }, null, 2));
+const short = { ...s, groups: Object.fromEntries(Object.entries(s.groups).map(([k, v]) => { const { per_instrument: p, ...rest } = v; return [k, { ...rest, instruments: p.length }]; })) };
+console.log(JSON.stringify({ heartbeat: hb, summary: short }, null, 2));
 const total = db.prepare('SELECT COUNT(*) c, MIN(minute_key) a, MAX(minute_key) b FROM quotes').get();
 console.log(JSON.stringify({ all_rows: total }));

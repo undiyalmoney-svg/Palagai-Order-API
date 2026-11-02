@@ -2,20 +2,20 @@
 
 const config = require('./config');
 const { istStamp, parseKiteStamp } = require('./time');
-const { impliedVol } = require('./iv');
+const { impliedVol, greeks } = require('./iv');
 
 const INSERT_QUOTE = `INSERT OR IGNORE INTO quotes (
   token, minute_key, fetch_ts, exch_ts, ltt, stale_s, ltt_changed,
   ltp, open, high, low, prev_close, volume, vol_delta, oi, oi_delta, oi_day_high, oi_day_low,
   buy_qty, sell_qty, avg_price, net_change,
   bid1, bid1_qty, bid1_orders, ask1, ask1_qty, ask1_orders, bid5_qty, ask5_qty,
-  rel_strike, atm_ref, spot_ref, iv_calc
+  rel_strike, atm_ref, spot_ref, iv_calc, delta, gamma, theta_day, vega_1pct, lower_circuit, upper_circuit
 ) VALUES (
   @token, @minute_key, @fetch_ts, @exch_ts, @ltt, @stale_s, @ltt_changed,
   @ltp, @open, @high, @low, @prev_close, @volume, @vol_delta, @oi, @oi_delta, @oi_day_high, @oi_day_low,
   @buy_qty, @sell_qty, @avg_price, @net_change,
   @bid1, @bid1_qty, @bid1_orders, @ask1, @ask1_qty, @ask1_orders, @bid5_qty, @ask5_qty,
-  @rel_strike, @atm_ref, @spot_ref, @iv_calc
+  @rel_strike, @atm_ref, @spot_ref, @iv_calc, @delta, @gamma, @theta_day, @vega_1pct, @lower_circuit, @upper_circuit
 )`;
 
 const num = (v) => (v === undefined || v === null || Number.isNaN(Number(v)) ? null : Number(v));
@@ -62,17 +62,31 @@ function normalize(q, ctx) {
     atm_ref: ctx.atmRef ?? null,
     spot_ref: ctx.spotRef ?? null,
     iv_calc: null,
+    delta: null,
+    gamma: null,
+    theta_day: null,
+    vega_1pct: null,
+    lower_circuit: num(q.lower_circuit_limit),
+    upper_circuit: num(q.upper_circuit_limit),
   };
 }
 
+/**
+ * Derived IV and Greeks from the bid/ask mid. Index options use spot with r=6.5%; crude options use the matching
+ * future with r=0 (Black-76). `inst.expiryMin` is the expiry time of day in IST minutes.
+ */
 function ivFor(row, inst, fetchDate) {
   if (!inst || (inst.kind !== 'CE' && inst.kind !== 'PE') || !row.spot_ref) return null;
   if (!(row.bid1 > 0) || !(row.ask1 > 0) || row.ask1 < row.bid1) return null;
   const mid = (row.bid1 + row.ask1) / 2;
-  const expiry = Date.UTC(+inst.expiry.slice(0, 4), +inst.expiry.slice(5, 7) - 1, +inst.expiry.slice(8, 10), 15, 30) - 330 * 60000;
+  const expiryMin = inst.expiryMin ?? 15 * 60 + 30;
+  const expiry = Date.UTC(+inst.expiry.slice(0, 4), +inst.expiry.slice(5, 7) - 1, +inst.expiry.slice(8, 10), 0, expiryMin) - 330 * 60000;
   const T = (expiry - fetchDate.getTime()) / 86400000 / 365;
-  const iv = impliedVol(mid, row.spot_ref, inst.strike, T, inst.kind === 'CE');
-  return iv == null ? null : Number(iv.toFixed(4));
+  const r = inst.priceModel === 'black76' ? 0 : 0.065;
+  const iv = impliedVol(mid, row.spot_ref, inst.strike, T, inst.kind === 'CE', r);
+  if (iv == null) return null;
+  const g = greeks(row.spot_ref, inst.strike, T, iv, inst.kind === 'CE', r);
+  return { iv: Number(iv.toFixed(4)), ...(g || {}) };
 }
 
 class Store {
@@ -84,8 +98,8 @@ class Store {
       VALUES (@token, @symbol, @underlying, @kind, @expiry, @strike, @lotSize, @date, @date)
       ON CONFLICT(token) DO UPDATE SET last_seen = excluded.last_seen`);
     this.insertMinute = db.prepare(`INSERT OR REPLACE INTO minutes
-      (minute_key, fetch_ts, status, n_requested, n_recorded, latency_ms, spot_stale_s, duplicates_ignored, error)
-      VALUES (@minute_key, @fetch_ts, @status, @n_requested, @n_recorded, @latency_ms, @spot_stale_s, @duplicates_ignored, @error)`);
+      (minute_key, fetch_ts, status, n_requested, n_recorded, latency_ms, spot_stale_s, duplicates_ignored, error, groups)
+      VALUES (@minute_key, @fetch_ts, @status, @n_requested, @n_recorded, @latency_ms, @spot_stale_s, @duplicates_ignored, @error, @groups)`);
     this.seedLast();
   }
 
@@ -120,7 +134,14 @@ class Store {
         row.vol_delta = same && row.volume != null && prev.volume != null && row.volume >= prev.volume ? row.volume - prev.volume : null;
         row.oi_delta = same && row.oi != null && prev.oi != null ? row.oi - prev.oi : null;
         row.ltt_changed = same ? (row.ltt !== prev.ltt ? 1 : 0) : null;
-        row.iv_calc = ivFor(row, instMap?.get(row.token), fetchDate);
+        const d = ivFor(row, instMap?.get(row.token), fetchDate);
+        if (d) {
+          row.iv_calc = d.iv;
+          row.delta = Number(d.delta.toFixed(4));
+          row.gamma = Number(d.gamma.toExponential(4));
+          row.theta_day = Number(d.theta_day.toFixed(4));
+          row.vega_1pct = Number(d.vega_1pct.toFixed(4));
+        }
         const res = this.insertQuote.run(row);
         if (res.changes === 0) duplicates += 1;
         else {
@@ -134,7 +155,7 @@ class Store {
   }
 
   recordMinute(m) {
-    this.insertMinute.run({ n_requested: null, n_recorded: null, latency_ms: null, spot_stale_s: null, duplicates_ignored: 0, error: null, ...m });
+    this.insertMinute.run({ n_requested: null, n_recorded: null, latency_ms: null, spot_stale_s: null, duplicates_ignored: 0, error: null, groups: null, ...m });
   }
 
   hasMinute(minuteKey) {

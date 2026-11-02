@@ -37,7 +37,9 @@ CREATE TABLE IF NOT EXISTS quotes (
   rel_strike INTEGER,            -- -3..+3 relative to the ATM chosen from spot at this minute
   atm_ref REAL,                  -- spot used to pick ATM (look-ahead guard: known at fetch time)
   spot_ref REAL,                 -- spot used for IV
-  iv_calc REAL,                  -- derived Black-Scholes IV on spot_ref; NULL when not reliable
+  iv_calc REAL,                  -- derived IV on spot_ref (Black-Scholes) or the matching future (Black-76); NULL when not reliable
+  delta REAL, gamma REAL, theta_day REAL, vega_1pct REAL,   -- derived from iv_calc
+  lower_circuit REAL, upper_circuit REAL,   -- exchange price band; a future sitting on a limit has no usable book
   PRIMARY KEY (token, minute_key)
 ) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS quotes_minute ON quotes (minute_key);
@@ -52,7 +54,8 @@ CREATE TABLE IF NOT EXISTS minutes (
   latency_ms INTEGER,
   spot_stale_s REAL,
   duplicates_ignored INTEGER DEFAULT 0,
-  error TEXT
+  error TEXT,
+  groups TEXT                    -- underlyings in session for this minute
 );
 
 CREATE TABLE IF NOT EXISTS day_context (
@@ -76,6 +79,19 @@ CREATE TABLE IF NOT EXISTS hist_bars (
 ) WITHOUT ROWID;
 `;
 
+const ADDED = {
+  quotes: [['delta', 'REAL'], ['gamma', 'REAL'], ['theta_day', 'REAL'], ['vega_1pct', 'REAL'], ['lower_circuit', 'REAL'], ['upper_circuit', 'REAL']],
+  minutes: [['groups', 'TEXT']],
+};
+
+/** Schema upgrades are additive only: existing rows are never touched. */
+function migrate(db) {
+  for (const [table, cols] of Object.entries(ADDED)) {
+    const have = new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name));
+    for (const [name, type] of cols) if (!have.has(name)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${type}`);
+  }
+}
+
 function open(file) {
   if (file !== ':memory:') fs.mkdirSync(path.dirname(file), { recursive: true });
   const db = new Database(file);
@@ -83,6 +99,7 @@ function open(file) {
   db.pragma('synchronous = NORMAL');
   db.pragma('busy_timeout = 5000');
   db.exec(SCHEMA);
+  migrate(db);
   return db;
 }
 
