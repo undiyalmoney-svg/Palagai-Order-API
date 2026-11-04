@@ -1,0 +1,2074 @@
+{
+  "as_of": "2026-11-04T07:58:35.977284+00:00",
+  "india_vix": 15.53,
+  "verdict": "NO VALIDATED EDGE \u2014 DO NOT DEPLOY LIVE CAPITAL.",
+  "recommended_portfolio": {
+    "live": "NONE",
+    "paper": "One book, one lot: NIFTY weekly options (liquidity) or CRUDEOILM options (lowest cash). Never both plus Bank/Sensex as diversification.",
+    "lots": 1,
+    "trades_per_day": "0 or 1",
+    "daily_loss_cap_paper": 420,
+    "why": "Only names with a two-sided book and prior research. That research is NO_EDGE. Adding correlated index books multiplies the same bet."
+  },
+  "disclaimer": "Live lots, premiums, spreads, OI and Kite NRML margins are as of the snapshot. Expectancy figures are copied from prior research or marked INCONCLUSIVE. They are not live-quote validated. Paper 14k audit (2026-11-04) found no after-cost edge. liveOrders stays false. Token was never written to this file.",
+  "books": [
+    {
+      "id": "NIFTY",
+      "venue": "NSE",
+      "pocket": "equity",
+      "hours": "09:15\u201315:30 IST",
+      "spot": 23868.2,
+      "lot": 65,
+      "units": 65,
+      "tick": 0.1,
+      "tick_value_rs": 6.5,
+      "opt_expiries": [
+        "2026-11-09",
+        "2026-11-17",
+        "2026-11-23",
+        "2026-12-01",
+        "2026-12-08",
+        "2026-12-29"
+      ],
+      "fut": {
+        "symbol": "NIFTY26NOVFUT",
+        "expiry": "2026-11-23",
+        "ltp": 23910.5,
+        "bid": 23902.4,
+        "ask": 23911.9,
+        "oi": 13702130,
+        "nrml_margin": 176108,
+        "span": 145038,
+        "exposure": 31070,
+        "round_trip_charges": 926.17
+      },
+      "option_buy": {
+        "atm_ce": {
+          "id": "NIFTY",
+          "kind": "CE",
+          "offset": 0,
+          "expiry": "2026-11-09",
+          "strike": 23850.0,
+          "lot": 65,
+          "symbol": "NIFTY26N0923850CE",
+          "ltp": 178,
+          "bid": 177.75,
+          "ask": 178,
+          "spread_pct": 0.0014054813773717498,
+          "units": 65,
+          "cost_rs": 11570,
+          "oi": 5811195,
+          "volume": 109845905
+        },
+        "otm2_ce": {
+          "id": "NIFTY",
+          "kind": "CE",
+          "offset": 2,
+          "expiry": "2026-11-09",
+          "strike": 23950.0,
+          "lot": 65,
+          "symbol": "NIFTY26N0923950CE",
+          "ltp": 132,
+          "bid": 131.95,
+          "ask": 132,
+          "spread_pct": 0.00037885963250624264,
+          "units": 65,
+          "cost_rs": 8580,
+          "oi": 5068180,
+          "volume": 92137825
+        },
+        "otm4_ce": {
+          "id": "NIFTY",
+          "kind": "CE",
+          "offset": 4,
+          "expiry": "2026-11-09",
+          "strike": 24050.0,
+          "lot": 65,
+          "symbol": "NIFTY26N0924050CE",
+          "ltp": 95.15,
+          "bid": 94.85,
+          "ask": 95.05,
+          "spread_pct": 0.0021063717746182503,
+          "units": 65,
+          "cost_rs": 6178.25,
+          "oi": 4178330,
+          "volume": 56856020
+        },
+        "one_lot_atm_rs": 11570,
+        "one_lot_otm4_rs": 6178.25,
+        "max_loss_atm": 11570,
+        "est_stop_25pct": 2967.13,
+        "round_trip_charges": 74.63,
+        "charge_breakdown": {
+          "brokerage": 40.0,
+          "stt_ctt": 17.36,
+          "exchange_txn": 8.22,
+          "sebi": 0.02,
+          "stamp": 0.35,
+          "ipft": 0.0,
+          "gst": 8.68,
+          "total": 74.63
+        },
+        "spread_slip_rs": 16.25,
+        "spread_pct": 0.141
+      },
+      "option_sell": {
+        "nrml_margin": 169569,
+        "note": "SPAN+exposure for 1 ATM CE short; premium credit is extra, not a substitute for margin."
+      },
+      "capital": {
+        "minimum": 17355,
+        "recommended": 23140,
+        "conservative": 228940
+      },
+      "expectancy": {
+        "status": "NO_EDGE",
+        "product": "options",
+        "evidence": "3y modelled grid + Paper 14k audit. Median config train \u2212\u20b951/trade. Selected NIFTY CE test \u2212\u20b985 (p=0.51). Paper 14k baseline VAL CI includes 0.",
+        "net_per_trade": null,
+        "profit_factor": null,
+        "max_dd": null,
+        "n_note": "Not 400 real-quote fills. Modelled only.",
+        "daily_mean": null,
+        "monthly_mean": null,
+        "modelled_paper14k_test": {
+          "n": 171,
+          "net": 100.7,
+          "pf": 1.76,
+          "wr": 42.1,
+          "dd": 2331,
+          "ci95": [
+            41.1,
+            156.0
+          ],
+          "note": "Modelled BS tape. Not live-quote validated. VAL CI includes 0."
+        }
+      },
+      "liquidity_flag": "ok"
+    },
+    {
+      "id": "BANKNIFTY",
+      "venue": "NSE",
+      "pocket": "equity",
+      "hours": "09:15\u201315:30 IST",
+      "spot": 55740.25,
+      "lot": 30,
+      "units": 30,
+      "tick": 0.2,
+      "tick_value_rs": 6.0,
+      "opt_expiries": [
+        "2026-11-23",
+        "2026-12-29",
+        "2027-01-25",
+        "2027-03-30",
+        "2027-06-29",
+        "2027-09-28"
+      ],
+      "fut": {
+        "symbol": "BANKNIFTY26NOVFUT",
+        "expiry": "2026-11-23",
+        "ltp": 55815,
+        "bid": 55810.6,
+        "ask": 55815,
+        "oi": 2234640,
+        "nrml_margin": 189629,
+        "span": 156142,
+        "exposure": 33486,
+        "round_trip_charges": 994.19
+      },
+      "option_buy": {
+        "atm_ce": {
+          "id": "BANKNIFTY",
+          "kind": "CE",
+          "offset": 0,
+          "expiry": "2026-11-23",
+          "strike": 55700.0,
+          "lot": 30,
+          "symbol": "BANKNIFTY26NOV55700CE",
+          "ltp": 785.4,
+          "bid": 785.25,
+          "ask": 786,
+          "spread_pct": 0.0009546539379474941,
+          "units": 30,
+          "cost_rs": 23580,
+          "oi": 317490,
+          "volume": 1630650
+        },
+        "otm2_ce": {
+          "id": "BANKNIFTY",
+          "kind": "CE",
+          "offset": 2,
+          "expiry": "2026-11-23",
+          "strike": 55900.0,
+          "lot": 30,
+          "symbol": "BANKNIFTY26NOV55900CE",
+          "ltp": 677.6,
+          "bid": 677.45,
+          "ask": 679.45,
+          "spread_pct": 0.0029478959392733434,
+          "units": 30,
+          "cost_rs": 20383.5,
+          "oi": 117750,
+          "volume": 667170
+        },
+        "otm4_ce": {
+          "id": "BANKNIFTY",
+          "kind": "CE",
+          "offset": 4,
+          "expiry": "2026-11-23",
+          "strike": 56100.0,
+          "lot": 30,
+          "symbol": "BANKNIFTY26NOV56100CE",
+          "ltp": 579.1,
+          "bid": 579,
+          "ask": 581,
+          "spread_pct": 0.0034482758620689655,
+          "units": 30,
+          "cost_rs": 17430,
+          "oi": 68370,
+          "volume": 300360
+        },
+        "one_lot_atm_rs": 23580,
+        "one_lot_otm4_rs": 17430,
+        "max_loss_atm": 23580,
+        "est_stop_25pct": 5998.11,
+        "round_trip_charges": 103.11,
+        "charge_breakdown": {
+          "brokerage": 40.0,
+          "stt_ctt": 35.37,
+          "exchange_txn": 16.76,
+          "sebi": 0.05,
+          "stamp": 0.71,
+          "ipft": 0.0,
+          "gst": 10.22,
+          "total": 103.11
+        },
+        "spread_slip_rs": 22.5,
+        "spread_pct": 0.095
+      },
+      "option_sell": {
+        "nrml_margin": 180382,
+        "note": "SPAN+exposure for 1 ATM CE short; premium credit is extra, not a substitute for margin."
+      },
+      "capital": {
+        "minimum": 35370,
+        "recommended": 47160,
+        "conservative": 246518
+      },
+      "expectancy": {
+        "status": "NO_EDGE",
+        "product": "options",
+        "evidence": "Paper 14k baseline negative on train/val/test. T1 median train \u2212\u20b997. Selected BANKNIFTY CE test \u2212\u20b9491 (p=0.98).",
+        "net_per_trade": -24.0,
+        "profit_factor": 0.87,
+        "max_dd": 8868,
+        "n_note": "Modelled Paper 14k TEST n=169. Live 4 Nov: \u2212\u20b9249 exact on one ticket.",
+        "daily_mean": -22.0,
+        "monthly_mean": null,
+        "modelled_paper14k_test": {
+          "n": 169,
+          "net": -24.2,
+          "pf": 0.87,
+          "wr": 30.8,
+          "dd": 8868,
+          "ci95": [
+            -79.4,
+            32.4
+          ],
+          "note": "CI includes 0. Negative on train/val/test."
+        }
+      },
+      "liquidity_flag": "ok"
+    },
+    {
+      "id": "FINNIFTY",
+      "venue": "NSE",
+      "pocket": "equity",
+      "hours": "09:15\u201315:30 IST",
+      "spot": 25495,
+      "lot": 60,
+      "units": 60,
+      "tick": 0.1,
+      "tick_value_rs": 6.0,
+      "opt_expiries": [
+        "2026-11-23",
+        "2026-12-29",
+        "2027-01-25"
+      ],
+      "fut": {
+        "symbol": "FINNIFTY26NOVFUT",
+        "expiry": "2026-11-23",
+        "ltp": 25473.2,
+        "bid": 25505.2,
+        "ask": 25528.3,
+        "oi": 28020,
+        "nrml_margin": 173148,
+        "span": 142580,
+        "exposure": 30568,
+        "round_trip_charges": 911.58
+      },
+      "option_buy": {
+        "atm_ce": {
+          "id": "FINNIFTY",
+          "kind": "CE",
+          "offset": 0,
+          "expiry": "2026-11-23",
+          "strike": 25500.0,
+          "lot": 60,
+          "symbol": "FINNIFTY26NOV25500CE",
+          "ltp": 367.3,
+          "bid": 364,
+          "ask": 367.3,
+          "spread_pct": 0.009025023929987724,
+          "units": 60,
+          "cost_rs": 22038.0,
+          "oi": 21480,
+          "volume": 66120
+        },
+        "otm2_ce": {
+          "id": "FINNIFTY",
+          "kind": "CE",
+          "offset": 2,
+          "expiry": "2026-11-23",
+          "strike": 25600.0,
+          "lot": 60,
+          "symbol": "FINNIFTY26NOV25600CE",
+          "ltp": 315,
+          "bid": 313.75,
+          "ask": 317.2,
+          "spread_pct": 0.010935890324114394,
+          "units": 60,
+          "cost_rs": 19032.0,
+          "oi": 6600,
+          "volume": 47400
+        },
+        "otm4_ce": {
+          "id": "FINNIFTY",
+          "kind": "CE",
+          "offset": 4,
+          "expiry": "2026-11-23",
+          "strike": 25700.0,
+          "lot": 60,
+          "symbol": "FINNIFTY26NOV25700CE",
+          "ltp": 264.4,
+          "bid": 266.7,
+          "ask": 269.6,
+          "spread_pct": 0.010814842438933561,
+          "units": 60,
+          "cost_rs": 16176.0,
+          "oi": 1260,
+          "volume": 18420
+        },
+        "one_lot_atm_rs": 22038.0,
+        "one_lot_otm4_rs": 16176.0,
+        "max_loss_atm": 22038.0,
+        "est_stop_25pct": 5608.95,
+        "round_trip_charges": 99.45,
+        "charge_breakdown": {
+          "brokerage": 40.0,
+          "stt_ctt": 33.06,
+          "exchange_txn": 15.66,
+          "sebi": 0.04,
+          "stamp": 0.66,
+          "ipft": 0.0,
+          "gst": 10.03,
+          "total": 99.45
+        },
+        "spread_slip_rs": 198.0,
+        "spread_pct": 0.903
+      },
+      "option_sell": {
+        "nrml_margin": 160894,
+        "note": "SPAN+exposure for 1 ATM CE short; premium credit is extra, not a substitute for margin."
+      },
+      "capital": {
+        "minimum": 33057,
+        "recommended": 44076,
+        "conservative": 225092
+      },
+      "expectancy": {
+        "status": "INCONCLUSIVE",
+        "product": "options",
+        "evidence": "No 3-year options study in this repo. Live specs only.",
+        "net_per_trade": null,
+        "profit_factor": null,
+        "max_dd": null,
+        "n_note": "Need listed-contract 5m bid/ask history.",
+        "daily_mean": null,
+        "monthly_mean": null
+      },
+      "liquidity_flag": "ok"
+    },
+    {
+      "id": "MIDCPNIFTY",
+      "venue": "NSE",
+      "pocket": "equity",
+      "hours": "09:15\u201315:30 IST",
+      "spot": 13669.85,
+      "lot": 120,
+      "units": 120,
+      "tick": 0.05,
+      "tick_value_rs": 6.0,
+      "opt_expiries": [
+        "2026-11-23",
+        "2026-12-29",
+        "2027-01-25"
+      ],
+      "fut": {
+        "symbol": "MIDCPNIFTY26NOVFUT",
+        "expiry": "2026-11-23",
+        "ltp": 13705.95,
+        "bid": 13699.6,
+        "ask": 13708.65,
+        "oi": 2254800,
+        "nrml_margin": 197077,
+        "span": 164183,
+        "exposure": 32894,
+        "round_trip_charges": 977.37
+      },
+      "option_buy": {
+        "atm_ce": {
+          "id": "MIDCPNIFTY",
+          "kind": "CE",
+          "offset": 0,
+          "expiry": "2026-11-23",
+          "strike": 13675.0,
+          "lot": 120,
+          "symbol": "MIDCPNIFTY26NOV13675CE",
+          "ltp": 241.95,
+          "bid": 242.3,
+          "ask": 243.65,
+          "spread_pct": 0.005556127173577505,
+          "units": 120,
+          "cost_rs": 29238.0,
+          "oi": 14760,
+          "volume": 51600
+        },
+        "otm2_ce": {
+          "id": "MIDCPNIFTY",
+          "kind": "CE",
+          "offset": 2,
+          "expiry": "2026-11-23",
+          "strike": 13725.0,
+          "lot": 120,
+          "symbol": "MIDCPNIFTY26NOV13725CE",
+          "ltp": 216.9,
+          "bid": 217.4,
+          "ask": 218.5,
+          "spread_pct": 0.005047029135122709,
+          "units": 120,
+          "cost_rs": 26220.0,
+          "oi": 11280,
+          "volume": 35160
+        },
+        "otm4_ce": {
+          "id": "MIDCPNIFTY",
+          "kind": "CE",
+          "offset": 4,
+          "expiry": "2026-11-23",
+          "strike": 13775.0,
+          "lot": 120,
+          "symbol": "MIDCPNIFTY26NOV13775CE",
+          "ltp": 192.85,
+          "bid": 191.3,
+          "ask": 192.6,
+          "spread_pct": 0.006772597030476598,
+          "units": 120,
+          "cost_rs": 23112.0,
+          "oi": 9120,
+          "volume": 16320
+        },
+        "one_lot_atm_rs": 29238.0,
+        "one_lot_otm4_rs": 23112.0,
+        "max_loss_atm": 29238.0,
+        "est_stop_25pct": 7426.02,
+        "round_trip_charges": 116.52,
+        "charge_breakdown": {
+          "brokerage": 40.0,
+          "stt_ctt": 43.86,
+          "exchange_txn": 20.78,
+          "sebi": 0.06,
+          "stamp": 0.88,
+          "ipft": 0.0,
+          "gst": 10.95,
+          "total": 116.52
+        },
+        "spread_slip_rs": 162.0,
+        "spread_pct": 0.556
+      },
+      "option_sell": {
+        "nrml_margin": 181987,
+        "note": "SPAN+exposure for 1 ATM CE short; premium credit is extra, not a substitute for margin."
+      },
+      "capital": {
+        "minimum": 43857,
+        "recommended": 58476,
+        "conservative": 256200
+      },
+      "expectancy": {
+        "status": "INCONCLUSIVE",
+        "product": "options",
+        "evidence": "No historical expectancy study.",
+        "net_per_trade": null,
+        "profit_factor": null,
+        "max_dd": null,
+        "n_note": "Need listed-contract 5m bid/ask history.",
+        "daily_mean": null,
+        "monthly_mean": null
+      },
+      "liquidity_flag": "ok"
+    },
+    {
+      "id": "SENSEX",
+      "venue": "BSE",
+      "pocket": "equity",
+      "hours": "09:15\u201315:30 IST",
+      "spot": 77091.21,
+      "lot": 20,
+      "units": 20,
+      "tick": 0.05,
+      "tick_value_rs": 1.0,
+      "opt_expiries": [
+        "2026-11-05",
+        "2026-11-12",
+        "2026-11-19",
+        "2026-11-26",
+        "2026-12-03",
+        "2026-12-10"
+      ],
+      "fut": {
+        "symbol": "SENSEX26NOVFUT",
+        "expiry": "2026-11-26",
+        "ltp": 77252.05,
+        "bid": 77254,
+        "ask": 77290,
+        "oi": 62800,
+        "nrml_margin": 175142,
+        "span": 144245,
+        "exposure": 30897,
+        "round_trip_charges": 854.27
+      },
+      "option_buy": {
+        "atm_ce": {
+          "id": "SENSEX",
+          "kind": "CE",
+          "offset": 0,
+          "expiry": "2026-11-05",
+          "strike": 77100.0,
+          "lot": 20,
+          "symbol": "SENSEX26N0577100CE",
+          "ltp": 350.15,
+          "bid": 350.15,
+          "ask": 351.15,
+          "spread_pct": 0.002851846570654499,
+          "units": 20,
+          "cost_rs": 7023.0,
+          "oi": 1691720,
+          "volume": 45628980
+        },
+        "otm2_ce": {
+          "id": "SENSEX",
+          "kind": "CE",
+          "offset": 2,
+          "expiry": "2026-11-05",
+          "strike": 77300.0,
+          "lot": 20,
+          "symbol": "SENSEX26N0577300CE",
+          "ltp": 259.4,
+          "bid": 258.85,
+          "ask": 259.4,
+          "spread_pct": 0.0021225277375782133,
+          "units": 20,
+          "cost_rs": 5188.0,
+          "oi": 2367300,
+          "volume": 63428200
+        },
+        "otm4_ce": {
+          "id": "SENSEX",
+          "kind": "CE",
+          "offset": 4,
+          "expiry": "2026-11-05",
+          "strike": 77500.0,
+          "lot": 20,
+          "symbol": "SENSEX26N0577500CE",
+          "ltp": 189.35,
+          "bid": 189.25,
+          "ask": 189.5,
+          "spread_pct": 0.0013201320132013201,
+          "units": 20,
+          "cost_rs": 3790.0,
+          "oi": 3126040,
+          "volume": 80230100
+        },
+        "one_lot_atm_rs": 7023.0,
+        "one_lot_otm4_rs": 3790.0,
+        "max_loss_atm": 7023.0,
+        "est_stop_25pct": 1819.1,
+        "round_trip_charges": 63.35,
+        "charge_breakdown": {
+          "brokerage": 40.0,
+          "stt_ctt": 10.53,
+          "exchange_txn": 4.56,
+          "sebi": 0.01,
+          "stamp": 0.21,
+          "ipft": 0.0,
+          "gst": 8.02,
+          "total": 63.35
+        },
+        "spread_slip_rs": 20.0,
+        "spread_pct": 0.285
+      },
+      "option_sell": {
+        "nrml_margin": 168571,
+        "note": "SPAN+exposure for 1 ATM CE short; premium credit is extra, not a substitute for margin."
+      },
+      "capital": {
+        "minimum": 10534,
+        "recommended": 14046,
+        "conservative": 227685
+      },
+      "expectancy": {
+        "status": "NO_EDGE",
+        "product": "options",
+        "evidence": "Paper 14k baseline TEST +\u20b937 CI [\u221220, 95] includes 0. T3 SENSEX CE test \u2212\u20b9167 (p=0.61). T10 real vs model \u2212\u20b9437 vs \u2212\u20b945.",
+        "net_per_trade": 37.0,
+        "profit_factor": 1.24,
+        "max_dd": 3951,
+        "n_note": "Modelled TEST n=167. CI includes 0. Live 4 Nov: \u2212\u20b9356 exact.",
+        "daily_mean": 33.0,
+        "monthly_mean": null,
+        "modelled_paper14k_test": {
+          "n": 167,
+          "net": 37.0,
+          "pf": 1.24,
+          "wr": null,
+          "dd": 3951,
+          "ci95": [
+            -20.0,
+            95.0
+          ],
+          "note": "CI includes 0. T10 fidelity \u2212\u20b9437 live vs \u2212\u20b945 model."
+        }
+      },
+      "liquidity_flag": "ok"
+    },
+    {
+      "id": "BANKEX",
+      "venue": "BSE",
+      "pocket": "equity",
+      "hours": "09:15\u201315:30 IST",
+      "spot": 62698.37,
+      "lot": 30,
+      "units": 30,
+      "tick": 0.05,
+      "tick_value_rs": 1.5,
+      "opt_expiries": [
+        "2026-11-26",
+        "2026-12-31",
+        "2027-01-28"
+      ],
+      "fut": {
+        "symbol": "BANKEX26NOVFUT",
+        "expiry": "2026-11-26",
+        "ltp": 62773.75,
+        "bid": 62767.45,
+        "ask": 62807.85,
+        "oi": 570,
+        "nrml_margin": 213268,
+        "span": 175604,
+        "exposure": 37664,
+        "round_trip_charges": 1030.92
+      },
+      "option_buy": {
+        "atm_ce": {
+          "id": "BANKEX",
+          "kind": "CE",
+          "offset": 0,
+          "expiry": "2026-11-26",
+          "strike": 62700.0,
+          "lot": 30,
+          "symbol": "BANKEX26NOV62700CE",
+          "ltp": 882.75,
+          "bid": 701.9,
+          "ask": 1090.35,
+          "spread_pct": 0.4334774724508299,
+          "units": 30,
+          "cost_rs": 32710.5,
+          "oi": 120,
+          "volume": 60
+        },
+        "otm2_ce": {
+          "id": "BANKEX",
+          "kind": "CE",
+          "offset": 2,
+          "expiry": "2026-11-26",
+          "strike": 62900.0,
+          "lot": 30,
+          "symbol": "BANKEX26NOV62900CE",
+          "ltp": 895.25,
+          "bid": 0.1,
+          "ask": 2158.05,
+          "spread_pct": 1.9998146560711723,
+          "units": 30,
+          "cost_rs": 64741.5,
+          "oi": 0,
+          "volume": 0
+        },
+        "otm4_ce": {
+          "id": "BANKEX",
+          "kind": "CE",
+          "offset": 4,
+          "expiry": "2026-11-26",
+          "strike": 63100.0,
+          "lot": 30,
+          "symbol": "BANKEX26NOV63100CE",
+          "ltp": 808,
+          "bid": 10.15,
+          "ask": 1795.85,
+          "spread_pct": 1.977519379844961,
+          "units": 30,
+          "cost_rs": 53875.5,
+          "oi": 0,
+          "volume": 0
+        },
+        "one_lot_atm_rs": 32710.5,
+        "one_lot_otm4_rs": 53875.5,
+        "max_loss_atm": 32710.5,
+        "est_stop_25pct": 8300.03,
+        "round_trip_charges": 122.41,
+        "charge_breakdown": {
+          "brokerage": 40.0,
+          "stt_ctt": 49.07,
+          "exchange_txn": 21.26,
+          "sebi": 0.07,
+          "stamp": 0.98,
+          "ipft": 0.0,
+          "gst": 11.04,
+          "total": 122.41
+        },
+        "spread_slip_rs": 11653.5,
+        "spread_pct": 43.348
+      },
+      "option_sell": {
+        "nrml_margin": 207474,
+        "note": "SPAN+exposure for 1 ATM CE short; premium credit is extra, not a substitute for margin."
+      },
+      "capital": {
+        "minimum": 49066,
+        "recommended": 65421,
+        "conservative": 277248
+      },
+      "expectancy": {
+        "status": "INCONCLUSIVE",
+        "product": "options",
+        "evidence": "No historical study. Live book is not tradeable (43\u2013200% spread, OI 0\u20131,800).",
+        "net_per_trade": null,
+        "profit_factor": null,
+        "max_dd": null,
+        "n_note": "Liquidity first; then history.",
+        "daily_mean": null,
+        "monthly_mean": null
+      },
+      "liquidity_flag": "untradeable"
+    },
+    {
+      "id": "CRUDEOIL",
+      "venue": "MCX",
+      "pocket": "commodity",
+      "hours": "09:00\u201323:30 IST (MCX energy)",
+      "spot": 9126,
+      "lot": 1,
+      "units": 100,
+      "tick": 1.0,
+      "tick_value_rs": 100.0,
+      "opt_expiries": [
+        "2026-11-17",
+        "2026-12-16",
+        "2027-01-15"
+      ],
+      "fut": {
+        "symbol": "CRUDEOIL26NOVFUT",
+        "expiry": "2026-11-19",
+        "ltp": 9126,
+        "bid": 9126,
+        "ask": 9127,
+        "oi": 9934,
+        "nrml_margin": 284501,
+        "span": 273100,
+        "exposure": 11401,
+        "round_trip_charges": 204.1
+      },
+      "option_buy": {
+        "atm_ce": {
+          "id": "CRUDEOIL",
+          "kind": "CE",
+          "offset": 0,
+          "expiry": "2026-11-17",
+          "strike": 9150.0,
+          "lot": 1,
+          "symbol": "CRUDEOIL26NOV9150CE",
+          "ltp": 437,
+          "bid": 435.1,
+          "ask": 436.5,
+          "spread_pct": 0.0032124827902707143,
+          "units": 100,
+          "cost_rs": 43650.0,
+          "oi": 614,
+          "volume": 3104
+        },
+        "otm2_ce": {
+          "id": "CRUDEOIL",
+          "kind": "CE",
+          "offset": 2,
+          "expiry": "2026-11-17",
+          "strike": 9250.0,
+          "lot": 1,
+          "symbol": "CRUDEOIL26NOV9250CE",
+          "ltp": 391.6,
+          "bid": 391,
+          "ask": 392.6,
+          "spread_pct": 0.004083716181725428,
+          "units": 100,
+          "cost_rs": 39260.0,
+          "oi": 850,
+          "volume": 1513
+        },
+        "otm4_ce": {
+          "id": "CRUDEOIL",
+          "kind": "CE",
+          "offset": 4,
+          "expiry": "2026-11-17",
+          "strike": 9350.0,
+          "lot": 1,
+          "symbol": "CRUDEOIL26NOV9350CE",
+          "ltp": 351.8,
+          "bid": 351.1,
+          "ask": 352.6,
+          "spread_pct": 0.004263180332528066,
+          "units": 100,
+          "cost_rs": 35260.0,
+          "oi": 646,
+          "volume": 852
+        },
+        "one_lot_atm_rs": 43650.0,
+        "one_lot_otm4_rs": 35260.0,
+        "max_loss_atm": 43650.0,
+        "est_stop_25pct": 11026.0,
+        "round_trip_charges": 113.5,
+        "charge_breakdown": {
+          "brokerage": 40.0,
+          "stt_ctt": 21.82,
+          "exchange_txn": 36.49,
+          "sebi": 0.09,
+          "stamp": 1.31,
+          "ipft": 0.0,
+          "gst": 13.78,
+          "total": 113.5
+        },
+        "spread_slip_rs": 140.0,
+        "spread_pct": 0.321
+      },
+      "option_sell": {
+        "nrml_margin": 326291,
+        "note": "SPAN+exposure for 1 ATM CE short; premium credit is extra, not a substitute for margin."
+      },
+      "capital": {
+        "minimum": 65475,
+        "recommended": 87300,
+        "conservative": 369851
+      },
+      "expectancy": {
+        "status": "INCONCLUSIVE",
+        "product": "both",
+        "evidence": "No dedicated big-crude study. Mini futures/options already lose after costs (T9).",
+        "net_per_trade": null,
+        "profit_factor": null,
+        "max_dd": null,
+        "n_note": "1 lot is 100 bbl; ATM CE today ~\u20b943,650. Mini is 10\u00d7 smaller and already NO_EDGE.",
+        "daily_mean": null,
+        "monthly_mean": null
+      },
+      "liquidity_flag": "ok"
+    },
+    {
+      "id": "CRUDEOILM",
+      "venue": "MCX",
+      "pocket": "commodity",
+      "hours": "09:00\u201323:30 IST (MCX energy)",
+      "spot": 9128,
+      "lot": 1,
+      "units": 10,
+      "tick": 1.0,
+      "tick_value_rs": 10.0,
+      "opt_expiries": [
+        "2026-11-17",
+        "2026-12-16",
+        "2027-01-15"
+      ],
+      "fut": {
+        "symbol": "CRUDEOILM26NOVFUT",
+        "expiry": "2026-11-19",
+        "ltp": 9128,
+        "bid": 9125,
+        "ask": 9127,
+        "oi": 30342,
+        "nrml_margin": 28450,
+        "span": 27310,
+        "exposure": 1140,
+        "round_trip_charges": 62.89
+      },
+      "option_buy": {
+        "atm_ce": {
+          "id": "CRUDEOILM",
+          "kind": "CE",
+          "offset": 0,
+          "expiry": "2026-11-17",
+          "strike": 9150.0,
+          "lot": 1,
+          "symbol": "CRUDEOILM26NOV9150CE",
+          "ltp": 443.7,
+          "bid": 443.4,
+          "ask": 444.55,
+          "spread_pct": 0.0025902359367082246,
+          "units": 10,
+          "cost_rs": 4445.5,
+          "oi": 4217,
+          "volume": 22472
+        },
+        "otm2_ce": {
+          "id": "CRUDEOILM",
+          "kind": "CE",
+          "offset": 2,
+          "expiry": "2026-11-17",
+          "strike": 9250.0,
+          "lot": 1,
+          "symbol": "CRUDEOILM26NOV9250CE",
+          "ltp": 402.25,
+          "bid": 398.4,
+          "ask": 399.55,
+          "spread_pct": 0.002882386114418282,
+          "units": 10,
+          "cost_rs": 3995.5,
+          "oi": 4021,
+          "volume": 10926
+        },
+        "otm4_ce": {
+          "id": "CRUDEOILM",
+          "kind": "CE",
+          "offset": 4,
+          "expiry": "2026-11-17",
+          "strike": 9350.0,
+          "lot": 1,
+          "symbol": "CRUDEOILM26NOV9350CE",
+          "ltp": 360.35,
+          "bid": 357.9,
+          "ask": 359.6,
+          "spread_pct": 0.00473867595818828,
+          "units": 10,
+          "cost_rs": 3596.0,
+          "oi": 3347,
+          "volume": 5605
+        },
+        "one_lot_atm_rs": 4445.5,
+        "one_lot_otm4_rs": 3596.0,
+        "max_loss_atm": 4445.5,
+        "est_stop_25pct": 1165.33,
+        "round_trip_charges": 53.95,
+        "charge_breakdown": {
+          "brokerage": 40.0,
+          "stt_ctt": 2.22,
+          "exchange_txn": 3.72,
+          "sebi": 0.01,
+          "stamp": 0.13,
+          "ipft": 0.0,
+          "gst": 7.87,
+          "total": 53.95
+        },
+        "spread_slip_rs": 11.5,
+        "spread_pct": 0.259
+      },
+      "option_sell": {
+        "nrml_margin": 32683,
+        "note": "SPAN+exposure for 1 ATM CE short; premium credit is extra, not a substitute for margin."
+      },
+      "capital": {
+        "minimum": 6668,
+        "recommended": 8891,
+        "conservative": 36985
+      },
+      "expectancy": {
+        "status": "NO_EDGE",
+        "product": "both",
+        "evidence": "T9: 14 weeks. Futures 0/540 configs positive on train, median net \u2212\u20b995. Options real premium median \u2212\u20b982, 4% configs positive. IV 51% vs realised 32%.",
+        "net_per_trade": -82.0,
+        "profit_factor": null,
+        "max_dd": null,
+        "n_note": "Listed-contract window only. Not 400 fills.",
+        "daily_mean": null,
+        "monthly_mean": null
+      },
+      "liquidity_flag": "ok"
+    }
+  ],
+  "rankings": {
+    "method": "Liquidity, spread, capital efficiency, risk per lot. Expectancy is NO_EDGE or INCONCLUSIVE for every name \u2014 it is not used as a ranking key.",
+    "best_one_lot_paper": "NIFTY \u2014 tightest two-sided book, deepest OI, weekly expiries, charges ~\u20b975 RT. Still NO_EDGE.",
+    "second_best_paper": "SENSEX \u2014 lowest index ATM cash (\u20b97,023) and weekly Fridays. DTE-1 fade on 4 Nov. Still NO_EDGE.",
+    "best_low_capital": "CRUDEOILM \u2014 ATM CE ~\u20b94,446, futures NRML \u20b928,450. T9 already loses after costs. Not a cheap edge.",
+    "best_liquidity": "NIFTY",
+    "best_risk_adjusted": "NONE \u2014 no validated positive after-cost expectancy.",
+    "avoid": [
+      "BANKEX",
+      "NIFTY+BANKNIFTY+SENSEX as diversification",
+      "CRUDEOIL standard as a first book",
+      "any futures book until an options edge exists"
+    ],
+    "further_research": [
+      "FINNIFTY",
+      "MIDCPNIFTY",
+      "CRUDEOIL (separate from mini)",
+      "Paper-only Model A execution on NIFTY"
+    ],
+    "by_spread": [
+      "BANKNIFTY",
+      "NIFTY",
+      "CRUDEOILM",
+      "SENSEX",
+      "CRUDEOIL",
+      "MIDCPNIFTY",
+      "FINNIFTY"
+    ],
+    "by_recommended_cash": [
+      "CRUDEOILM",
+      "SENSEX",
+      "NIFTY",
+      "FINNIFTY",
+      "BANKNIFTY",
+      "MIDCPNIFTY",
+      "CRUDEOIL"
+    ],
+    "by_atm_oi": [
+      "NIFTY",
+      "SENSEX",
+      "BANKNIFTY",
+      "FINNIFTY",
+      "MIDCPNIFTY",
+      "CRUDEOILM",
+      "CRUDEOIL"
+    ]
+  },
+  "portfolios": [
+    {
+      "id": "A",
+      "instruments": [
+        "NIFTY"
+      ],
+      "n": 1,
+      "total_premium_atm": 11570,
+      "recommended_capital": 23140,
+      "conservative_capital": 228940,
+      "futures_margin_if_all_fut": 176108,
+      "max_simultaneous_option_exposure": 11570,
+      "estimated_daily_risk_25pct": 2967.13,
+      "maximum_daily_loss_option_buy": 11570,
+      "reserve_capital": 11570,
+      "capital_utilization": 0.5,
+      "expected_portfolio_drawdown": "UNKNOWN \u2014 no validated joint model",
+      "net_portfolio_expectancy": null,
+      "expectancy_note": "Sum of modelled single-name figures where they exist. Not a portfolio forecast. Joint CI was not estimated.",
+      "index_names_in_book": 1,
+      "crude_names_in_book": 0,
+      "correlated": "single-cluster",
+      "untradeable": [],
+      "statuses": {
+        "NIFTY": "NO_EDGE"
+      },
+      "suitable_for_live": false
+    },
+    {
+      "id": "B",
+      "instruments": [
+        "NIFTY",
+        "SENSEX"
+      ],
+      "n": 2,
+      "total_premium_atm": 18593.0,
+      "recommended_capital": 37186,
+      "conservative_capital": 456625,
+      "futures_margin_if_all_fut": 351250,
+      "max_simultaneous_option_exposure": 18593.0,
+      "estimated_daily_risk_25pct": 4786.23,
+      "maximum_daily_loss_option_buy": 18593.0,
+      "reserve_capital": 18593,
+      "capital_utilization": 0.5,
+      "expected_portfolio_drawdown": "UNKNOWN \u2014 no validated joint model",
+      "net_portfolio_expectancy": 37.0,
+      "expectancy_note": "Sum of modelled single-name figures where they exist. Not a portfolio forecast. Joint CI was not estimated.",
+      "index_names_in_book": 2,
+      "crude_names_in_book": 0,
+      "correlated": "yes \u2014 treat as one equity-beta book",
+      "untradeable": [],
+      "statuses": {
+        "NIFTY": "NO_EDGE",
+        "SENSEX": "NO_EDGE"
+      },
+      "suitable_for_live": false
+    },
+    {
+      "id": "C",
+      "instruments": [
+        "NIFTY",
+        "SENSEX",
+        "CRUDEOILM"
+      ],
+      "n": 3,
+      "total_premium_atm": 23038.5,
+      "recommended_capital": 46077,
+      "conservative_capital": 493610,
+      "futures_margin_if_all_fut": 379700,
+      "max_simultaneous_option_exposure": 23038.5,
+      "estimated_daily_risk_25pct": 5951.56,
+      "maximum_daily_loss_option_buy": 23038.5,
+      "reserve_capital": 23039,
+      "capital_utilization": 0.5,
+      "expected_portfolio_drawdown": "UNKNOWN \u2014 no validated joint model",
+      "net_portfolio_expectancy": -45.0,
+      "expectancy_note": "Sum of modelled single-name figures where they exist. Not a portfolio forecast. Joint CI was not estimated.",
+      "index_names_in_book": 2,
+      "crude_names_in_book": 1,
+      "correlated": "index cluster plus crude \u2014 not independent books",
+      "untradeable": [],
+      "statuses": {
+        "NIFTY": "NO_EDGE",
+        "SENSEX": "NO_EDGE",
+        "CRUDEOILM": "NO_EDGE"
+      },
+      "suitable_for_live": false
+    },
+    {
+      "id": "D",
+      "instruments": [
+        "NIFTY",
+        "BANKNIFTY",
+        "SENSEX",
+        "CRUDEOILM"
+      ],
+      "n": 4,
+      "total_premium_atm": 46618.5,
+      "recommended_capital": 93237,
+      "conservative_capital": 740128,
+      "futures_margin_if_all_fut": 569329,
+      "max_simultaneous_option_exposure": 46618.5,
+      "estimated_daily_risk_25pct": 11949.67,
+      "maximum_daily_loss_option_buy": 46618.5,
+      "reserve_capital": 46619,
+      "capital_utilization": 0.5,
+      "expected_portfolio_drawdown": "UNKNOWN \u2014 no validated joint model",
+      "net_portfolio_expectancy": -69.0,
+      "expectancy_note": "Sum of modelled single-name figures where they exist. Not a portfolio forecast. Joint CI was not estimated.",
+      "index_names_in_book": 3,
+      "crude_names_in_book": 1,
+      "correlated": "index cluster plus crude \u2014 not independent books",
+      "untradeable": [],
+      "statuses": {
+        "NIFTY": "NO_EDGE",
+        "BANKNIFTY": "NO_EDGE",
+        "SENSEX": "NO_EDGE",
+        "CRUDEOILM": "NO_EDGE"
+      },
+      "suitable_for_live": false
+    },
+    {
+      "id": "E",
+      "instruments": [
+        "NIFTY",
+        "BANKNIFTY",
+        "SENSEX",
+        "FINNIFTY",
+        "CRUDEOILM"
+      ],
+      "n": 5,
+      "total_premium_atm": 68656.5,
+      "recommended_capital": 137313,
+      "conservative_capital": 965220,
+      "futures_margin_if_all_fut": 742477,
+      "max_simultaneous_option_exposure": 68656.5,
+      "estimated_daily_risk_25pct": 17558.62,
+      "maximum_daily_loss_option_buy": 68656.5,
+      "reserve_capital": 68657,
+      "capital_utilization": 0.5,
+      "expected_portfolio_drawdown": "UNKNOWN \u2014 no validated joint model",
+      "net_portfolio_expectancy": -69.0,
+      "expectancy_note": "Sum of modelled single-name figures where they exist. Not a portfolio forecast. Joint CI was not estimated.",
+      "index_names_in_book": 4,
+      "crude_names_in_book": 1,
+      "correlated": "index cluster plus crude \u2014 not independent books",
+      "untradeable": [],
+      "statuses": {
+        "NIFTY": "NO_EDGE",
+        "BANKNIFTY": "NO_EDGE",
+        "SENSEX": "NO_EDGE",
+        "FINNIFTY": "INCONCLUSIVE",
+        "CRUDEOILM": "NO_EDGE"
+      },
+      "suitable_for_live": false
+    },
+    {
+      "id": "F",
+      "instruments": [
+        "NIFTY",
+        "BANKNIFTY",
+        "FINNIFTY",
+        "MIDCPNIFTY",
+        "SENSEX",
+        "CRUDEOIL",
+        "CRUDEOILM"
+      ],
+      "n": 7,
+      "total_premium_atm": 141544.5,
+      "recommended_capital": 283089,
+      "conservative_capital": 1591271,
+      "futures_margin_if_all_fut": 1224055,
+      "max_simultaneous_option_exposure": 141544.5,
+      "estimated_daily_risk_25pct": 36010.64,
+      "maximum_daily_loss_option_buy": 141544.5,
+      "reserve_capital": 141545,
+      "capital_utilization": 0.5,
+      "expected_portfolio_drawdown": "UNKNOWN \u2014 no validated joint model",
+      "net_portfolio_expectancy": -69.0,
+      "expectancy_note": "Sum of modelled single-name figures where they exist. Not a portfolio forecast. Joint CI was not estimated.",
+      "index_names_in_book": 5,
+      "crude_names_in_book": 2,
+      "correlated": "index cluster plus crude \u2014 not independent books",
+      "untradeable": [],
+      "statuses": {
+        "NIFTY": "NO_EDGE",
+        "BANKNIFTY": "NO_EDGE",
+        "FINNIFTY": "INCONCLUSIVE",
+        "MIDCPNIFTY": "INCONCLUSIVE",
+        "SENSEX": "NO_EDGE",
+        "CRUDEOIL": "INCONCLUSIVE",
+        "CRUDEOILM": "NO_EDGE"
+      },
+      "suitable_for_live": false
+    }
+  ],
+  "capital_plans": [
+    {
+      "capital": 50000,
+      "option_buy_fit": [
+        "NIFTY",
+        "SENSEX",
+        "CRUDEOILM"
+      ],
+      "futures_fit": [
+        "CRUDEOILM"
+      ],
+      "recommended_instruments": [
+        "NIFTY"
+      ],
+      "n_instruments": 1,
+      "lots_per_instrument": 1,
+      "max_simultaneous": 1,
+      "capital_reserve_pct": 50,
+      "daily_risk_limit": 1000,
+      "max_expected_drawdown": "UNKNOWN \u2014 no validated model. Desk book cap is \u20b9420/book (paper).",
+      "insufficient_for_live": true,
+      "insufficient_for_paper": false,
+      "note": "No validated edge at any capital. Larger capital only buys more of a zero/negative expectancy. Option-buy recommended capital must be \u2264 50% of the account (\u2264\u20b925,000). Futures NRML must stay \u2264 70% (\u2264\u20b935,000).",
+      "leftover_if_first": 26860,
+      "spend_ceiling": 25000,
+      "daily_risk_note": "2% of capital, capped. Never raise size after a loss. Paper desk still uses \u20b9420/book."
+    },
+    {
+      "capital": 100000,
+      "option_buy_fit": [
+        "NIFTY",
+        "BANKNIFTY",
+        "FINNIFTY",
+        "SENSEX",
+        "CRUDEOILM"
+      ],
+      "futures_fit": [
+        "CRUDEOILM"
+      ],
+      "recommended_instruments": [
+        "NIFTY"
+      ],
+      "n_instruments": 1,
+      "lots_per_instrument": 1,
+      "max_simultaneous": 1,
+      "capital_reserve_pct": 50,
+      "daily_risk_limit": 2000,
+      "max_expected_drawdown": "UNKNOWN \u2014 no validated model. Desk book cap is \u20b9420/book (paper).",
+      "insufficient_for_live": true,
+      "insufficient_for_paper": false,
+      "note": "No validated edge at any capital. Larger capital only buys more of a zero/negative expectancy. Option-buy recommended capital must be \u2264 50% of the account (\u2264\u20b950,000). Futures NRML must stay \u2264 70% (\u2264\u20b970,000).",
+      "leftover_if_first": 76860,
+      "spend_ceiling": 50000,
+      "daily_risk_note": "2% of capital, capped. Never raise size after a loss. Paper desk still uses \u20b9420/book."
+    },
+    {
+      "capital": 200000,
+      "option_buy_fit": [
+        "NIFTY",
+        "BANKNIFTY",
+        "FINNIFTY",
+        "MIDCPNIFTY",
+        "SENSEX",
+        "CRUDEOIL",
+        "CRUDEOILM"
+      ],
+      "futures_fit": [
+        "CRUDEOILM"
+      ],
+      "recommended_instruments": [
+        "NIFTY"
+      ],
+      "n_instruments": 1,
+      "lots_per_instrument": 1,
+      "max_simultaneous": 1,
+      "capital_reserve_pct": 50,
+      "daily_risk_limit": 2000,
+      "max_expected_drawdown": "UNKNOWN \u2014 no validated model. Desk book cap is \u20b9420/book (paper).",
+      "insufficient_for_live": true,
+      "insufficient_for_paper": false,
+      "note": "No validated edge at any capital. Larger capital only buys more of a zero/negative expectancy. Option-buy recommended capital must be \u2264 50% of the account (\u2264\u20b9100,000). Futures NRML must stay \u2264 70% (\u2264\u20b9140,000).",
+      "leftover_if_first": 176860,
+      "spend_ceiling": 100000,
+      "daily_risk_note": "2% of capital, capped. Never raise size after a loss. Paper desk still uses \u20b9420/book."
+    },
+    {
+      "capital": 300000,
+      "option_buy_fit": [
+        "NIFTY",
+        "BANKNIFTY",
+        "FINNIFTY",
+        "MIDCPNIFTY",
+        "SENSEX",
+        "CRUDEOIL",
+        "CRUDEOILM"
+      ],
+      "futures_fit": [
+        "NIFTY",
+        "BANKNIFTY",
+        "FINNIFTY",
+        "MIDCPNIFTY",
+        "SENSEX",
+        "CRUDEOILM"
+      ],
+      "recommended_instruments": [
+        "NIFTY"
+      ],
+      "n_instruments": 1,
+      "lots_per_instrument": 1,
+      "max_simultaneous": 2,
+      "capital_reserve_pct": 50,
+      "daily_risk_limit": 5000,
+      "max_expected_drawdown": "UNKNOWN \u2014 no validated model. Desk book cap is \u20b9420/book (paper).",
+      "insufficient_for_live": true,
+      "insufficient_for_paper": false,
+      "note": "No validated edge at any capital. Larger capital only buys more of a zero/negative expectancy. Option-buy recommended capital must be \u2264 50% of the account (\u2264\u20b9150,000). Futures NRML must stay \u2264 70% (\u2264\u20b9210,000).",
+      "leftover_if_first": 276860,
+      "spend_ceiling": 150000,
+      "daily_risk_note": "2% of capital, capped. Never raise size after a loss. Paper desk still uses \u20b9420/book."
+    },
+    {
+      "capital": 500000,
+      "option_buy_fit": [
+        "NIFTY",
+        "BANKNIFTY",
+        "FINNIFTY",
+        "MIDCPNIFTY",
+        "SENSEX",
+        "CRUDEOIL",
+        "CRUDEOILM"
+      ],
+      "futures_fit": [
+        "NIFTY",
+        "BANKNIFTY",
+        "FINNIFTY",
+        "MIDCPNIFTY",
+        "SENSEX",
+        "CRUDEOIL",
+        "CRUDEOILM"
+      ],
+      "recommended_instruments": [
+        "NIFTY"
+      ],
+      "n_instruments": 1,
+      "lots_per_instrument": 1,
+      "max_simultaneous": 2,
+      "capital_reserve_pct": 50,
+      "daily_risk_limit": 5000,
+      "max_expected_drawdown": "UNKNOWN \u2014 no validated model. Desk book cap is \u20b9420/book (paper).",
+      "insufficient_for_live": true,
+      "insufficient_for_paper": false,
+      "note": "No validated edge at any capital. Larger capital only buys more of a zero/negative expectancy. Option-buy recommended capital must be \u2264 50% of the account (\u2264\u20b9250,000). Futures NRML must stay \u2264 70% (\u2264\u20b9350,000).",
+      "leftover_if_first": 476860,
+      "spend_ceiling": 250000,
+      "daily_risk_note": "2% of capital, capped. Never raise size after a loss. Paper desk still uses \u20b9420/book."
+    },
+    {
+      "capital": 1000000,
+      "option_buy_fit": [
+        "NIFTY",
+        "BANKNIFTY",
+        "FINNIFTY",
+        "MIDCPNIFTY",
+        "SENSEX",
+        "CRUDEOIL",
+        "CRUDEOILM"
+      ],
+      "futures_fit": [
+        "NIFTY",
+        "BANKNIFTY",
+        "FINNIFTY",
+        "MIDCPNIFTY",
+        "SENSEX",
+        "CRUDEOIL",
+        "CRUDEOILM"
+      ],
+      "recommended_instruments": [
+        "NIFTY"
+      ],
+      "n_instruments": 1,
+      "lots_per_instrument": 1,
+      "max_simultaneous": 2,
+      "capital_reserve_pct": 50,
+      "daily_risk_limit": 5000,
+      "max_expected_drawdown": "UNKNOWN \u2014 no validated model. Desk book cap is \u20b9420/book (paper).",
+      "insufficient_for_live": true,
+      "insufficient_for_paper": false,
+      "note": "No validated edge at any capital. Larger capital only buys more of a zero/negative expectancy. Option-buy recommended capital must be \u2264 50% of the account (\u2264\u20b9500,000). Futures NRML must stay \u2264 70% (\u2264\u20b9700,000).",
+      "leftover_if_first": 976860,
+      "spend_ceiling": 500000,
+      "daily_risk_note": "2% of capital, capped. Never raise size after a loss. Paper desk still uses \u20b9420/book."
+    },
+    {
+      "capital": 1500000,
+      "option_buy_fit": [
+        "NIFTY",
+        "BANKNIFTY",
+        "FINNIFTY",
+        "MIDCPNIFTY",
+        "SENSEX",
+        "CRUDEOIL",
+        "CRUDEOILM"
+      ],
+      "futures_fit": [
+        "NIFTY",
+        "BANKNIFTY",
+        "FINNIFTY",
+        "MIDCPNIFTY",
+        "SENSEX",
+        "CRUDEOIL",
+        "CRUDEOILM"
+      ],
+      "recommended_instruments": [
+        "NIFTY"
+      ],
+      "n_instruments": 1,
+      "lots_per_instrument": 1,
+      "max_simultaneous": 2,
+      "capital_reserve_pct": 50,
+      "daily_risk_limit": 5000,
+      "max_expected_drawdown": "UNKNOWN \u2014 no validated model. Desk book cap is \u20b9420/book (paper).",
+      "insufficient_for_live": true,
+      "insufficient_for_paper": false,
+      "note": "No validated edge at any capital. Larger capital only buys more of a zero/negative expectancy. Option-buy recommended capital must be \u2264 50% of the account (\u2264\u20b9750,000). Futures NRML must stay \u2264 70% (\u2264\u20b91,050,000).",
+      "leftover_if_first": 1476860,
+      "spend_ceiling": 750000,
+      "daily_risk_note": "2% of capital, capped. Never raise size after a loss. Paper desk still uses \u20b9420/book."
+    },
+    {
+      "capital": 2000000,
+      "option_buy_fit": [
+        "NIFTY",
+        "BANKNIFTY",
+        "FINNIFTY",
+        "MIDCPNIFTY",
+        "SENSEX",
+        "CRUDEOIL",
+        "CRUDEOILM"
+      ],
+      "futures_fit": [
+        "NIFTY",
+        "BANKNIFTY",
+        "FINNIFTY",
+        "MIDCPNIFTY",
+        "SENSEX",
+        "CRUDEOIL",
+        "CRUDEOILM"
+      ],
+      "recommended_instruments": [
+        "NIFTY"
+      ],
+      "n_instruments": 1,
+      "lots_per_instrument": 1,
+      "max_simultaneous": 2,
+      "capital_reserve_pct": 50,
+      "daily_risk_limit": 5000,
+      "max_expected_drawdown": "UNKNOWN \u2014 no validated model. Desk book cap is \u20b9420/book (paper).",
+      "insufficient_for_live": true,
+      "insufficient_for_paper": false,
+      "note": "No validated edge at any capital. Larger capital only buys more of a zero/negative expectancy. Option-buy recommended capital must be \u2264 50% of the account (\u2264\u20b91,000,000). Futures NRML must stay \u2264 70% (\u2264\u20b91,400,000).",
+      "leftover_if_first": 1976860,
+      "spend_ceiling": 1000000,
+      "daily_risk_note": "2% of capital, capped. Never raise size after a loss. Paper desk still uses \u20b9420/book."
+    }
+  ],
+  "daily_targets": [
+    {
+      "target": 500,
+      "hypothetical": true,
+      "supported_by_validated_edge": false,
+      "note": "No strategy in this repo has a one-sided 95% lower CI for after-cost expectancy above zero on real-quote fills. These are break-even identities, not probabilities.",
+      "risk_rs_used": 2967.0,
+      "risk_note": "Nifty ATM 25% stop + scratch-flat charges from the 4 Nov snapshot, used only as a scale. Not a recommended stop.",
+      "by_frequency": [
+        {
+          "trades": 1,
+          "required_net_per_trade": 500.0,
+          "wr_rr1": 0.5843,
+          "wr_rr2": 0.3895,
+          "wr_rr3": 0.2921
+        },
+        {
+          "trades": 2,
+          "required_net_per_trade": 250.0,
+          "wr_rr1": 0.5421,
+          "wr_rr2": 0.3614,
+          "wr_rr3": 0.2711
+        },
+        {
+          "trades": 3,
+          "required_net_per_trade": 166.67,
+          "wr_rr1": 0.5281,
+          "wr_rr2": 0.3521,
+          "wr_rr3": 0.264
+        },
+        {
+          "trades": 4,
+          "required_net_per_trade": 125.0,
+          "wr_rr1": 0.5211,
+          "wr_rr2": 0.3474,
+          "wr_rr3": 0.2605
+        },
+        {
+          "trades": 5,
+          "required_net_per_trade": 100.0,
+          "wr_rr1": 0.5169,
+          "wr_rr2": 0.3446,
+          "wr_rr3": 0.2584
+        },
+        {
+          "trades": 6,
+          "required_net_per_trade": 83.33,
+          "wr_rr1": 0.514,
+          "wr_rr2": 0.3427,
+          "wr_rr3": 0.257
+        }
+      ],
+      "required_capital_if_risk_2pct": 25000,
+      "max_acceptable_loss": 500,
+      "probability_of_reaching_target": "UNSUPPORTED \u2014 no validated edge",
+      "probability_losing_day": "UNSUPPORTED \u2014 no validated edge",
+      "probability_exceeding_daily_loss": "UNSUPPORTED \u2014 no validated edge"
+    },
+    {
+      "target": 1000,
+      "hypothetical": true,
+      "supported_by_validated_edge": false,
+      "note": "No strategy in this repo has a one-sided 95% lower CI for after-cost expectancy above zero on real-quote fills. These are break-even identities, not probabilities.",
+      "risk_rs_used": 2967.0,
+      "risk_note": "Nifty ATM 25% stop + scratch-flat charges from the 4 Nov snapshot, used only as a scale. Not a recommended stop.",
+      "by_frequency": [
+        {
+          "trades": 1,
+          "required_net_per_trade": 1000.0,
+          "wr_rr1": 0.6685,
+          "wr_rr2": 0.4457,
+          "wr_rr3": 0.3343
+        },
+        {
+          "trades": 2,
+          "required_net_per_trade": 500.0,
+          "wr_rr1": 0.5843,
+          "wr_rr2": 0.3895,
+          "wr_rr3": 0.2921
+        },
+        {
+          "trades": 3,
+          "required_net_per_trade": 333.33,
+          "wr_rr1": 0.5562,
+          "wr_rr2": 0.3708,
+          "wr_rr3": 0.2781
+        },
+        {
+          "trades": 4,
+          "required_net_per_trade": 250.0,
+          "wr_rr1": 0.5421,
+          "wr_rr2": 0.3614,
+          "wr_rr3": 0.2711
+        },
+        {
+          "trades": 5,
+          "required_net_per_trade": 200.0,
+          "wr_rr1": 0.5337,
+          "wr_rr2": 0.3558,
+          "wr_rr3": 0.2669
+        },
+        {
+          "trades": 6,
+          "required_net_per_trade": 166.67,
+          "wr_rr1": 0.5281,
+          "wr_rr2": 0.3521,
+          "wr_rr3": 0.264
+        }
+      ],
+      "required_capital_if_risk_2pct": 50000,
+      "max_acceptable_loss": 1000,
+      "probability_of_reaching_target": "UNSUPPORTED \u2014 no validated edge",
+      "probability_losing_day": "UNSUPPORTED \u2014 no validated edge",
+      "probability_exceeding_daily_loss": "UNSUPPORTED \u2014 no validated edge"
+    },
+    {
+      "target": 1500,
+      "hypothetical": true,
+      "supported_by_validated_edge": false,
+      "note": "No strategy in this repo has a one-sided 95% lower CI for after-cost expectancy above zero on real-quote fills. These are break-even identities, not probabilities.",
+      "risk_rs_used": 2967.0,
+      "risk_note": "Nifty ATM 25% stop + scratch-flat charges from the 4 Nov snapshot, used only as a scale. Not a recommended stop.",
+      "by_frequency": [
+        {
+          "trades": 1,
+          "required_net_per_trade": 1500.0,
+          "wr_rr1": 0.7528,
+          "wr_rr2": 0.5019,
+          "wr_rr3": 0.3764
+        },
+        {
+          "trades": 2,
+          "required_net_per_trade": 750.0,
+          "wr_rr1": 0.6264,
+          "wr_rr2": 0.4176,
+          "wr_rr3": 0.3132
+        },
+        {
+          "trades": 3,
+          "required_net_per_trade": 500.0,
+          "wr_rr1": 0.5843,
+          "wr_rr2": 0.3895,
+          "wr_rr3": 0.2921
+        },
+        {
+          "trades": 4,
+          "required_net_per_trade": 375.0,
+          "wr_rr1": 0.5632,
+          "wr_rr2": 0.3755,
+          "wr_rr3": 0.2816
+        },
+        {
+          "trades": 5,
+          "required_net_per_trade": 300.0,
+          "wr_rr1": 0.5506,
+          "wr_rr2": 0.367,
+          "wr_rr3": 0.2753
+        },
+        {
+          "trades": 6,
+          "required_net_per_trade": 250.0,
+          "wr_rr1": 0.5421,
+          "wr_rr2": 0.3614,
+          "wr_rr3": 0.2711
+        }
+      ],
+      "required_capital_if_risk_2pct": 75000,
+      "max_acceptable_loss": 1500,
+      "probability_of_reaching_target": "UNSUPPORTED \u2014 no validated edge",
+      "probability_losing_day": "UNSUPPORTED \u2014 no validated edge",
+      "probability_exceeding_daily_loss": "UNSUPPORTED \u2014 no validated edge"
+    },
+    {
+      "target": 2000,
+      "hypothetical": true,
+      "supported_by_validated_edge": false,
+      "note": "No strategy in this repo has a one-sided 95% lower CI for after-cost expectancy above zero on real-quote fills. These are break-even identities, not probabilities.",
+      "risk_rs_used": 2967.0,
+      "risk_note": "Nifty ATM 25% stop + scratch-flat charges from the 4 Nov snapshot, used only as a scale. Not a recommended stop.",
+      "by_frequency": [
+        {
+          "trades": 1,
+          "required_net_per_trade": 2000.0,
+          "wr_rr1": 0.837,
+          "wr_rr2": 0.558,
+          "wr_rr3": 0.4185
+        },
+        {
+          "trades": 2,
+          "required_net_per_trade": 1000.0,
+          "wr_rr1": 0.6685,
+          "wr_rr2": 0.4457,
+          "wr_rr3": 0.3343
+        },
+        {
+          "trades": 3,
+          "required_net_per_trade": 666.67,
+          "wr_rr1": 0.6123,
+          "wr_rr2": 0.4082,
+          "wr_rr3": 0.3062
+        },
+        {
+          "trades": 4,
+          "required_net_per_trade": 500.0,
+          "wr_rr1": 0.5843,
+          "wr_rr2": 0.3895,
+          "wr_rr3": 0.2921
+        },
+        {
+          "trades": 5,
+          "required_net_per_trade": 400.0,
+          "wr_rr1": 0.5674,
+          "wr_rr2": 0.3783,
+          "wr_rr3": 0.2837
+        },
+        {
+          "trades": 6,
+          "required_net_per_trade": 333.33,
+          "wr_rr1": 0.5562,
+          "wr_rr2": 0.3708,
+          "wr_rr3": 0.2781
+        }
+      ],
+      "required_capital_if_risk_2pct": 100000,
+      "max_acceptable_loss": 2000,
+      "probability_of_reaching_target": "UNSUPPORTED \u2014 no validated edge",
+      "probability_losing_day": "UNSUPPORTED \u2014 no validated edge",
+      "probability_exceeding_daily_loss": "UNSUPPORTED \u2014 no validated edge"
+    },
+    {
+      "target": 3000,
+      "hypothetical": true,
+      "supported_by_validated_edge": false,
+      "note": "No strategy in this repo has a one-sided 95% lower CI for after-cost expectancy above zero on real-quote fills. These are break-even identities, not probabilities.",
+      "risk_rs_used": 2967.0,
+      "risk_note": "Nifty ATM 25% stop + scratch-flat charges from the 4 Nov snapshot, used only as a scale. Not a recommended stop.",
+      "by_frequency": [
+        {
+          "trades": 1,
+          "required_net_per_trade": 3000.0,
+          "wr_rr1": 1.0056,
+          "wr_rr2": 0.6704,
+          "wr_rr3": 0.5028
+        },
+        {
+          "trades": 2,
+          "required_net_per_trade": 1500.0,
+          "wr_rr1": 0.7528,
+          "wr_rr2": 0.5019,
+          "wr_rr3": 0.3764
+        },
+        {
+          "trades": 3,
+          "required_net_per_trade": 1000.0,
+          "wr_rr1": 0.6685,
+          "wr_rr2": 0.4457,
+          "wr_rr3": 0.3343
+        },
+        {
+          "trades": 4,
+          "required_net_per_trade": 750.0,
+          "wr_rr1": 0.6264,
+          "wr_rr2": 0.4176,
+          "wr_rr3": 0.3132
+        },
+        {
+          "trades": 5,
+          "required_net_per_trade": 600.0,
+          "wr_rr1": 0.6011,
+          "wr_rr2": 0.4007,
+          "wr_rr3": 0.3006
+        },
+        {
+          "trades": 6,
+          "required_net_per_trade": 500.0,
+          "wr_rr1": 0.5843,
+          "wr_rr2": 0.3895,
+          "wr_rr3": 0.2921
+        }
+      ],
+      "required_capital_if_risk_2pct": 150000,
+      "max_acceptable_loss": 3000,
+      "probability_of_reaching_target": "UNSUPPORTED \u2014 no validated edge",
+      "probability_losing_day": "UNSUPPORTED \u2014 no validated edge",
+      "probability_exceeding_daily_loss": "UNSUPPORTED \u2014 no validated edge"
+    },
+    {
+      "target": 5000,
+      "hypothetical": true,
+      "supported_by_validated_edge": false,
+      "note": "No strategy in this repo has a one-sided 95% lower CI for after-cost expectancy above zero on real-quote fills. These are break-even identities, not probabilities.",
+      "risk_rs_used": 2967.0,
+      "risk_note": "Nifty ATM 25% stop + scratch-flat charges from the 4 Nov snapshot, used only as a scale. Not a recommended stop.",
+      "by_frequency": [
+        {
+          "trades": 1,
+          "required_net_per_trade": 5000.0,
+          "wr_rr1": 1.3426,
+          "wr_rr2": 0.8951,
+          "wr_rr3": 0.6713
+        },
+        {
+          "trades": 2,
+          "required_net_per_trade": 2500.0,
+          "wr_rr1": 0.9213,
+          "wr_rr2": 0.6142,
+          "wr_rr3": 0.4607
+        },
+        {
+          "trades": 3,
+          "required_net_per_trade": 1666.67,
+          "wr_rr1": 0.7809,
+          "wr_rr2": 0.5206,
+          "wr_rr3": 0.3904
+        },
+        {
+          "trades": 4,
+          "required_net_per_trade": 1250.0,
+          "wr_rr1": 0.7107,
+          "wr_rr2": 0.4738,
+          "wr_rr3": 0.3553
+        },
+        {
+          "trades": 5,
+          "required_net_per_trade": 1000.0,
+          "wr_rr1": 0.6685,
+          "wr_rr2": 0.4457,
+          "wr_rr3": 0.3343
+        },
+        {
+          "trades": 6,
+          "required_net_per_trade": 833.33,
+          "wr_rr1": 0.6404,
+          "wr_rr2": 0.427,
+          "wr_rr3": 0.3202
+        }
+      ],
+      "required_capital_if_risk_2pct": 250000,
+      "max_acceptable_loss": 5000,
+      "probability_of_reaching_target": "UNSUPPORTED \u2014 no validated edge",
+      "probability_losing_day": "UNSUPPORTED \u2014 no validated edge",
+      "probability_exceeding_daily_loss": "UNSUPPORTED \u2014 no validated edge"
+    },
+    {
+      "target": 7500,
+      "hypothetical": true,
+      "supported_by_validated_edge": false,
+      "note": "No strategy in this repo has a one-sided 95% lower CI for after-cost expectancy above zero on real-quote fills. These are break-even identities, not probabilities.",
+      "risk_rs_used": 2967.0,
+      "risk_note": "Nifty ATM 25% stop + scratch-flat charges from the 4 Nov snapshot, used only as a scale. Not a recommended stop.",
+      "by_frequency": [
+        {
+          "trades": 1,
+          "required_net_per_trade": 7500.0,
+          "wr_rr1": 1.7639,
+          "wr_rr2": 1.1759,
+          "wr_rr3": 0.882
+        },
+        {
+          "trades": 2,
+          "required_net_per_trade": 3750.0,
+          "wr_rr1": 1.132,
+          "wr_rr2": 0.7546,
+          "wr_rr3": 0.566
+        },
+        {
+          "trades": 3,
+          "required_net_per_trade": 2500.0,
+          "wr_rr1": 0.9213,
+          "wr_rr2": 0.6142,
+          "wr_rr3": 0.4607
+        },
+        {
+          "trades": 4,
+          "required_net_per_trade": 1875.0,
+          "wr_rr1": 0.816,
+          "wr_rr2": 0.544,
+          "wr_rr3": 0.408
+        },
+        {
+          "trades": 5,
+          "required_net_per_trade": 1500.0,
+          "wr_rr1": 0.7528,
+          "wr_rr2": 0.5019,
+          "wr_rr3": 0.3764
+        },
+        {
+          "trades": 6,
+          "required_net_per_trade": 1250.0,
+          "wr_rr1": 0.7107,
+          "wr_rr2": 0.4738,
+          "wr_rr3": 0.3553
+        }
+      ],
+      "required_capital_if_risk_2pct": 375000,
+      "max_acceptable_loss": 7500,
+      "probability_of_reaching_target": "UNSUPPORTED \u2014 no validated edge",
+      "probability_losing_day": "UNSUPPORTED \u2014 no validated edge",
+      "probability_exceeding_daily_loss": "UNSUPPORTED \u2014 no validated edge"
+    },
+    {
+      "target": 10000,
+      "hypothetical": true,
+      "supported_by_validated_edge": false,
+      "note": "No strategy in this repo has a one-sided 95% lower CI for after-cost expectancy above zero on real-quote fills. These are break-even identities, not probabilities.",
+      "risk_rs_used": 2967.0,
+      "risk_note": "Nifty ATM 25% stop + scratch-flat charges from the 4 Nov snapshot, used only as a scale. Not a recommended stop.",
+      "by_frequency": [
+        {
+          "trades": 1,
+          "required_net_per_trade": 10000.0,
+          "wr_rr1": 2.1852,
+          "wr_rr2": 1.4568,
+          "wr_rr3": 1.0926
+        },
+        {
+          "trades": 2,
+          "required_net_per_trade": 5000.0,
+          "wr_rr1": 1.3426,
+          "wr_rr2": 0.8951,
+          "wr_rr3": 0.6713
+        },
+        {
+          "trades": 3,
+          "required_net_per_trade": 3333.33,
+          "wr_rr1": 1.0617,
+          "wr_rr2": 0.7078,
+          "wr_rr3": 0.5309
+        },
+        {
+          "trades": 4,
+          "required_net_per_trade": 2500.0,
+          "wr_rr1": 0.9213,
+          "wr_rr2": 0.6142,
+          "wr_rr3": 0.4607
+        },
+        {
+          "trades": 5,
+          "required_net_per_trade": 2000.0,
+          "wr_rr1": 0.837,
+          "wr_rr2": 0.558,
+          "wr_rr3": 0.4185
+        },
+        {
+          "trades": 6,
+          "required_net_per_trade": 1666.67,
+          "wr_rr1": 0.7809,
+          "wr_rr2": 0.5206,
+          "wr_rr3": 0.3904
+        }
+      ],
+      "required_capital_if_risk_2pct": 500000,
+      "max_acceptable_loss": 10000,
+      "probability_of_reaching_target": "UNSUPPORTED \u2014 no validated edge",
+      "probability_losing_day": "UNSUPPORTED \u2014 no validated edge",
+      "probability_exceeding_daily_loss": "UNSUPPORTED \u2014 no validated edge"
+    }
+  ],
+  "trade_frequency": {
+    "rule": "Do not add trades to hit a daily rupee target.",
+    "paper14k_design": "One signal family per book per session; no-trade days are valid.",
+    "live_4_nov": "Nifty took a second ticket after a scratch (no cooldown). Both lost.",
+    "evidence": {
+      "1": "Matches the pre-registered Paper 14k and 3-year grids (one trade/day). Still no validated edge.",
+      "2": "Doubles charges and the chance of a second scratch. 4 Nov Nifty: \u2212\u20b9221 then \u2212\u20b9217.",
+      "3": "No study in this repo supports three independent +EV entries per name per day.",
+      "4": "Overtrading. Cost stack (\u20b954\u2013\u20b9122 RT plus spread) dominates any unvalidated tick edge.",
+      "5": "Rejected. Same as 4 with worse cost drag.",
+      "gt5": "Rejected. Intraday options buying at this size is a lottery on direction, not a volume business."
+    },
+    "optimal_per_instrument": "0 or 1. A no-trade day is allowed and preferred when spread, DTE, or structure fail the filters.",
+    "time_of_day": "Paper 14k: Nifty first entry 10:15, Bank/Sensex 09:45, flat 15:15. Crude energy session 09:00\u201323:30 IST; overnight gap is a different market.",
+    "losing_day_probability": "UNSUPPORTED as a forecast. Modelled Paper 14k green-day rates were ~31\u201342% on TEST \u2014 that is not a live probability."
+  },
+  "journal": [
+    {
+      "book": "NIFTY",
+      "contract": "NIFTY 23950 CE 9 Nov",
+      "entry": 95.7,
+      "exit": 93.25,
+      "lot": 65,
+      "mode": "pdhl",
+      "paper_net": -209.3,
+      "exact_charges": 61.64,
+      "exact_net": -220.89,
+      "move_pts": 2.45,
+      "scratch_pts": 2.4
+    },
+    {
+      "book": "NIFTY",
+      "contract": "NIFTY 24000 CE 9 Nov",
+      "entry": 90.25,
+      "exit": 87.85,
+      "lot": 65,
+      "mode": "trap",
+      "paper_net": -206.0,
+      "exact_charges": 60.81,
+      "exact_net": -216.81,
+      "move_pts": 2.4,
+      "scratch_pts": 2.4
+    },
+    {
+      "book": "BANKNIFTY",
+      "contract": "BANKNIFTY 55900 CE 23 Nov",
+      "entry": 604.7,
+      "exit": 599.4,
+      "lot": 30,
+      "mode": "pdhl",
+      "paper_net": -209.0,
+      "exact_charges": 89.9,
+      "exact_net": -248.9,
+      "move_pts": 5.3,
+      "scratch_pts": 5.0
+    },
+    {
+      "book": "SENSEX",
+      "contract": "SENSEX 77500 CE 5 Nov",
+      "entry": 173.3,
+      "exit": 158.25,
+      "lot": 20,
+      "mode": "trap",
+      "paper_net": -351.0,
+      "exact_charges": 54.6,
+      "exact_net": -355.6,
+      "move_pts": 15.05,
+      "scratch_pts": 8.0
+    }
+  ],
+  "journal_totals": {
+    "paper_net": -975.3,
+    "exact_charges": 266.95,
+    "exact_net": -1042.2
+  },
+  "missing_data": [
+    "Historical executable option bid/ask for FINNIFTY, MIDCPNIFTY, BANKEX, CRUDEOIL (standard).",
+    "\u2265400 real-quote fills of any candidate rule, across regimes, with day-clustered CIs.",
+    "Intraday IV, skew, and depth history (recorder v1.1.0 started 2026-11-02; ATM\u00b13 only).",
+    "Joint covariance of the eight books (index cluster vs crude) on live option P&L, not index returns.",
+    "Expired-contract option tape (Kite will not grow it backwards).",
+    "Sensex 77500 path after 10:22 IST on 4 Nov (left ATM\u00b13; recorder dropped the strike)."
+  ],
+  "answers": {
+    "capital_needed": "For paper observation of one Nifty lot: recommended \u20b923,140 (ATM cash \u20b911,570 + 100% reserve) as of 4 Nov 2026 13:28 IST. For live deployment: do not fund. No validated edge.",
+    "instruments": "Paper-only: NIFTY (first) or CRUDEOILM (low cash). Not a live shortlist.",
+    "how_many": "One. Two only if the second is a different driver (crude vs index) and still paper. Three or more is correlated size, not diversification.",
+    "lots": "One lot. Never two. Never average down. Never martingale.",
+    "trades_per_day": "Zero or one per instrument. No-trade days allowed.",
+    "daily_expectancy": "Not supported. Modelled figures are not live-quote validated. 4 Nov exact blotter: \u2212\u20b91,042 on four tickets.",
+    "monthly_expectancy": "Not supported. Do not annualise a non-edge.",
+    "avoid": "BANKEX (untradeable book). CRUDEOIL standard as a first book. Stacking NIFTY+BANKNIFTY+SENSEX. Any futures book as a substitute for an options edge.",
+    "max_daily_loss": "Paper desk \u20b9420/book. Research recommendation: 2% of allocated capital, never more than 25% of the premium on the open lot, then stand down.",
+    "validated_strategy": "NONE. NO VALIDATED EDGE \u2014 DO NOT DEPLOY LIVE CAPITAL."
+  }
+}
