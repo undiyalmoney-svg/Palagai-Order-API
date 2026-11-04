@@ -1,0 +1,3586 @@
+[
+ {
+  "und": "NIFTY",
+  "family": "MOMENTUM",
+  "dte": 1,
+  "train": {
+   "n": 335,
+   "per_trade": 200.9,
+   "total": 67288,
+   "win": 46.6,
+   "ci": [
+    -65,
+    471
+   ]
+  },
+  "val": {
+   "n": 107,
+   "per_trade": -7.0,
+   "total": -749,
+   "win": 51.4,
+   "ci": [
+    -267,
+    261
+   ]
+  },
+  "test": {
+   "n": 130,
+   "per_trade": 448.9,
+   "total": 58357,
+   "win": 51.5,
+   "ci": [
+    67,
+    836
+   ]
+  },
+  "new": {
+   "n": 0,
+   "per_trade": null,
+   "total": 0,
+   "win": null,
+   "ci": null
+  },
+  "all": {
+   "n": 576,
+   "per_trade": 217.5,
+   "total": 125277,
+   "win": 48.6,
+   "ci": [
+    31,
+    406
+   ]
+  },
+  "quarters_positive": "9/13",
+  "worst_day": -5487,
+  "losing_day_pct": 48.6,
+  "max_dd": 34866
+ },
+ {
+  "und": "NIFTY",
+  "family": "MOMENTUM",
+  "dte": 3,
+  "train": {
+   "n": 335,
+   "per_trade": 379.6,
+   "total": 127160,
+   "win": 49.9,
+   "ci": [
+    37,
+    737
+   ]
+  },
+  "val": {
+   "n": 107,
+   "per_trade": -0.8,
+   "total": -85,
+   "win": 54.2,
+   "ci": [
+    -301,
+    303
+   ]
+  },
+  "test": {
+   "n": 130,
+   "per_trade": 403.3,
+   "total": 52424,
+   "win": 51.5,
+   "ci": [
+    -38,
+    846
+   ]
+  },
+  "new": {
+   "n": 0,
+   "per_trade": null,
+   "total": 0,
+   "win": null,
+   "ci": null
+  },
+  "all": {
+   "n": 576,
+   "per_trade": 327.2,
+   "total": 188493,
+   "win": 51.2,
+   "ci": [
+    103,
+    564
+   ]
+  },
+  "quarters_positive": "10/13",
+  "worst_day": -6832,
+  "losing_day_pct": 46.3,
+  "max_dd": 42221
+ },
+ {
+  "und": "NIFTY",
+  "family": "MOMENTUM",
+  "dte": 6,
+  "train": {
+   "n": 335,
+   "per_trade": 268.5,
+   "total": 89959,
+   "win": 49.9,
+   "ci": [
+    -52,
+    611
+   ]
+  },
+  "val": {
+   "n": 107,
+   "per_trade": -72.6,
+   "total": -7768,
+   "win": 53.3,
+   "ci": [
+    -375,
+    231
+   ]
+  },
+  "test": {
+   "n": 130,
+   "per_trade": 350.8,
+   "total": 45600,
+   "win": 51.5,
+   "ci": [
+    -93,
+    802
+   ]
+  },
+  "new": {
+   "n": 0,
+   "per_trade": null,
+   "total": 0,
+   "win": null,
+   "ci": null
+  },
+  "all": {
+   "n": 576,
+   "per_trade": 241.7,
+   "total": 139244,
+   "win": 51.0,
+   "ci": [
+    18,
+    462
+   ]
+  },
+  "quarters_positive": "10/13",
+  "worst_day": -8599,
+  "losing_day_pct": 46.7,
+  "max_dd": 41466
+ },
+ {
+  "und": "NIFTY",
+  "family": "MOMENTUM_FLIP",
+  "dte": 1,
+  "train": {
+   "n": 335,
+   "per_trade": -30.9,
+   "total": -10356,
+   "win": 39.1,
+   "ci": [
+    -296,
+    233
+   ]
+  },
+  "val": {
+   "n": 107,
+   "per_trade": -94.0,
+   "total": -10060,
+   "win": 38.3,
+   "ci": [
+    -367,
+    185
+   ]
+  },
+  "test": {
+   "n": 130,
+   "per_trade": -243.5,
+   "total": -31649,
+   "win": 38.5,
+   "ci": [
+    -598,
+    137
+   ]
+  },
+  "new": {
+   "n": 0,
+   "per_trade": null,
+   "total": 0,
+   "win": null,
+   "ci": null
+  },
+  "all": {
+   "n": 576,
+   "per_trade": -99.3,
+   "total": -57213,
+   "win": 38.7,
+   "ci": [
+    -270,
+    84
+   ]
+  },
+  "quarters_positive": "3/13",
+  "worst_day": -6370,
+  "losing_day_pct": 61.9,
+  "max_dd": 67875
+ },
+ {
+  "und": "NIFTY",
+  "family": "MOMENTUM_FLIP",
+  "dte": 3,
+  "train": {
+   "n": 335,
+   "per_trade": -196.1,
+   "total": -65682,
+   "win": 41.5,
+   "ci": [
+    -484,
+    97
+   ]
+  },
+  "val": {
+   "n": 107,
+   "per_trade": -52.4,
+   "total": -5606,
+   "win": 40.2,
+   "ci": [
+    -347,
+    276
+   ]
+  },
+  "test": {
+   "n": 130,
+   "per_trade": -351.4,
+   "total": -45676,
+   "win": 39.2,
+   "ci": [
+    -734,
+    46
+   ]
+  },
+  "new": {
+   "n": 0,
+   "per_trade": null,
+   "total": 0,
+   "win": null,
+   "ci": null
+  },
+  "all": {
+   "n": 576,
+   "per_trade": -214.9,
+   "total": -123778,
+   "win": 40.6,
+   "ci": [
+    -408,
+    -17
+   ]
+  },
+  "quarters_positive": "2/13",
+  "worst_day": -10224,
+  "losing_day_pct": 60.9,
+  "max_dd": 140566
+ },
+ {
+  "und": "NIFTY",
+  "family": "MOMENTUM_FLIP",
+  "dte": 6,
+  "train": {
+   "n": 335,
+   "per_trade": -350.1,
+   "total": -117288,
+   "win": 41.8,
+   "ci": [
+    -662,
+    -47
+   ]
+  },
+  "val": {
+   "n": 107,
+   "per_trade": -98.6,
+   "total": -10553,
+   "win": 38.3,
+   "ci": [
+    -420,
+    260
+   ]
+  },
+  "test": {
+   "n": 130,
+   "per_trade": -414.8,
+   "total": -53918,
+   "win": 39.2,
+   "ci": [
+    -805,
+    -12
+   ]
+  },
+  "new": {
+   "n": 0,
+   "per_trade": null,
+   "total": 0,
+   "win": null,
+   "ci": null
+  },
+  "all": {
+   "n": 576,
+   "per_trade": -330.2,
+   "total": -190190,
+   "win": 40.5,
+   "ci": [
+    -534,
+    -123
+   ]
+  },
+  "quarters_positive": "1/13",
+  "worst_day": -14206,
+  "losing_day_pct": 61.9,
+  "max_dd": 199562
+ },
+ {
+  "und": "NIFTY",
+  "family": "PDHL",
+  "dte": 1,
+  "train": {
+   "n": 317,
+   "per_trade": 94.0,
+   "total": 29787,
+   "win": 43.5,
+   "ci": [
+    -178,
+    374
+   ]
+  },
+  "val": {
+   "n": 120,
+   "per_trade": 35.7,
+   "total": 4287,
+   "win": 47.5,
+   "ci": [
+    -262,
+    340
+   ]
+  },
+  "test": {
+   "n": 152,
+   "per_trade": 150.9,
+   "total": 22931,
+   "win": 46.7,
+   "ci": [
+    -265,
+    557
+   ]
+  },
+  "new": {
+   "n": 3,
+   "per_trade": 631.6,
+   "total": 1895,
+   "win": 66.7,
+   "ci": null
+  },
+  "all": {
+   "n": 594,
+   "per_trade": 96.6,
+   "total": 57377,
+   "win": 45.3,
+   "ci": [
+    -96,
+    284
+   ]
+  },
+  "quarters_positive": "10/13",
+  "worst_day": -4141,
+  "losing_day_pct": 54.7,
+  "max_dd": 34879
+ },
+ {
+  "und": "NIFTY",
+  "family": "PDHL",
+  "dte": 3,
+  "train": {
+   "n": 317,
+   "per_trade": 75.1,
+   "total": 23820,
+   "win": 47.9,
+   "ci": [
+    -222,
+    390
+   ]
+  },
+  "val": {
+   "n": 120,
+   "per_trade": 38.7,
+   "total": 4640,
+   "win": 52.5,
+   "ci": [
+    -287,
+    362
+   ]
+  },
+  "test": {
+   "n": 152,
+   "per_trade": 105.1,
+   "total": 15982,
+   "win": 50.0,
+   "ci": [
+    -295,
+    511
+   ]
+  },
+  "new": {
+   "n": 3,
+   "per_trade": 709.7,
+   "total": 2129,
+   "win": 66.7,
+   "ci": null
+  },
+  "all": {
+   "n": 594,
+   "per_trade": 73.6,
+   "total": 43733,
+   "win": 49.5,
+   "ci": [
+    -138,
+    272
+   ]
+  },
+  "quarters_positive": "6/13",
+  "worst_day": -5890,
+  "losing_day_pct": 50.5,
+  "max_dd": 57067
+ },
+ {
+  "und": "NIFTY",
+  "family": "PDHL",
+  "dte": 6,
+  "train": {
+   "n": 317,
+   "per_trade": 114.0,
+   "total": 36153,
+   "win": 48.9,
+   "ci": [
+    -212,
+    465
+   ]
+  },
+  "val": {
+   "n": 120,
+   "per_trade": -14.6,
+   "total": -1749,
+   "win": 53.3,
+   "ci": [
+    -331,
+    297
+   ]
+  },
+  "test": {
+   "n": 152,
+   "per_trade": 52.0,
+   "total": 7910,
+   "win": 50.0,
+   "ci": [
+    -356,
+    446
+   ]
+  },
+  "new": {
+   "n": 3,
+   "per_trade": 676.2,
+   "total": 2029,
+   "win": 66.7,
+   "ci": null
+  },
+  "all": {
+   "n": 594,
+   "per_trade": 67.5,
+   "total": 40079,
+   "win": 50.2,
+   "ci": [
+    -159,
+    278
+   ]
+  },
+  "quarters_positive": "7/13",
+  "worst_day": -6106,
+  "losing_day_pct": 49.8,
+  "max_dd": 53011
+ },
+ {
+  "und": "NIFTY",
+  "family": "ORB15",
+  "dte": 1,
+  "train": {
+   "n": 393,
+   "per_trade": 78.3,
+   "total": 30779,
+   "win": 41.7,
+   "ci": [
+    -166,
+    320
+   ]
+  },
+  "val": {
+   "n": 144,
+   "per_trade": -36.8,
+   "total": -5295,
+   "win": 43.1,
+   "ci": [
+    -341,
+    256
+   ]
+  },
+  "test": {
+   "n": 181,
+   "per_trade": -114.4,
+   "total": -20712,
+   "win": 40.9,
+   "ci": [
+    -427,
+    223
+   ]
+  },
+  "new": {
+   "n": 2,
+   "per_trade": 768.8,
+   "total": 1538,
+   "win": 100.0,
+   "ci": null
+  },
+  "all": {
+   "n": 722,
+   "per_trade": 3.0,
+   "total": 2199,
+   "win": 41.8,
+   "ci": [
+    -155,
+    166
+   ]
+  },
+  "quarters_positive": "6/13",
+  "worst_day": -3835,
+  "losing_day_pct": 58.2,
+  "max_dd": 86101
+ },
+ {
+  "und": "NIFTY",
+  "family": "ORB15",
+  "dte": 3,
+  "train": {
+   "n": 393,
+   "per_trade": 90.9,
+   "total": 35707,
+   "win": 44.5,
+   "ci": [
+    -182,
+    377
+   ]
+  },
+  "val": {
+   "n": 144,
+   "per_trade": -89.8,
+   "total": -12931,
+   "win": 44.4,
+   "ci": [
+    -428,
+    235
+   ]
+  },
+  "test": {
+   "n": 181,
+   "per_trade": -164.7,
+   "total": -29809,
+   "win": 42.0,
+   "ci": [
+    -492,
+    194
+   ]
+  },
+  "new": {
+   "n": 2,
+   "per_trade": 790.2,
+   "total": 1580,
+   "win": 100.0,
+   "ci": null
+  },
+  "all": {
+   "n": 722,
+   "per_trade": -13.3,
+   "total": -9570,
+   "win": 43.9,
+   "ci": [
+    -199,
+    164
+   ]
+  },
+  "quarters_positive": "4/13",
+  "worst_day": -6373,
+  "losing_day_pct": 56.1,
+  "max_dd": 106555
+ },
+ {
+  "und": "NIFTY",
+  "family": "ORB15",
+  "dte": 6,
+  "train": {
+   "n": 393,
+   "per_trade": -16.5,
+   "total": -6471,
+   "win": 44.3,
+   "ci": [
+    -291,
+    283
+   ]
+  },
+  "val": {
+   "n": 144,
+   "per_trade": -211.6,
+   "total": -30474,
+   "win": 43.8,
+   "ci": [
+    -548,
+    104
+   ]
+  },
+  "test": {
+   "n": 181,
+   "per_trade": -229.7,
+   "total": -41573,
+   "win": 42.0,
+   "ci": [
+    -553,
+    130
+   ]
+  },
+  "new": {
+   "n": 2,
+   "per_trade": 784.7,
+   "total": 1569,
+   "win": 100.0,
+   "ci": null
+  },
+  "all": {
+   "n": 722,
+   "per_trade": -112.8,
+   "total": -81475,
+   "win": 43.6,
+   "ci": [
+    -293,
+    72
+   ]
+  },
+  "quarters_positive": "3/13",
+  "worst_day": -6096,
+  "losing_day_pct": 56.4,
+  "max_dd": 166274
+ },
+ {
+  "und": "NIFTY",
+  "family": "AVGREJECT",
+  "dte": 1,
+  "train": {
+   "n": 917,
+   "per_trade": 120.9,
+   "total": 110849,
+   "win": 43.9,
+   "ci": [
+    -31,
+    271
+   ]
+  },
+  "val": {
+   "n": 335,
+   "per_trade": 71.6,
+   "total": 23995,
+   "win": 45.4,
+   "ci": [
+    -142,
+    277
+   ]
+  },
+  "test": {
+   "n": 425,
+   "per_trade": -18.2,
+   "total": -7736,
+   "win": 44.0,
+   "ci": [
+    -251,
+    223
+   ]
+  },
+  "new": {
+   "n": 7,
+   "per_trade": 411.4,
+   "total": 2880,
+   "win": 57.1,
+   "ci": null
+  },
+  "all": {
+   "n": 1687,
+   "per_trade": 74.3,
+   "total": 125404,
+   "win": 44.2,
+   "ci": [
+    -28,
+    185
+   ]
+  },
+  "quarters_positive": "9/13",
+  "worst_day": -7799,
+  "losing_day_pct": 54.9,
+  "max_dd": 58390
+ },
+ {
+  "und": "NIFTY",
+  "family": "AVGREJECT",
+  "dte": 3,
+  "train": {
+   "n": 917,
+   "per_trade": 42.3,
+   "total": 38752,
+   "win": 46.5,
+   "ci": [
+    -124,
+    202
+   ]
+  },
+  "val": {
+   "n": 335,
+   "per_trade": 55.6,
+   "total": 18637,
+   "win": 46.9,
+   "ci": [
+    -153,
+    254
+   ]
+  },
+  "test": {
+   "n": 425,
+   "per_trade": -124.1,
+   "total": -52752,
+   "win": 45.6,
+   "ci": [
+    -374,
+    128
+   ]
+  },
+  "new": {
+   "n": 7,
+   "per_trade": 158.7,
+   "total": 1111,
+   "win": 57.1,
+   "ci": null
+  },
+  "all": {
+   "n": 1687,
+   "per_trade": 2.3,
+   "total": 3922,
+   "win": 46.4,
+   "ci": [
+    -113,
+    124
+   ]
+  },
+  "quarters_positive": "6/13",
+  "worst_day": -12567,
+  "losing_day_pct": 55.9,
+  "max_dd": 126230
+ },
+ {
+  "und": "NIFTY",
+  "family": "AVGREJECT",
+  "dte": 6,
+  "train": {
+   "n": 917,
+   "per_trade": 4.6,
+   "total": 4209,
+   "win": 46.6,
+   "ci": [
+    -164,
+    176
+   ]
+  },
+  "val": {
+   "n": 335,
+   "per_trade": -7.9,
+   "total": -2649,
+   "win": 47.2,
+   "ci": [
+    -220,
+    190
+   ]
+  },
+  "test": {
+   "n": 425,
+   "per_trade": -188.4,
+   "total": -80077,
+   "win": 45.6,
+   "ci": [
+    -430,
+    56
+   ]
+  },
+  "new": {
+   "n": 7,
+   "per_trade": 35.7,
+   "total": 250,
+   "win": 57.1,
+   "ci": null
+  },
+  "all": {
+   "n": 1687,
+   "per_trade": -47.5,
+   "total": -80151,
+   "win": 46.5,
+   "ci": [
+    -167,
+    76
+   ]
+  },
+  "quarters_positive": "5/13",
+  "worst_day": -17193,
+  "losing_day_pct": 55.8,
+  "max_dd": 194996
+ },
+ {
+  "und": "NIFTY",
+  "family": "AVGCROSS",
+  "dte": 1,
+  "train": {
+   "n": 883,
+   "per_trade": 36.3,
+   "total": 32069,
+   "win": 39.5,
+   "ci": [
+    -115,
+    179
+   ]
+  },
+  "val": {
+   "n": 324,
+   "per_trade": 48.4,
+   "total": 15676,
+   "win": 42.9,
+   "ci": [
+    -117,
+    222
+   ]
+  },
+  "test": {
+   "n": 415,
+   "per_trade": 78.2,
+   "total": 32466,
+   "win": 42.2,
+   "ci": [
+    -147,
+    320
+   ]
+  },
+  "new": {
+   "n": 6,
+   "per_trade": 1232.9,
+   "total": 7397,
+   "win": 66.7,
+   "ci": null
+  },
+  "all": {
+   "n": 1632,
+   "per_trade": 51.2,
+   "total": 83499,
+   "win": 40.9,
+   "ci": [
+    -51,
+    158
+   ]
+  },
+  "quarters_positive": "5/13",
+  "worst_day": -7151,
+  "losing_day_pct": 56.2,
+  "max_dd": 45983
+ },
+ {
+  "und": "NIFTY",
+  "family": "AVGCROSS",
+  "dte": 3,
+  "train": {
+   "n": 883,
+   "per_trade": -61.0,
+   "total": -53819,
+   "win": 40.7,
+   "ci": [
+    -208,
+    81
+   ]
+  },
+  "val": {
+   "n": 324,
+   "per_trade": -53.1,
+   "total": -17210,
+   "win": 43.8,
+   "ci": [
+    -232,
+    142
+   ]
+  },
+  "test": {
+   "n": 415,
+   "per_trade": 64.4,
+   "total": 26746,
+   "win": 45.1,
+   "ci": [
+    -182,
+    326
+   ]
+  },
+  "new": {
+   "n": 6,
+   "per_trade": 1047.7,
+   "total": 6286,
+   "win": 66.7,
+   "ci": null
+  },
+  "all": {
+   "n": 1632,
+   "per_trade": -21.4,
+   "total": -34891,
+   "win": 42.5,
+   "ci": [
+    -124,
+    89
+   ]
+  },
+  "quarters_positive": "5/13",
+  "worst_day": -10528,
+  "losing_day_pct": 56.7,
+  "max_dd": 102825
+ },
+ {
+  "und": "NIFTY",
+  "family": "AVGCROSS",
+  "dte": 6,
+  "train": {
+   "n": 883,
+   "per_trade": -121.7,
+   "total": -107500,
+   "win": 40.4,
+   "ci": [
+    -284,
+    36
+   ]
+  },
+  "val": {
+   "n": 324,
+   "per_trade": -134.3,
+   "total": -43518,
+   "win": 43.8,
+   "ci": [
+    -310,
+    58
+   ]
+  },
+  "test": {
+   "n": 415,
+   "per_trade": -21.4,
+   "total": -8881,
+   "win": 44.8,
+   "ci": [
+    -265,
+    233
+   ]
+  },
+  "new": {
+   "n": 6,
+   "per_trade": 983.6,
+   "total": 5902,
+   "win": 66.7,
+   "ci": null
+  },
+  "all": {
+   "n": 1632,
+   "per_trade": -91.4,
+   "total": -149242,
+   "win": 42.3,
+   "ci": [
+    -198,
+    22
+   ]
+  },
+  "quarters_positive": "4/13",
+  "worst_day": -12887,
+  "losing_day_pct": 58.1,
+  "max_dd": 183127
+ },
+ {
+  "und": "NIFTY",
+  "family": "SRBRK",
+  "dte": 1,
+  "train": {
+   "n": 1183,
+   "per_trade": 108.9,
+   "total": 128822,
+   "win": 41.2,
+   "ci": [
+    -30,
+    251
+   ]
+  },
+  "val": {
+   "n": 435,
+   "per_trade": 97.0,
+   "total": 42193,
+   "win": 46.0,
+   "ci": [
+    -75,
+    270
+   ]
+  },
+  "test": {
+   "n": 545,
+   "per_trade": 107.2,
+   "total": 58441,
+   "win": 44.2,
+   "ci": [
+    -119,
+    341
+   ]
+  },
+  "new": {
+   "n": 9,
+   "per_trade": -157.1,
+   "total": -1414,
+   "win": 33.3,
+   "ci": null
+  },
+  "all": {
+   "n": 2178,
+   "per_trade": 105.2,
+   "total": 229071,
+   "win": 42.8,
+   "ci": [
+    4,
+    206
+   ]
+  },
+  "quarters_positive": "10/13",
+  "worst_day": -9494,
+  "losing_day_pct": 57.1,
+  "max_dd": 43310
+ },
+ {
+  "und": "NIFTY",
+  "family": "SRBRK",
+  "dte": 3,
+  "train": {
+   "n": 1183,
+   "per_trade": 57.5,
+   "total": 68011,
+   "win": 42.4,
+   "ci": [
+    -94,
+    223
+   ]
+  },
+  "val": {
+   "n": 435,
+   "per_trade": -9.6,
+   "total": -4180,
+   "win": 47.1,
+   "ci": [
+    -189,
+    174
+   ]
+  },
+  "test": {
+   "n": 545,
+   "per_trade": 74.5,
+   "total": 40584,
+   "win": 46.4,
+   "ci": [
+    -165,
+    322
+   ]
+  },
+  "new": {
+   "n": 9,
+   "per_trade": -512.2,
+   "total": -4609,
+   "win": 44.4,
+   "ci": null
+  },
+  "all": {
+   "n": 2178,
+   "per_trade": 47.9,
+   "total": 104247,
+   "win": 44.4,
+   "ci": [
+    -58,
+    161
+   ]
+  },
+  "quarters_positive": "7/13",
+  "worst_day": -12106,
+  "losing_day_pct": 57.9,
+  "max_dd": 94347
+ },
+ {
+  "und": "NIFTY",
+  "family": "SRBRK",
+  "dte": 6,
+  "train": {
+   "n": 1183,
+   "per_trade": 16.6,
+   "total": 19602,
+   "win": 42.7,
+   "ci": [
+    -138,
+    183
+   ]
+  },
+  "val": {
+   "n": 435,
+   "per_trade": -89.7,
+   "total": -39040,
+   "win": 46.9,
+   "ci": [
+    -263,
+    93
+   ]
+  },
+  "test": {
+   "n": 545,
+   "per_trade": -6.4,
+   "total": -3509,
+   "win": 46.2,
+   "ci": [
+    -238,
+    238
+   ]
+  },
+  "new": {
+   "n": 9,
+   "per_trade": -408.6,
+   "total": -3678,
+   "win": 44.4,
+   "ci": null
+  },
+  "all": {
+   "n": 2178,
+   "per_trade": -10.2,
+   "total": -22193,
+   "win": 44.4,
+   "ci": [
+    -119,
+    104
+   ]
+  },
+  "quarters_positive": "8/13",
+  "worst_day": -13480,
+  "losing_day_pct": 60.3,
+  "max_dd": 133302
+ },
+ {
+  "und": "NIFTY",
+  "family": "RANDOM",
+  "dte": 1,
+  "train": {
+   "n": 810,
+   "per_trade": 31.7,
+   "total": 25706,
+   "win": 42.0,
+   "ci": [
+    -122,
+    184
+   ]
+  },
+  "val": {
+   "n": 294,
+   "per_trade": 212.5,
+   "total": 62467,
+   "win": 46.3,
+   "ci": [
+    2,
+    412
+   ]
+  },
+  "test": {
+   "n": 368,
+   "per_trade": 172.1,
+   "total": 63329,
+   "win": 45.4,
+   "ci": [
+    -70,
+    435
+   ]
+  },
+  "new": {
+   "n": 6,
+   "per_trade": 2742.7,
+   "total": 16456,
+   "win": 83.3,
+   "ci": null
+  },
+  "all": {
+   "n": 1482,
+   "per_trade": 109.2,
+   "total": 161790,
+   "win": 43.7,
+   "ci": [
+    -3,
+    227
+   ]
+  },
+  "quarters_positive": "11/13",
+  "worst_day": -7350,
+  "losing_day_pct": 52.8,
+  "max_dd": 55355
+ },
+ {
+  "und": "NIFTY",
+  "family": "RANDOM",
+  "dte": 3,
+  "train": {
+   "n": 810,
+   "per_trade": 5.6,
+   "total": 4525,
+   "win": 44.9,
+   "ci": [
+    -164,
+    176
+   ]
+  },
+  "val": {
+   "n": 294,
+   "per_trade": 159.0,
+   "total": 46757,
+   "win": 48.3,
+   "ci": [
+    -57,
+    372
+   ]
+  },
+  "test": {
+   "n": 368,
+   "per_trade": 43.1,
+   "total": 15860,
+   "win": 47.0,
+   "ci": [
+    -225,
+    314
+   ]
+  },
+  "new": {
+   "n": 6,
+   "per_trade": 2428.0,
+   "total": 14568,
+   "win": 83.3,
+   "ci": null
+  },
+  "all": {
+   "n": 1482,
+   "per_trade": 56.0,
+   "total": 83062,
+   "win": 46.2,
+   "ci": [
+    -70,
+    186
+   ]
+  },
+  "quarters_positive": "9/13",
+  "worst_day": -12154,
+  "losing_day_pct": 53.7,
+  "max_dd": 55827
+ },
+ {
+  "und": "NIFTY",
+  "family": "RANDOM",
+  "dte": 6,
+  "train": {
+   "n": 810,
+   "per_trade": -15.2,
+   "total": -12324,
+   "win": 45.1,
+   "ci": [
+    -197,
+    171
+   ]
+  },
+  "val": {
+   "n": 294,
+   "per_trade": 77.2,
+   "total": 22709,
+   "win": 48.0,
+   "ci": [
+    -137,
+    292
+   ]
+  },
+  "test": {
+   "n": 368,
+   "per_trade": -64.7,
+   "total": -23820,
+   "win": 47.0,
+   "ci": [
+    -347,
+    213
+   ]
+  },
+  "new": {
+   "n": 6,
+   "per_trade": 2313.8,
+   "total": 13883,
+   "win": 83.3,
+   "ci": null
+  },
+  "all": {
+   "n": 1482,
+   "per_trade": -0.9,
+   "total": -1387,
+   "win": 46.2,
+   "ci": [
+    -133,
+    139
+   ]
+  },
+  "quarters_positive": "7/13",
+  "worst_day": -15299,
+  "losing_day_pct": 54.7,
+  "max_dd": 61133
+ },
+ {
+  "und": "SENSEX",
+  "family": "MOMENTUM",
+  "dte": 1,
+  "train": {
+   "n": 366,
+   "per_trade": 201.8,
+   "total": 73858,
+   "win": 47.0,
+   "ci": [
+    -47,
+    429
+   ]
+  },
+  "val": {
+   "n": 102,
+   "per_trade": -28.1,
+   "total": -2863,
+   "win": 43.1,
+   "ci": [
+    -295,
+    271
+   ]
+  },
+  "test": {
+   "n": 149,
+   "per_trade": 447.0,
+   "total": 66597,
+   "win": 50.3,
+   "ci": [
+    55,
+    840
+   ]
+  },
+  "new": {
+   "n": 1,
+   "per_trade": -1991.2,
+   "total": -1991,
+   "win": 0.0,
+   "ci": null
+  },
+  "all": {
+   "n": 622,
+   "per_trade": 227.5,
+   "total": 141486,
+   "win": 47.3,
+   "ci": [
+    55,
+    415
+   ]
+  },
+  "quarters_positive": "9/13",
+  "worst_day": -5809,
+  "losing_day_pct": 50.2,
+  "max_dd": 45544
+ },
+ {
+  "und": "SENSEX",
+  "family": "MOMENTUM",
+  "dte": 3,
+  "train": {
+   "n": 366,
+   "per_trade": 274.5,
+   "total": 100454,
+   "win": 50.3,
+   "ci": [
+    -36,
+    602
+   ]
+  },
+  "val": {
+   "n": 102,
+   "per_trade": -22.9,
+   "total": -2340,
+   "win": 43.1,
+   "ci": [
+    -349,
+    326
+   ]
+  },
+  "test": {
+   "n": 149,
+   "per_trade": 364.0,
+   "total": 54233,
+   "win": 51.0,
+   "ci": [
+    -104,
+    817
+   ]
+  },
+  "new": {
+   "n": 1,
+   "per_trade": -2499.2,
+   "total": -2499,
+   "win": 0.0,
+   "ci": null
+  },
+  "all": {
+   "n": 622,
+   "per_trade": 256.3,
+   "total": 159439,
+   "win": 49.4,
+   "ci": [
+    28,
+    488
+   ]
+  },
+  "quarters_positive": "9/13",
+  "worst_day": -9062,
+  "losing_day_pct": 49.3,
+  "max_dd": 54170
+ },
+ {
+  "und": "SENSEX",
+  "family": "MOMENTUM",
+  "dte": 6,
+  "train": {
+   "n": 366,
+   "per_trade": 174.0,
+   "total": 63672,
+   "win": 50.3,
+   "ci": [
+    -129,
+    471
+   ]
+  },
+  "val": {
+   "n": 102,
+   "per_trade": -106.2,
+   "total": -10829,
+   "win": 42.2,
+   "ci": [
+    -411,
+    232
+   ]
+  },
+  "test": {
+   "n": 149,
+   "per_trade": 367.8,
+   "total": 54809,
+   "win": 50.3,
+   "ci": [
+    -106,
+    829
+   ]
+  },
+  "new": {
+   "n": 1,
+   "per_trade": -2547.7,
+   "total": -2548,
+   "win": 0.0,
+   "ci": null
+  },
+  "all": {
+   "n": 622,
+   "per_trade": 188.3,
+   "total": 117134,
+   "win": 49.0,
+   "ci": [
+    -36,
+    427
+   ]
+  },
+  "quarters_positive": "9/13",
+  "worst_day": -10344,
+  "losing_day_pct": 50.2,
+  "max_dd": 60631
+ },
+ {
+  "und": "SENSEX",
+  "family": "MOMENTUM_FLIP",
+  "dte": 1,
+  "train": {
+   "n": 366,
+   "per_trade": -50.0,
+   "total": -18299,
+   "win": 38.5,
+   "ci": [
+    -286,
+    192
+   ]
+  },
+  "val": {
+   "n": 102,
+   "per_trade": 2.9,
+   "total": 294,
+   "win": 43.1,
+   "ci": [
+    -267,
+    280
+   ]
+  },
+  "test": {
+   "n": 149,
+   "per_trade": -201.2,
+   "total": -29974,
+   "win": 36.2,
+   "ci": [
+    -567,
+    192
+   ]
+  },
+  "new": {
+   "n": 1,
+   "per_trade": 2941.9,
+   "total": 2942,
+   "win": 100.0,
+   "ci": null
+  },
+  "all": {
+   "n": 622,
+   "per_trade": -79.9,
+   "total": -49689,
+   "win": 38.7,
+   "ci": [
+    -259,
+    91
+   ]
+  },
+  "quarters_positive": "3/13",
+  "worst_day": -7640,
+  "losing_day_pct": 61.3,
+  "max_dd": 77570
+ },
+ {
+  "und": "SENSEX",
+  "family": "MOMENTUM_FLIP",
+  "dte": 3,
+  "train": {
+   "n": 366,
+   "per_trade": -129.0,
+   "total": -47231,
+   "win": 40.4,
+   "ci": [
+    -389,
+    142
+   ]
+  },
+  "val": {
+   "n": 102,
+   "per_trade": 2.8,
+   "total": 286,
+   "win": 47.1,
+   "ci": [
+    -295,
+    308
+   ]
+  },
+  "test": {
+   "n": 149,
+   "per_trade": -410.1,
+   "total": -61099,
+   "win": 36.9,
+   "ci": [
+    -779,
+    -15
+   ]
+  },
+  "new": {
+   "n": 1,
+   "per_trade": 2806.2,
+   "total": 2806,
+   "win": 100.0,
+   "ci": null
+  },
+  "all": {
+   "n": 622,
+   "per_trade": -180.0,
+   "total": -111961,
+   "win": 40.7,
+   "ci": [
+    -376,
+    14
+   ]
+  },
+  "quarters_positive": "3/13",
+  "worst_day": -10833,
+  "losing_day_pct": 60.9,
+  "max_dd": 128692
+ },
+ {
+  "und": "SENSEX",
+  "family": "MOMENTUM_FLIP",
+  "dte": 6,
+  "train": {
+   "n": 366,
+   "per_trade": -219.0,
+   "total": -80140,
+   "win": 41.0,
+   "ci": [
+    -501,
+    64
+   ]
+  },
+  "val": {
+   "n": 102,
+   "per_trade": -46.8,
+   "total": -4772,
+   "win": 46.1,
+   "ci": [
+    -380,
+    288
+   ]
+  },
+  "test": {
+   "n": 149,
+   "per_trade": -477.0,
+   "total": -71073,
+   "win": 37.6,
+   "ci": [
+    -863,
+    -77
+   ]
+  },
+  "new": {
+   "n": 1,
+   "per_trade": 2749.3,
+   "total": 2749,
+   "win": 100.0,
+   "ci": null
+  },
+  "all": {
+   "n": 622,
+   "per_trade": -259.7,
+   "total": -161554,
+   "win": 41.0,
+   "ci": [
+    -474,
+    -53
+   ]
+  },
+  "quarters_positive": "2/13",
+  "worst_day": -14749,
+  "losing_day_pct": 60.9,
+  "max_dd": 176496
+ },
+ {
+  "und": "SENSEX",
+  "family": "PDHL",
+  "dte": 1,
+  "train": {
+   "n": 318,
+   "per_trade": 187.8,
+   "total": 59723,
+   "win": 45.3,
+   "ci": [
+    -81,
+    472
+   ]
+  },
+  "val": {
+   "n": 120,
+   "per_trade": 26.9,
+   "total": 3233,
+   "win": 50.8,
+   "ci": [
+    -268,
+    342
+   ]
+  },
+  "test": {
+   "n": 151,
+   "per_trade": 174.1,
+   "total": 26284,
+   "win": 47.0,
+   "ci": [
+    -247,
+    612
+   ]
+  },
+  "new": {
+   "n": 3,
+   "per_trade": 461.7,
+   "total": 1385,
+   "win": 66.7,
+   "ci": null
+  },
+  "all": {
+   "n": 594,
+   "per_trade": 149.8,
+   "total": 89005,
+   "win": 47.0,
+   "ci": [
+    -44,
+    336
+   ]
+  },
+  "quarters_positive": "10/13",
+  "worst_day": -4231,
+  "losing_day_pct": 53.0,
+  "max_dd": 35002
+ },
+ {
+  "und": "SENSEX",
+  "family": "PDHL",
+  "dte": 3,
+  "train": {
+   "n": 318,
+   "per_trade": 121.2,
+   "total": 38535,
+   "win": 49.4,
+   "ci": [
+    -187,
+    407
+   ]
+  },
+  "val": {
+   "n": 120,
+   "per_trade": -20.0,
+   "total": -2397,
+   "win": 54.2,
+   "ci": [
+    -352,
+    317
+   ]
+  },
+  "test": {
+   "n": 151,
+   "per_trade": 35.6,
+   "total": 5370,
+   "win": 50.3,
+   "ci": [
+    -399,
+    474
+   ]
+  },
+  "new": {
+   "n": 3,
+   "per_trade": 557.1,
+   "total": 1671,
+   "win": 66.7,
+   "ci": null
+  },
+  "all": {
+   "n": 594,
+   "per_trade": 67.7,
+   "total": 40241,
+   "win": 50.7,
+   "ci": [
+    -144,
+    271
+   ]
+  },
+  "quarters_positive": "6/13",
+  "worst_day": -5725,
+  "losing_day_pct": 49.3,
+  "max_dd": 42090
+ },
+ {
+  "und": "SENSEX",
+  "family": "PDHL",
+  "dte": 6,
+  "train": {
+   "n": 318,
+   "per_trade": 187.7,
+   "total": 59702,
+   "win": 50.6,
+   "ci": [
+    -149,
+    515
+   ]
+  },
+  "val": {
+   "n": 120,
+   "per_trade": -46.3,
+   "total": -5553,
+   "win": 54.2,
+   "ci": [
+    -386,
+    329
+   ]
+  },
+  "test": {
+   "n": 151,
+   "per_trade": 11.3,
+   "total": 1706,
+   "win": 49.7,
+   "ci": [
+    -429,
+    454
+   ]
+  },
+  "new": {
+   "n": 3,
+   "per_trade": 525.5,
+   "total": 1577,
+   "win": 66.7,
+   "ci": null
+  },
+  "all": {
+   "n": 594,
+   "per_trade": 89.4,
+   "total": 53075,
+   "win": 51.2,
+   "ci": [
+    -122,
+    307
+   ]
+  },
+  "quarters_positive": "6/13",
+  "worst_day": -7981,
+  "losing_day_pct": 48.8,
+  "max_dd": 42376
+ },
+ {
+  "und": "SENSEX",
+  "family": "ORB15",
+  "dte": 1,
+  "train": {
+   "n": 390,
+   "per_trade": 91.5,
+   "total": 35697,
+   "win": 42.1,
+   "ci": [
+    -143,
+    330
+   ]
+  },
+  "val": {
+   "n": 141,
+   "per_trade": -34.8,
+   "total": -4911,
+   "win": 41.8,
+   "ci": [
+    -300,
+    252
+   ]
+  },
+  "test": {
+   "n": 176,
+   "per_trade": -210.2,
+   "total": -36991,
+   "win": 38.1,
+   "ci": [
+    -543,
+    140
+   ]
+  },
+  "new": {
+   "n": 2,
+   "per_trade": -304.1,
+   "total": -608,
+   "win": 0.0,
+   "ci": null
+  },
+  "all": {
+   "n": 711,
+   "per_trade": -12.7,
+   "total": -9025,
+   "win": 40.8,
+   "ci": [
+    -189,
+    154
+   ]
+  },
+  "quarters_positive": "6/13",
+  "worst_day": -4234,
+  "losing_day_pct": 59.2,
+  "max_dd": 97195
+ },
+ {
+  "und": "SENSEX",
+  "family": "ORB15",
+  "dte": 3,
+  "train": {
+   "n": 390,
+   "per_trade": 47.8,
+   "total": 18647,
+   "win": 45.9,
+   "ci": [
+    -213,
+    324
+   ]
+  },
+  "val": {
+   "n": 141,
+   "per_trade": -125.5,
+   "total": -17696,
+   "win": 44.0,
+   "ci": [
+    -436,
+    197
+   ]
+  },
+  "test": {
+   "n": 176,
+   "per_trade": -278.6,
+   "total": -49042,
+   "win": 40.9,
+   "ci": [
+    -646,
+    112
+   ]
+  },
+  "new": {
+   "n": 2,
+   "per_trade": -273.1,
+   "total": -546,
+   "win": 0.0,
+   "ci": null
+  },
+  "all": {
+   "n": 711,
+   "per_trade": -73.4,
+   "total": -52168,
+   "win": 44.0,
+   "ci": [
+    -269,
+    116
+   ]
+  },
+  "quarters_positive": "4/13",
+  "worst_day": -6529,
+  "losing_day_pct": 56.0,
+  "max_dd": 135857
+ },
+ {
+  "und": "SENSEX",
+  "family": "ORB15",
+  "dte": 6,
+  "train": {
+   "n": 390,
+   "per_trade": -24.9,
+   "total": -9724,
+   "win": 45.6,
+   "ci": [
+    -298,
+    259
+   ]
+  },
+  "val": {
+   "n": 141,
+   "per_trade": -271.5,
+   "total": -38287,
+   "win": 43.3,
+   "ci": [
+    -567,
+    42
+   ]
+  },
+  "test": {
+   "n": 176,
+   "per_trade": -312.6,
+   "total": -55016,
+   "win": 40.3,
+   "ci": [
+    -697,
+    76
+   ]
+  },
+  "new": {
+   "n": 2,
+   "per_trade": -282.6,
+   "total": -565,
+   "win": 0.0,
+   "ci": null
+  },
+  "all": {
+   "n": 711,
+   "per_trade": -152.7,
+   "total": -108552,
+   "win": 43.6,
+   "ci": [
+    -345,
+    49
+   ]
+  },
+  "quarters_positive": "4/13",
+  "worst_day": -7848,
+  "losing_day_pct": 56.4,
+  "max_dd": 197760
+ },
+ {
+  "und": "SENSEX",
+  "family": "AVGREJECT",
+  "dte": 1,
+  "train": {
+   "n": 874,
+   "per_trade": -41.9,
+   "total": -36617,
+   "win": 40.6,
+   "ci": [
+    -180,
+    104
+   ]
+  },
+  "val": {
+   "n": 326,
+   "per_trade": 54.3,
+   "total": 17704,
+   "win": 44.8,
+   "ci": [
+    -141,
+    251
+   ]
+  },
+  "test": {
+   "n": 406,
+   "per_trade": -53.2,
+   "total": -21592,
+   "win": 43.8,
+   "ci": [
+    -259,
+    161
+   ]
+  },
+  "new": {
+   "n": 7,
+   "per_trade": 447.5,
+   "total": 3133,
+   "win": 71.4,
+   "ci": null
+  },
+  "all": {
+   "n": 1617,
+   "per_trade": -21.7,
+   "total": -35044,
+   "win": 42.4,
+   "ci": [
+    -117,
+    82
+   ]
+  },
+  "quarters_positive": "5/13",
+  "worst_day": -7555,
+  "losing_day_pct": 55.4,
+  "max_dd": 79327
+ },
+ {
+  "und": "SENSEX",
+  "family": "AVGREJECT",
+  "dte": 3,
+  "train": {
+   "n": 874,
+   "per_trade": -104.1,
+   "total": -91007,
+   "win": 42.8,
+   "ci": [
+    -262,
+    58
+   ]
+  },
+  "val": {
+   "n": 326,
+   "per_trade": 41.7,
+   "total": 13606,
+   "win": 47.5,
+   "ci": [
+    -147,
+    247
+   ]
+  },
+  "test": {
+   "n": 406,
+   "per_trade": -136.2,
+   "total": -55302,
+   "win": 46.1,
+   "ci": [
+    -360,
+    91
+   ]
+  },
+  "new": {
+   "n": 7,
+   "per_trade": 223.0,
+   "total": 1561,
+   "win": 71.4,
+   "ci": null
+  },
+  "all": {
+   "n": 1617,
+   "per_trade": -79.1,
+   "total": -127925,
+   "win": 44.7,
+   "ci": [
+    -183,
+    28
+   ]
+  },
+  "quarters_positive": "6/13",
+  "worst_day": -11976,
+  "losing_day_pct": 55.9,
+  "max_dd": 146678
+ },
+ {
+  "und": "SENSEX",
+  "family": "AVGREJECT",
+  "dte": 6,
+  "train": {
+   "n": 874,
+   "per_trade": -182.9,
+   "total": -159895,
+   "win": 42.7,
+   "ci": [
+    -339,
+    -19
+   ]
+  },
+  "val": {
+   "n": 326,
+   "per_trade": -17.8,
+   "total": -5807,
+   "win": 47.2,
+   "ci": [
+    -215,
+    199
+   ]
+  },
+  "test": {
+   "n": 406,
+   "per_trade": -200.7,
+   "total": -81490,
+   "win": 45.8,
+   "ci": [
+    -423,
+    29
+   ]
+  },
+  "new": {
+   "n": 7,
+   "per_trade": 297.2,
+   "total": 2081,
+   "win": 71.4,
+   "ci": null
+  },
+  "all": {
+   "n": 1617,
+   "per_trade": -149.7,
+   "total": -242022,
+   "win": 44.5,
+   "ci": [
+    -257,
+    -40
+   ]
+  },
+  "quarters_positive": "3/13",
+  "worst_day": -16966,
+  "losing_day_pct": 56.2,
+  "max_dd": 256446
+ },
+ {
+  "und": "SENSEX",
+  "family": "AVGCROSS",
+  "dte": 1,
+  "train": {
+   "n": 903,
+   "per_trade": 10.6,
+   "total": 9548,
+   "win": 37.9,
+   "ci": [
+    -123,
+    146
+   ]
+  },
+  "val": {
+   "n": 331,
+   "per_trade": 95.8,
+   "total": 31721,
+   "win": 45.3,
+   "ci": [
+    -78,
+    278
+   ]
+  },
+  "test": {
+   "n": 408,
+   "per_trade": 141.5,
+   "total": 57748,
+   "win": 42.6,
+   "ci": [
+    -72,
+    365
+   ]
+  },
+  "new": {
+   "n": 6,
+   "per_trade": 1017.4,
+   "total": 6104,
+   "win": 50.0,
+   "ci": null
+  },
+  "all": {
+   "n": 1651,
+   "per_trade": 62.2,
+   "total": 102642,
+   "win": 40.6,
+   "ci": [
+    -31,
+    165
+   ]
+  },
+  "quarters_positive": "6/13",
+  "worst_day": -7422,
+  "losing_day_pct": 54.7,
+  "max_dd": 47794
+ },
+ {
+  "und": "SENSEX",
+  "family": "AVGCROSS",
+  "dte": 3,
+  "train": {
+   "n": 903,
+   "per_trade": -65.3,
+   "total": -58980,
+   "win": 39.5,
+   "ci": [
+    -216,
+    94
+   ]
+  },
+  "val": {
+   "n": 331,
+   "per_trade": -16.8,
+   "total": -5559,
+   "win": 46.2,
+   "ci": [
+    -203,
+    182
+   ]
+  },
+  "test": {
+   "n": 408,
+   "per_trade": 118.0,
+   "total": 48126,
+   "win": 45.1,
+   "ci": [
+    -123,
+    385
+   ]
+  },
+  "new": {
+   "n": 6,
+   "per_trade": 667.0,
+   "total": 4002,
+   "win": 50.0,
+   "ci": null
+  },
+  "all": {
+   "n": 1651,
+   "per_trade": -3.5,
+   "total": -5749,
+   "win": 42.3,
+   "ci": [
+    -112,
+    112
+   ]
+  },
+  "quarters_positive": "5/13",
+  "worst_day": -10043,
+  "losing_day_pct": 56.9,
+  "max_dd": 118917
+ },
+ {
+  "und": "SENSEX",
+  "family": "AVGCROSS",
+  "dte": 6,
+  "train": {
+   "n": 903,
+   "per_trade": -121.1,
+   "total": -109328,
+   "win": 39.4,
+   "ci": [
+    -277,
+    39
+   ]
+  },
+  "val": {
+   "n": 331,
+   "per_trade": -72.1,
+   "total": -23872,
+   "win": 46.5,
+   "ci": [
+    -257,
+    124
+   ]
+  },
+  "test": {
+   "n": 408,
+   "per_trade": 56.2,
+   "total": 22929,
+   "win": 45.3,
+   "ci": [
+    -195,
+    322
+   ]
+  },
+  "new": {
+   "n": 6,
+   "per_trade": 703.4,
+   "total": 4220,
+   "win": 50.0,
+   "ci": null
+  },
+  "all": {
+   "n": 1651,
+   "per_trade": -58.6,
+   "total": -96765,
+   "win": 42.4,
+   "ci": [
+    -174,
+    52
+   ]
+  },
+  "quarters_positive": "5/13",
+  "worst_day": -11447,
+  "losing_day_pct": 57.7,
+  "max_dd": 171381
+ },
+ {
+  "und": "SENSEX",
+  "family": "SRBRK",
+  "dte": 1,
+  "train": {
+   "n": 1178,
+   "per_trade": 99.8,
+   "total": 117539,
+   "win": 41.3,
+   "ci": [
+    -41,
+    241
+   ]
+  },
+  "val": {
+   "n": 436,
+   "per_trade": 123.9,
+   "total": 54036,
+   "win": 48.4,
+   "ci": [
+    -52,
+    309
+   ]
+  },
+  "test": {
+   "n": 545,
+   "per_trade": 177.5,
+   "total": 96714,
+   "win": 45.0,
+   "ci": [
+    -49,
+    428
+   ]
+  },
+  "new": {
+   "n": 9,
+   "per_trade": 116.2,
+   "total": 1045,
+   "win": 33.3,
+   "ci": null
+  },
+  "all": {
+   "n": 2174,
+   "per_trade": 124.4,
+   "total": 270412,
+   "win": 43.6,
+   "ci": [
+    21,
+    226
+   ]
+  },
+  "quarters_positive": "10/13",
+  "worst_day": -9702,
+  "losing_day_pct": 56.0,
+  "max_dd": 43418
+ },
+ {
+  "und": "SENSEX",
+  "family": "SRBRK",
+  "dte": 3,
+  "train": {
+   "n": 1178,
+   "per_trade": 52.2,
+   "total": 61451,
+   "win": 42.6,
+   "ci": [
+    -101,
+    204
+   ]
+  },
+  "val": {
+   "n": 436,
+   "per_trade": 33.3,
+   "total": 14527,
+   "win": 50.0,
+   "ci": [
+    -143,
+    218
+   ]
+  },
+  "test": {
+   "n": 545,
+   "per_trade": 127.7,
+   "total": 69596,
+   "win": 47.9,
+   "ci": [
+    -112,
+    390
+   ]
+  },
+  "new": {
+   "n": 9,
+   "per_trade": -128.2,
+   "total": -1154,
+   "win": 33.3,
+   "ci": null
+  },
+  "all": {
+   "n": 2174,
+   "per_trade": 68.8,
+   "total": 149629,
+   "win": 45.4,
+   "ci": [
+    -43,
+    182
+   ]
+  },
+  "quarters_positive": "9/13",
+  "worst_day": -13019,
+  "losing_day_pct": 56.7,
+  "max_dd": 70952
+ },
+ {
+  "und": "SENSEX",
+  "family": "SRBRK",
+  "dte": 6,
+  "train": {
+   "n": 1178,
+   "per_trade": -4.1,
+   "total": -4828,
+   "win": 42.9,
+   "ci": [
+    -161,
+    154
+   ]
+  },
+  "val": {
+   "n": 436,
+   "per_trade": -46.6,
+   "total": -20318,
+   "win": 49.5,
+   "ci": [
+    -221,
+    134
+   ]
+  },
+  "test": {
+   "n": 545,
+   "per_trade": 63.9,
+   "total": 34835,
+   "win": 47.7,
+   "ci": [
+    -176,
+    331
+   ]
+  },
+  "new": {
+   "n": 9,
+   "per_trade": -173.8,
+   "total": -1564,
+   "win": 33.3,
+   "ci": null
+  },
+  "all": {
+   "n": 2174,
+   "per_trade": 6.0,
+   "total": 12974,
+   "win": 45.4,
+   "ci": [
+    -106,
+    122
+   ]
+  },
+  "quarters_positive": "7/13",
+  "worst_day": -15923,
+  "losing_day_pct": 58.7,
+  "max_dd": 115930
+ },
+ {
+  "und": "SENSEX",
+  "family": "RANDOM",
+  "dte": 1,
+  "train": {
+   "n": 810,
+   "per_trade": 59.4,
+   "total": 48102,
+   "win": 42.2,
+   "ci": [
+    -89,
+    215
+   ]
+  },
+  "val": {
+   "n": 294,
+   "per_trade": 216.6,
+   "total": 63691,
+   "win": 47.3,
+   "ci": [
+    12,
+    417
+   ]
+  },
+  "test": {
+   "n": 368,
+   "per_trade": 173.0,
+   "total": 63663,
+   "win": 46.5,
+   "ci": [
+    -76,
+    436
+   ]
+  },
+  "new": {
+   "n": 6,
+   "per_trade": 2827.7,
+   "total": 16966,
+   "win": 83.3,
+   "ci": null
+  },
+  "all": {
+   "n": 1482,
+   "per_trade": 125.2,
+   "total": 185594,
+   "win": 44.3,
+   "ci": [
+    14,
+    243
+   ]
+  },
+  "quarters_positive": "11/13",
+  "worst_day": -7297,
+  "losing_day_pct": 51.4,
+  "max_dd": 50963
+ },
+ {
+  "und": "SENSEX",
+  "family": "RANDOM",
+  "dte": 3,
+  "train": {
+   "n": 810,
+   "per_trade": -0.5,
+   "total": -371,
+   "win": 45.1,
+   "ci": [
+    -167,
+    166
+   ]
+  },
+  "val": {
+   "n": 294,
+   "per_trade": 146.1,
+   "total": 42956,
+   "win": 48.6,
+   "ci": [
+    -74,
+    361
+   ]
+  },
+  "test": {
+   "n": 368,
+   "per_trade": 43.1,
+   "total": 15879,
+   "win": 48.1,
+   "ci": [
+    -237,
+    322
+   ]
+  },
+  "new": {
+   "n": 6,
+   "per_trade": 2615.6,
+   "total": 15694,
+   "win": 83.3,
+   "ci": null
+  },
+  "all": {
+   "n": 1482,
+   "per_trade": 50.2,
+   "total": 74340,
+   "win": 46.6,
+   "ci": [
+    -74,
+    181
+   ]
+  },
+  "quarters_positive": "9/13",
+  "worst_day": -11658,
+  "losing_day_pct": 52.2,
+  "max_dd": 57107
+ },
+ {
+  "und": "SENSEX",
+  "family": "RANDOM",
+  "dte": 6,
+  "train": {
+   "n": 810,
+   "per_trade": -55.1,
+   "total": -44652,
+   "win": 45.2,
+   "ci": [
+    -225,
+    116
+   ]
+  },
+  "val": {
+   "n": 294,
+   "per_trade": 70.5,
+   "total": 20721,
+   "win": 48.6,
+   "ci": [
+    -142,
+    281
+   ]
+  },
+  "test": {
+   "n": 368,
+   "per_trade": -61.0,
+   "total": -22447,
+   "win": 48.1,
+   "ci": [
+    -351,
+    228
+   ]
+  },
+  "new": {
+   "n": 6,
+   "per_trade": 2502.7,
+   "total": 15016,
+   "win": 83.3,
+   "ci": null
+  },
+  "all": {
+   "n": 1482,
+   "per_trade": -23.0,
+   "total": -34143,
+   "win": 46.7,
+   "ci": [
+    -150,
+    105
+   ]
+  },
+  "quarters_positive": "5/13",
+  "worst_day": -15239,
+  "losing_day_pct": 54.1,
+  "max_dd": 79506
+ },
+ {
+  "und": "BANKNIFTY",
+  "family": "MOMENTUM",
+  "dte": 3,
+  "train": {
+   "n": 269,
+   "per_trade": 300.4,
+   "total": 80821,
+   "win": 45.7,
+   "ci": [
+    -122,
+    756
+   ]
+  },
+  "val": {
+   "n": 78,
+   "per_trade": -49.3,
+   "total": -3846,
+   "win": 39.7,
+   "ci": [
+    -522,
+    439
+   ]
+  },
+  "test": {
+   "n": 137,
+   "per_trade": 281.5,
+   "total": 38563,
+   "win": 44.5,
+   "ci": [
+    -395,
+    1011
+   ]
+  },
+  "new": {
+   "n": 1,
+   "per_trade": -3769.7,
+   "total": -3770,
+   "win": 0.0,
+   "ci": null
+  },
+  "all": {
+   "n": 487,
+   "per_trade": 249.5,
+   "total": 121517,
+   "win": 44.6,
+   "ci": [
+    -54,
+    575
+   ]
+  },
+  "quarters_positive": "9/13",
+  "worst_day": -12121,
+  "losing_day_pct": 53.9,
+  "max_dd": 52623
+ },
+ {
+  "und": "BANKNIFTY",
+  "family": "MOMENTUM",
+  "dte": 10,
+  "train": {
+   "n": 269,
+   "per_trade": 186.0,
+   "total": 50024,
+   "win": 48.0,
+   "ci": [
+    -273,
+    665
+   ]
+  },
+  "val": {
+   "n": 78,
+   "per_trade": -150.3,
+   "total": -11727,
+   "win": 38.5,
+   "ci": [
+    -642,
+    358
+   ]
+  },
+  "test": {
+   "n": 137,
+   "per_trade": 191.0,
+   "total": 26172,
+   "win": 43.8,
+   "ci": [
+    -510,
+    965
+   ]
+  },
+  "new": {
+   "n": 1,
+   "per_trade": -3052.9,
+   "total": -3053,
+   "win": 0.0,
+   "ci": null
+  },
+  "all": {
+   "n": 487,
+   "per_trade": 157.5,
+   "total": 76712,
+   "win": 45.4,
+   "ci": [
+    -158,
+    504
+   ]
+  },
+  "quarters_positive": "8/13",
+  "worst_day": -11628,
+  "losing_day_pct": 55.2,
+  "max_dd": 56920
+ },
+ {
+  "und": "BANKNIFTY",
+  "family": "MOMENTUM_FLIP",
+  "dte": 3,
+  "train": {
+   "n": 269,
+   "per_trade": -48.3,
+   "total": -12992,
+   "win": 44.2,
+   "ci": [
+    -466,
+    388
+   ]
+  },
+  "val": {
+   "n": 78,
+   "per_trade": 199.7,
+   "total": 15580,
+   "win": 50.0,
+   "ci": [
+    -316,
+    735
+   ]
+  },
+  "test": {
+   "n": 137,
+   "per_trade": 6.7,
+   "total": 923,
+   "win": 47.4,
+   "ci": [
+    -518,
+    542
+   ]
+  },
+  "new": {
+   "n": 1,
+   "per_trade": 3265.8,
+   "total": 3266,
+   "win": 100.0,
+   "ci": null
+  },
+  "all": {
+   "n": 487,
+   "per_trade": 3.2,
+   "total": 1571,
+   "win": 46.0,
+   "ci": [
+    -286,
+    284
+   ]
+  },
+  "quarters_positive": "7/13",
+  "worst_day": -10571,
+  "losing_day_pct": 54.5,
+  "max_dd": 58061
+ },
+ {
+  "und": "BANKNIFTY",
+  "family": "MOMENTUM_FLIP",
+  "dte": 10,
+  "train": {
+   "n": 269,
+   "per_trade": -253.2,
+   "total": -68119,
+   "win": 45.0,
+   "ci": [
+    -727,
+    218
+   ]
+  },
+  "val": {
+   "n": 78,
+   "per_trade": 124.7,
+   "total": 9727,
+   "win": 50.0,
+   "ci": [
+    -436,
+    747
+   ]
+  },
+  "test": {
+   "n": 137,
+   "per_trade": -262.0,
+   "total": -35895,
+   "win": 48.2,
+   "ci": [
+    -869,
+    309
+   ]
+  },
+  "new": {
+   "n": 1,
+   "per_trade": 3197.5,
+   "total": 3197,
+   "win": 100.0,
+   "ci": null
+  },
+  "all": {
+   "n": 487,
+   "per_trade": -204.1,
+   "total": -99420,
+   "win": 46.6,
+   "ci": [
+    -528,
+    92
+   ]
+  },
+  "quarters_positive": "4/13",
+  "worst_day": -20009,
+  "losing_day_pct": 53.9,
+  "max_dd": 127603
+ },
+ {
+  "und": "BANKNIFTY",
+  "family": "PDHL",
+  "dte": 3,
+  "train": {
+   "n": 327,
+   "per_trade": 104.5,
+   "total": 34182,
+   "win": 44.0,
+   "ci": [
+    -314,
+    508
+   ]
+  },
+  "val": {
+   "n": 116,
+   "per_trade": 92.5,
+   "total": 10729,
+   "win": 48.3,
+   "ci": [
+    -330,
+    514
+   ]
+  },
+  "test": {
+   "n": 154,
+   "per_trade": -164.0,
+   "total": -25261,
+   "win": 45.5,
+   "ci": [
+    -633,
+    345
+   ]
+  },
+  "new": {
+   "n": 2,
+   "per_trade": 872.0,
+   "total": 1744,
+   "win": 50.0,
+   "ci": null
+  },
+  "all": {
+   "n": 601,
+   "per_trade": 46.7,
+   "total": 28064,
+   "win": 45.3,
+   "ci": [
+    -223,
+    307
+   ]
+  },
+  "quarters_positive": "6/13",
+  "worst_day": -7598,
+  "losing_day_pct": 54.7,
+  "max_dd": 68439
+ },
+ {
+  "und": "BANKNIFTY",
+  "family": "PDHL",
+  "dte": 10,
+  "train": {
+   "n": 327,
+   "per_trade": 25.6,
+   "total": 8375,
+   "win": 45.3,
+   "ci": [
+    -384,
+    431
+   ]
+  },
+  "val": {
+   "n": 116,
+   "per_trade": -28.0,
+   "total": -3249,
+   "win": 48.3,
+   "ci": [
+    -503,
+    484
+   ]
+  },
+  "test": {
+   "n": 154,
+   "per_trade": -284.8,
+   "total": -43857,
+   "win": 46.1,
+   "ci": [
+    -775,
+    217
+   ]
+  },
+  "new": {
+   "n": 2,
+   "per_trade": 794.3,
+   "total": 1589,
+   "win": 50.0,
+   "ci": null
+  },
+  "all": {
+   "n": 601,
+   "per_trade": -41.6,
+   "total": -25021,
+   "win": 46.1,
+   "ci": [
+    -341,
+    243
+   ]
+  },
+  "quarters_positive": "5/13",
+  "worst_day": -8847,
+  "losing_day_pct": 53.9,
+  "max_dd": 88274
+ },
+ {
+  "und": "BANKNIFTY",
+  "family": "ORB15",
+  "dte": 3,
+  "train": {
+   "n": 390,
+   "per_trade": 162.3,
+   "total": 63301,
+   "win": 43.6,
+   "ci": [
+    -192,
+    516
+   ]
+  },
+  "val": {
+   "n": 141,
+   "per_trade": -162.9,
+   "total": -22962,
+   "win": 43.3,
+   "ci": [
+    -526,
+    204
+   ]
+  },
+  "test": {
+   "n": 171,
+   "per_trade": -51.9,
+   "total": -8882,
+   "win": 45.6,
+   "ci": [
+    -506,
+    409
+   ]
+  },
+  "new": {
+   "n": 3,
+   "per_trade": -1925.9,
+   "total": -5778,
+   "win": 33.3,
+   "ci": null
+  },
+  "all": {
+   "n": 707,
+   "per_trade": 29.3,
+   "total": 20745,
+   "win": 43.8,
+   "ci": [
+    -212,
+    272
+   ]
+  },
+  "quarters_positive": "7/13",
+  "worst_day": -6457,
+  "losing_day_pct": 56.2,
+  "max_dd": 79075
+ },
+ {
+  "und": "BANKNIFTY",
+  "family": "ORB15",
+  "dte": 10,
+  "train": {
+   "n": 390,
+   "per_trade": 20.2,
+   "total": 7894,
+   "win": 44.6,
+   "ci": [
+    -346,
+    408
+   ]
+  },
+  "val": {
+   "n": 141,
+   "per_trade": -276.7,
+   "total": -39014,
+   "win": 43.3,
+   "ci": [
+    -696,
+    148
+   ]
+  },
+  "test": {
+   "n": 171,
+   "per_trade": -205.9,
+   "total": -35204,
+   "win": 45.0,
+   "ci": [
+    -684,
+    273
+   ]
+  },
+  "new": {
+   "n": 3,
+   "per_trade": -1908.6,
+   "total": -5726,
+   "win": 33.3,
+   "ci": null
+  },
+  "all": {
+   "n": 707,
+   "per_trade": -113.4,
+   "total": -80194,
+   "win": 44.3,
+   "ci": [
+    -370,
+    146
+   ]
+  },
+  "quarters_positive": "4/13",
+  "worst_day": -11262,
+  "losing_day_pct": 55.7,
+  "max_dd": 130330
+ },
+ {
+  "und": "BANKNIFTY",
+  "family": "AVGREJECT",
+  "dte": 3,
+  "train": {
+   "n": 916,
+   "per_trade": 126.9,
+   "total": 116273,
+   "win": 45.0,
+   "ci": [
+    -94,
+    371
+   ]
+  },
+  "val": {
+   "n": 362,
+   "per_trade": -144.0,
+   "total": -52136,
+   "win": 43.6,
+   "ci": [
+    -364,
+    75
+   ]
+  },
+  "test": {
+   "n": 431,
+   "per_trade": 13.7,
+   "total": 5897,
+   "win": 45.5,
+   "ci": [
+    -267,
+    305
+   ]
+  },
+  "new": {
+   "n": 9,
+   "per_trade": -576.6,
+   "total": -5190,
+   "win": 44.4,
+   "ci": null
+  },
+  "all": {
+   "n": 1721,
+   "per_trade": 37.7,
+   "total": 64891,
+   "win": 44.8,
+   "ci": [
+    -112,
+    198
+   ]
+  },
+  "quarters_positive": "7/13",
+  "worst_day": -13808,
+  "losing_day_pct": 56.0,
+  "max_dd": 141918
+ },
+ {
+  "und": "BANKNIFTY",
+  "family": "AVGREJECT",
+  "dte": 10,
+  "train": {
+   "n": 916,
+   "per_trade": 71.1,
+   "total": 65109,
+   "win": 45.6,
+   "ci": [
+    -162,
+    323
+   ]
+  },
+  "val": {
+   "n": 362,
+   "per_trade": -264.0,
+   "total": -95577,
+   "win": 43.1,
+   "ci": [
+    -508,
+    -34
+   ]
+  },
+  "test": {
+   "n": 431,
+   "per_trade": -249.1,
+   "total": -107370,
+   "win": 44.8,
+   "ci": [
+    -552,
+    55
+   ]
+  },
+  "new": {
+   "n": 9,
+   "per_trade": -594.2,
+   "total": -5347,
+   "win": 44.4,
+   "ci": null
+  },
+  "all": {
+   "n": 1721,
+   "per_trade": -83.9,
+   "total": -144379,
+   "win": 44.9,
+   "ci": [
+    -241,
+    86
+   ]
+  },
+  "quarters_positive": "5/13",
+  "worst_day": -16445,
+  "losing_day_pct": 56.7,
+  "max_dd": 304990
+ },
+ {
+  "und": "BANKNIFTY",
+  "family": "AVGCROSS",
+  "dte": 3,
+  "train": {
+   "n": 906,
+   "per_trade": -25.6,
+   "total": -23156,
+   "win": 43.4,
+   "ci": [
+    -209,
+    159
+   ]
+  },
+  "val": {
+   "n": 337,
+   "per_trade": -10.5,
+   "total": -3549,
+   "win": 44.5,
+   "ci": [
+    -230,
+    217
+   ]
+  },
+  "test": {
+   "n": 436,
+   "per_trade": 4.3,
+   "total": 1874,
+   "win": 43.8,
+   "ci": [
+    -316,
+    338
+   ]
+  },
+  "new": {
+   "n": 8,
+   "per_trade": -107.8,
+   "total": -862,
+   "win": 50.0,
+   "ci": null
+  },
+  "all": {
+   "n": 1692,
+   "per_trade": -14.4,
+   "total": -24300,
+   "win": 43.7,
+   "ci": [
+    -156,
+    122
+   ]
+  },
+  "quarters_positive": "5/13",
+  "worst_day": -13901,
+  "losing_day_pct": 57.8,
+  "max_dd": 140951
+ },
+ {
+  "und": "BANKNIFTY",
+  "family": "AVGCROSS",
+  "dte": 10,
+  "train": {
+   "n": 906,
+   "per_trade": -170.8,
+   "total": -154706,
+   "win": 43.4,
+   "ci": [
+    -374,
+    40
+   ]
+  },
+  "val": {
+   "n": 337,
+   "per_trade": -148.2,
+   "total": -49934,
+   "win": 44.5,
+   "ci": [
+    -364,
+    71
+   ]
+  },
+  "test": {
+   "n": 436,
+   "per_trade": -145.2,
+   "total": -63327,
+   "win": 43.8,
+   "ci": [
+    -488,
+    195
+   ]
+  },
+  "new": {
+   "n": 8,
+   "per_trade": -161.2,
+   "total": -1289,
+   "win": 50.0,
+   "ci": null
+  },
+  "all": {
+   "n": 1692,
+   "per_trade": -153.0,
+   "total": -258876,
+   "win": 43.8,
+   "ci": [
+    -307,
+    -6
+   ]
+  },
+  "quarters_positive": "3/13",
+  "worst_day": -21316,
+  "losing_day_pct": 59.2,
+  "max_dd": 289372
+ },
+ {
+  "und": "BANKNIFTY",
+  "family": "SRBRK",
+  "dte": 3,
+  "train": {
+   "n": 1169,
+   "per_trade": 25.2,
+   "total": 29514,
+   "win": 41.3,
+   "ci": [
+    -182,
+    230
+   ]
+  },
+  "val": {
+   "n": 429,
+   "per_trade": -27.8,
+   "total": -11944,
+   "win": 43.4,
+   "ci": [
+    -253,
+    195
+   ]
+  },
+  "test": {
+   "n": 537,
+   "per_trade": 228.5,
+   "total": 122712,
+   "win": 47.3,
+   "ci": [
+    -55,
+    532
+   ]
+  },
+  "new": {
+   "n": 9,
+   "per_trade": -979.9,
+   "total": -8819,
+   "win": 44.4,
+   "ci": null
+  },
+  "all": {
+   "n": 2150,
+   "per_trade": 68.8,
+   "total": 147825,
+   "win": 43.3,
+   "ci": [
+    -71,
+    214
+   ]
+  },
+  "quarters_positive": "8/13",
+  "worst_day": -12891,
+  "losing_day_pct": 60.9,
+  "max_dd": 137967
+ },
+ {
+  "und": "BANKNIFTY",
+  "family": "SRBRK",
+  "dte": 10,
+  "train": {
+   "n": 1169,
+   "per_trade": -123.8,
+   "total": -144761,
+   "win": 42.0,
+   "ci": [
+    -330,
+    88
+   ]
+  },
+  "val": {
+   "n": 429,
+   "per_trade": -225.0,
+   "total": -96534,
+   "win": 43.4,
+   "ci": [
+    -440,
+    -8
+   ]
+  },
+  "test": {
+   "n": 537,
+   "per_trade": 54.8,
+   "total": 29440,
+   "win": 46.7,
+   "ci": [
+    -226,
+    355
+   ]
+  },
+  "new": {
+   "n": 9,
+   "per_trade": -1125.4,
+   "total": -10129,
+   "win": 44.4,
+   "ci": null
+  },
+  "all": {
+   "n": 2150,
+   "per_trade": -93.0,
+   "total": -199944,
+   "win": 43.5,
+   "ci": [
+    -231,
+    59
+   ]
+  },
+  "quarters_positive": "4/13",
+  "worst_day": -18222,
+  "losing_day_pct": 62.8,
+  "max_dd": 292002
+ },
+ {
+  "und": "BANKNIFTY",
+  "family": "RANDOM",
+  "dte": 3,
+  "train": {
+   "n": 810,
+   "per_trade": -10.4,
+   "total": -8395,
+   "win": 42.7,
+   "ci": [
+    -223,
+    204
+   ]
+  },
+  "val": {
+   "n": 294,
+   "per_trade": 315.2,
+   "total": 92655,
+   "win": 48.0,
+   "ci": [
+    4,
+    625
+   ]
+  },
+  "test": {
+   "n": 368,
+   "per_trade": 13.2,
+   "total": 4858,
+   "win": 45.7,
+   "ci": [
+    -328,
+    358
+   ]
+  },
+  "new": {
+   "n": 6,
+   "per_trade": 1402.6,
+   "total": 8416,
+   "win": 66.7,
+   "ci": null
+  },
+  "all": {
+   "n": 1482,
+   "per_trade": 63.7,
+   "total": 94343,
+   "win": 44.5,
+   "ci": [
+    -89,
+    226
+   ]
+  },
+  "quarters_positive": "8/13",
+  "worst_day": -12810,
+  "losing_day_pct": 54.9,
+  "max_dd": 71575
+ },
+ {
+  "und": "BANKNIFTY",
+  "family": "RANDOM",
+  "dte": 10,
+  "train": {
+   "n": 810,
+   "per_trade": -215.5,
+   "total": -174551,
+   "win": 43.0,
+   "ci": [
+    -426,
+    6
+   ]
+  },
+  "val": {
+   "n": 294,
+   "per_trade": 255.9,
+   "total": 75235,
+   "win": 48.0,
+   "ci": [
+    -40,
+    551
+   ]
+  },
+  "test": {
+   "n": 368,
+   "per_trade": -155.4,
+   "total": -57180,
+   "win": 46.2,
+   "ci": [
+    -532,
+    218
+   ]
+  },
+  "new": {
+   "n": 6,
+   "per_trade": 1447.4,
+   "total": 8685,
+   "win": 66.7,
+   "ci": null
+  },
+  "all": {
+   "n": 1482,
+   "per_trade": -105.0,
+   "total": -155593,
+   "win": 44.8,
+   "ci": [
+    -260,
+    63
+   ]
+  },
+  "quarters_positive": "4/13",
+  "worst_day": -22790,
+  "losing_day_pct": 55.9,
+  "max_dd": 221239
+ }
+]
