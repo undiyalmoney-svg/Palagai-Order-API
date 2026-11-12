@@ -5,6 +5,7 @@ const usersStore = require('./auth/users.store');
 const { getMomentumApp, startMomentumScheduler } = require('./momentum/instance');
 const { startResearchSupervisor } = require('./research/instance');
 const { start: startChartsProtect } = require('./charts-protect/worker');
+const { start: startPaperLive } = require('./paper-live/worker');
 const { start: startSlBuddy } = require('./sl-buddy/worker');
 const { start: startPdhLive } = require('./pdh-live/worker');
 const { start: startCrudeLive } = require('./crude-live/worker');
@@ -65,6 +66,21 @@ async function boot() {
       getAuthorization: async (userId) => {
         if (!userId) return null;
         return getMomentumApp().momentum.sessions.authorization(userId);
+      },
+    });
+    startPaperLive({
+      getAuthorization: async (userId) => {
+        if (!userId) return null;
+        return getMomentumApp().momentum.sessions.authorization(userId);
+      },
+      saveAuthorization: (userId, apiKey, accessToken) => {
+        if (!userId || !apiKey || !accessToken) return false;
+        try {
+          getMomentumApp().momentum.sessions.save(userId, apiKey, accessToken);
+          return true;
+        } catch {
+          return false;
+        }
       },
     });
     startSlBuddy({

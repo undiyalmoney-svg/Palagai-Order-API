@@ -39,3 +39,6 @@ data/pdh-live/
 
 # Crude Mini live money fills (runtime)
 data/crude-live/
+
+# Paper Live blotter / arm (runtime)
+data/paper-live/
