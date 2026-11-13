@@ -20,9 +20,12 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 var index_exports = {};
 __export(index_exports, {
   LIVE_PAPER_BOOKS: () => LIVE_PAPER_BOOKS,
+  emptyEvolve: () => emptyEvolve,
   emptySession: () => emptySession,
+  evolvePaperDesk: () => evolvePaperDesk,
   istDay: () => istDay,
   keepPaperOnKite: () => keepPaperOnKite,
+  paperEvolveFlags: () => paperEvolveFlags,
   paperLiveArmedFor: () => paperLiveArmedFor,
   runPaperTick: () => runPaperTick,
   underOf: () => underOf
@@ -745,6 +748,185 @@ function mixGate(bars, i, cfg, hit, structure) {
   };
 }
 
+// ../palagai/src/app/core/paper-desk/paper-review.util.ts
+var PAPER_REVIEW_BID_THROUGH = "option-tick-exit-when-bid-through-level";
+function paperReviewClock(iso) {
+  if (!iso) return "\u2014";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "\u2014";
+  const ist = new Date(d.getTime() + 330 * 60 * 1e3);
+  return `${String(ist.getUTCHours()).padStart(2, "0")}:${String(ist.getUTCMinutes()).padStart(2, "0")}`;
+}
+function fillThroughStop(f) {
+  if (f.reason !== "sl" && f.reason !== "scratch") return false;
+  const sl = Number(f.sl);
+  const exit = Number(f.exit);
+  if (!(sl > 0) || !Number.isFinite(exit)) return false;
+  return exit < sl - 0.05;
+}
+function fillsSamePoll(fills, ms = 2e3) {
+  const times = fills.map((f) => Date.parse(String(f.exitAt || ""))).filter((n) => Number.isFinite(n));
+  if (times.length < 2) return false;
+  return Math.max(...times) - Math.min(...times) <= ms;
+}
+function nameOf(f) {
+  return f.contract || f.label || f.under || "book";
+}
+function takenNote(f) {
+  const kind = f.optionType === "PE" ? "PE" : f.optionType === "CE" ? "CE" : "option";
+  const dir = kind === "PE" ? "down" : "up";
+  const st = f.structure ? ` Morning was ${f.structure}.` : "";
+  const mode = f.mode || "momentum";
+  const lot = f.lot ? ` ${f.lot} qty.` : "";
+  return `${nameOf(f)} \u2014 ATM ${kind} because ${mode} 0.8\xD7 1-min ${dir} confirm at ${paperReviewClock(f.entryAt)} IST, fill at ask \u20B9${f.entry}.` + st + ` SL \u20B9${f.sl} (\u20B9370 stop)${lot} Target \u20B9${f.tp}.`;
+}
+function failedNote(f) {
+  const through = fillThroughStop(f);
+  const slip = through ? Math.round((Number(f.sl) - Number(f.exit)) * 10) / 10 : 0;
+  const extra = through && f.lot ? ` ~\u20B9${Math.round(slip * f.lot)} past the \u20B9370 stop.` : "";
+  const gauge = f.gaugeMove != null && f.gaugeNeed != null ? ` Underlying ${f.gaugeMove} vs need ${f.gaugeNeed}.` : "";
+  const hold = f.holdMin != null ? ` Held ${f.holdMin}m.` : "";
+  if (through) {
+    return `${nameOf(f)} \u2014 ${f.reason} sold \u20B9${f.exit} vs SL \u20B9${f.sl} (${slip} pts through).` + extra + gauge + hold + ` \u20B9${f.rs}. Grade ${f.grade || "F"}.`;
+  }
+  return `${nameOf(f)} \u2014 ${f.reason} exit \u20B9${f.exit} from \u20B9${f.entry}.` + gauge + hold + ` \u20B9${f.rs}. Grade ${f.grade || "\u2014"}.`;
+}
+function judgeOf(fills) {
+  const through = fills.filter(fillThroughStop);
+  const same = fillsSamePoll(fills);
+  if (through.length) {
+    const change = "In tickBook, do not let barsHandleExit skip the 8s hitExit when the live bid is already through SL, scratch, or TP. Keep tooSoon and the fill-minute skip. A lagged 1-min option candle must not block a bid that is already through the stop.";
+    const why = same ? ` ${through.length} books stopped on the same poll, sold through the SL. That is a lagged candle, not two independent hits.` : " The fill sold through the written SL. The live bid was not checked while option candles lagged.";
+    return {
+      changeId: PAPER_REVIEW_BID_THROUGH,
+      change,
+      body: `Exact change: honor the live bid stop on that tick.${why} Do not rewrite 0.8\xD7 momentum from this dump. Not a guaranteed \u20B9370.`,
+      fills: [
+        {
+          under: "engine",
+          note: `live-paper.engine.ts tickBook \u2014 ${PAPER_REVIEW_BID_THROUGH}`
+        }
+      ]
+    };
+  }
+  return {
+    changeId: "none",
+    change: "No engine change. Wait for more fills.",
+    body: "Stops printed at the written SL. The signal went the wrong way. Do not rewrite 0.8\xD7 or skip-range from this dump. Not a guaranteed \u20B9370.",
+    fills: []
+  };
+}
+function reviewPaperDesk(log) {
+  const fills = log.fills || [];
+  const through = fills.filter(fillThroughStop);
+  const same = fillsSamePoll(fills);
+  const takenBody = fills.length ? "Each book bought its own ATM CE/PE from a 0.8\xD7 1-min confirm. Paper always records. Not a lock." : "No closed fill yet.";
+  const failedBody = !fills.length ? "No closed fill yet." : through.length ? same ? "The live bid stop did not fire while 1-min option candles lagged. One poll then sold every open book at the crashed bid. Direction was also wrong. Honoring the bid still loses about \u20B9370 each, not thousands past the stop. Not a guaranteed profit." : "The fill sold through the written SL. Honor the live bid on every tick when it is already through. A \u20B9370 stop that fills at the bid is still a loss. Not a guaranteed profit." : "The stop filled at the written SL. The underlying went the other way. That is a wrong-direction fill, not an exit-path bug. Not a guaranteed profit.";
+  const judge = judgeOf(fills);
+  return {
+    taken: {
+      id: "taken",
+      title: "Why taken",
+      body: takenBody,
+      fills: fills.map((f) => ({ under: f.under || f.label || "book", note: takenNote(f) }))
+    },
+    failed: {
+      id: "failed",
+      title: "Why it failed",
+      body: failedBody,
+      fills: fills.map((f) => ({ under: f.under || f.label || "book", note: failedNote(f) }))
+    },
+    judge: {
+      id: "judge",
+      title: "Judge",
+      body: judge.body,
+      fills: judge.fills,
+      changeId: judge.changeId,
+      change: judge.change
+    }
+  };
+}
+
+// ../palagai/src/app/core/paper-desk/paper-evolve.util.ts
+var PAPER_PATCH_BID_THROUGH = PAPER_REVIEW_BID_THROUGH;
+var PAPER_PATCH_NO_STALE_CATCHUP = "no-stale-option-catchup-bid";
+var THROUGH_SL = (log) => (log.fills || []).some((f) => {
+  if (f.reason !== "sl" && f.reason !== "scratch") return false;
+  const sl = Number(f.sl);
+  const exit = Number(f.exit);
+  return sl > 0 && Number.isFinite(exit) && exit < sl - 0.05;
+});
+var PAPER_JUDGE_PATCHES = [
+  {
+    id: PAPER_PATCH_BID_THROUGH,
+    change: "In tickBook, do not let barsHandleExit skip the 8s hitExit when the live bid is already through SL, scratch, or TP. Keep tooSoon and the fill-minute skip.",
+    evidence: THROUGH_SL
+  },
+  {
+    id: PAPER_PATCH_NO_STALE_CATCHUP,
+    change: "When catching up lagged 1-min option bars, do not pass the current live bid into hitExit. Use that bar\u2019s own high/low/open. The live bid is only for the current tick. A 10-minute sleep must not sell every missed minute at the crashed bid.",
+    evidence: THROUGH_SL
+  }
+];
+function emptyEvolve() {
+  return {
+    applied: [{ id: PAPER_PATCH_BID_THROUGH, at: "shipped", day: "2026-11-13" }]
+  };
+}
+function paperEvolveFlags(state) {
+  const ids = new Set((state?.applied || []).map((a) => a.id));
+  return {
+    bidThroughTick: true,
+    barCatchupIgnoresLiveBid: ids.has(PAPER_PATCH_NO_STALE_CATCHUP)
+  };
+}
+function hasPatch(state, id) {
+  return (state?.applied || []).some((a) => a.id === id);
+}
+function nextJudgePatch(log, state) {
+  return PAPER_JUDGE_PATCHES.find((p) => !hasPatch(state, p.id) && p.evidence(log)) || null;
+}
+function applyJudgePatch(state, id, day, at) {
+  if (!PAPER_JUDGE_PATCHES.some((p) => p.id === id) || hasPatch(state, id)) return state;
+  return {
+    applied: [...state.applied, { id, at: at || (/* @__PURE__ */ new Date()).toISOString(), day }]
+  };
+}
+function reviewEvolvingDesk(log, state = emptyEvolve()) {
+  const next = nextJudgePatch(log, state);
+  const base = reviewPaperDesk(log);
+  const appliedNote = state.applied.map((a) => a.id).join(", ");
+  if (!next) {
+    return {
+      ...base,
+      judge: {
+        ...base.judge,
+        changeId: "none",
+        change: appliedNote ? `Already applied: ${appliedNote}. No further engine change from this dump.` : "No engine change. Wait for more fills.",
+        body: appliedNote ? `This desk applied ${appliedNote}. Next ticks use those rules. Do not rewrite 0.8\xD7 momentum from this dump. Not a guaranteed \u20B9370.` : base.judge.body,
+        fills: state.applied.map((a) => ({ under: "engine", note: `applied ${a.id}` }))
+      }
+    };
+  }
+  return {
+    ...base,
+    judge: {
+      id: "judge",
+      title: "Judge",
+      changeId: next.id,
+      change: next.change,
+      body: `Exact change: apply ${next.id} on this desk now. Next ticks use it. Do not rewrite 0.8\xD7 momentum from this dump. Not a guaranteed \u20B9370.`,
+      fills: [{ under: "engine", note: `pending ${next.id}` }]
+    }
+  };
+}
+function evolvePaperDesk(log, state = emptyEvolve()) {
+  const next = nextJudgePatch(log, state);
+  if (!next) return { state, appliedNow: null, review: reviewEvolvingDesk(log, state) };
+  const evolved = applyJudgePatch(state, next.id, log.day);
+  return { state: evolved, appliedNow: next.id, review: reviewEvolvingDesk(log, evolved) };
+}
+
 // ../palagai/src/app/core/paper-desk/option-charges.util.ts
 var SCHEDULE = {
   NSE: { tax: 15e-4, txn: 3553e-7, stamp: 3e-5 },
@@ -852,6 +1034,9 @@ var EXIT = {
   expiryAfterTomorrow: false,
   freshCross: true
 };
+var PAPER_DESKS = [
+  { id: "momentum", label: "Daily \u20B9370", rule: "Nifty, Bank, Sensex and Crude Mini each take their own ATM CE/PE. Paper always records, Live on or off. Target nets \u20B9370 after charges, fill at the live bid. All four: up to five fills so a wrong trade can be corrected. Crude Mini from 09:00. Live Kite on a ticked book adds a real order" }
+];
 function deskPatch(under) {
   if (under === "crude") {
     return {
@@ -993,6 +1178,18 @@ var LIVE_PAPER_STOP_RANGE_MULT = 1.5;
 var LIVE_PAPER_TARGET_R = 2;
 var MIN_RANGE_BARS = 3;
 var RANGE_LOOKBACK_BARS = 12;
+var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+function expiryShort(expiry) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(expiry || "");
+  if (!m) return "";
+  return `${Number(m[3])} ${MONTHS[Number(m[2]) - 1] ?? ""}`.trim();
+}
+function optionPickLabel(pick) {
+  if (!pick.optionType || pick.strike == null) return pick.optionSymbol || "";
+  const name = OPTION_14K_BOOKS[underOf(pick.id)]?.name ?? pick.id.toUpperCase();
+  const exp = expiryShort(pick.expiry);
+  return `${name} ${pick.strike} ${pick.optionType}${exp ? ` \xB7 exp ${exp}` : ""}`;
+}
 function emptyBook(cfg) {
   return {
     id: cfg.id,
@@ -1133,6 +1330,13 @@ function emptySession(day, asOf = (/* @__PURE__ */ new Date()).toISOString()) {
 }
 function hhmm(min) {
   return `${Math.floor(min / 60)}:${String(min % 60).padStart(2, "0")}`;
+}
+function paperHoldMin(entryAt, exitAt, fallback) {
+  if (entryAt && exitAt) {
+    const ms = Date.parse(exitAt) - Date.parse(entryAt);
+    if (Number.isFinite(ms)) return Math.max(0, Math.round(ms / 6e4));
+  }
+  return fallback ?? null;
 }
 function istDay(d = /* @__PURE__ */ new Date()) {
   const ist = new Date(d.getTime() + 330 * 60 * 1e3);
@@ -1383,7 +1587,9 @@ function tickBook(book, cfg, bars, last, day, nowMin, instrument, optionBars = [
         next.lastBarMin = bar.min;
         continue;
       }
-      if (hitExit(next, bar.high, bar.low, bar.close, cfg, day, bar.open, nowMin, exec.bid)) {
+      const lagged = isOptionBuy(cfg) && bar.min + barMin < nowMin;
+      const barBid = lagged && exec.evolve?.barCatchupIgnoresLiveBid ? null : exec.bid;
+      if (hitExit(next, bar.high, bar.low, bar.close, cfg, day, bar.open, nowMin, barBid)) {
         next.lastBarMin = bar.min;
         break;
       }
@@ -1398,7 +1604,7 @@ function tickBook(book, cfg, bars, last, day, nowMin, instrument, optionBars = [
     const tickExitPx = sellPx ?? last;
     const tooSoon = isOptionBuy(cfg) && next.entryMin != null && nowMin <= next.entryMin + barMin;
     const bid = exec.bid != null && exec.bid > 0 ? exec.bid : null;
-    const bidThrough = isOptionBuy(cfg) && bid != null && (next.sl != null && bid <= next.sl || next.scratch != null && bid <= next.scratch || next.tp != null && bid >= next.tp);
+    const bidThrough = exec.evolve?.bidThroughTick !== false && isOptionBuy(cfg) && bid != null && (next.sl != null && bid <= next.sl || next.scratch != null && bid <= next.scratch || next.tp != null && bid >= next.tp);
     const barsHandleExit = isOptionBuy(cfg) && optionBars.length > 0 && !bidThrough;
     if ((next.side === "long" || next.side === "short") && tickExitPx != null && !tooSoon && !barsHandleExit) {
       hitExit(next, tickExitPx, tickExitPx, tickExitPx, cfg, day, tickExitPx, nowMin, exec.bid);
@@ -1520,7 +1726,80 @@ function summarizePaper(books, extra) {
     books,
     liveRs,
     closedRs,
+    evolve: extra.evolve || emptyEvolve(),
     honest: live ? `Paper always records. LIVE Kite also sends a 1 lot MARKET buy and a resting SL on ticked books. A Kite reject does not drop the paper fill. Motto: buy CE/PE. ${fundsLine}${PAPER_TEST_HONEST}` : `Paper always records, Live on or off. No Kite order until Live Kite is selected and a book is ticked. Each book takes 1 lot at the live ask and shows that cash. Motto: buy CE/PE. SL, target, and live P/L come from the option. ${fundsLine}${PAPER_TEST_HONEST}`
+  };
+}
+function allClosedFills(books) {
+  return books.flatMap((b) => b.fills);
+}
+function nightLog(session) {
+  const fills = allClosedFills(session.books);
+  const desks = PAPER_DESKS.map((d) => {
+    const books = session.books.filter((b) => (b.desk || deskOf(b.id)) === d.id);
+    const rows = fills.filter((f) => (f.desk || deskOf(f.book)) === d.id);
+    const wins = rows.filter((f) => f.rs > 0);
+    const losses = rows.filter((f) => f.rs < 0);
+    const closedRs = Math.round(books.reduce((s, b) => s + b.closedRs, 0) * 10) / 10;
+    return {
+      desk: d.id,
+      label: d.label,
+      rule: d.rule,
+      trades: rows.length,
+      wins: wins.length,
+      losses: losses.length,
+      closedRs,
+      liveRs: Math.round(books.reduce((s, b) => s + (b.side === "flat" ? 0 : b.liveRs), 0) * 10) / 10,
+      avgRs: rows.length ? Math.round(rows.reduce((s, f) => s + f.rs, 0) / rows.length * 10) / 10 : 0,
+      maxLoss: rows.length ? Math.min(...rows.map((f) => f.rs)) : 0,
+      maxWin: rows.length ? Math.max(...rows.map((f) => f.rs)) : 0
+    };
+  });
+  const mapped = fills.map((f) => ({
+    desk: f.desk || deskOf(f.book),
+    under: f.under || underOf(f.book),
+    book: f.book,
+    label: f.label,
+    contract: optionPickLabel({ id: f.book, optionType: f.optionType, strike: f.strike, expiry: f.expiry, optionSymbol: f.optionSymbol }),
+    optionSymbol: f.optionSymbol || "",
+    optionType: f.optionType || "",
+    strike: f.strike ?? null,
+    expiry: f.expiry || "",
+    lot: f.lot || 0,
+    side: f.side,
+    mode: f.mode,
+    structure: f.structure || "",
+    entry: f.entry,
+    exit: f.exit,
+    sl: f.sl,
+    tp: f.tp,
+    pts: f.pts,
+    rs: f.rs,
+    grade: f.grade || paperFillGrade(f),
+    charges: f.charges ?? null,
+    reason: f.reason,
+    entryAt: f.entryAt || "",
+    exitAt: f.exitAt || "",
+    holdMin: paperHoldMin(f.entryAt, f.exitAt, f.holdMin),
+    gaugeMove: f.gaugeMove ?? null,
+    gaugeNeed: f.gaugeNeed ?? null,
+    entryBid: f.entryBid ?? null,
+    entryAsk: f.entryAsk ?? null,
+    exitBid: f.exitBid ?? null,
+    exitAsk: f.exitAsk ?? null
+  }));
+  return {
+    day: session.day,
+    asOf: session.asOf,
+    closedRs: session.closedRs,
+    liveRs: session.liveRs,
+    desks,
+    fills: mapped,
+    evolve: session.evolve || emptyEvolve(),
+    review: reviewEvolvingDesk(
+      { day: session.day, closedRs: session.closedRs, fills: mapped },
+      session.evolve || emptyEvolve()
+    )
   };
 }
 
@@ -1611,6 +1890,8 @@ async function runPaperTick(io) {
   const nowMin = istMinutes(now);
   const raw = io.session.day === day ? io.session : emptySession(day, now.toISOString());
   const cur = { ...raw, books: raw.books.map(replayBudgetSkips) };
+  const evolved = evolvePaperDesk(nightLog(cur), io.evolve || cur.evolve || emptyEvolve());
+  const flags = paperEvolveFlags(evolved.state);
   const [margins, csv] = await Promise.all([io.fetchMargins(), io.fetchCsv()]);
   const funds = margins ? parseFunds(margins) : cur.kiteFunds;
   const dump = String(csv || "");
@@ -1692,7 +1973,7 @@ async function runPaperTick(io) {
       nowMin,
       prev.optionSymbol || inst?.tradingSymbol || cfg.label,
       optionBars,
-      { bid: optBid, ask: optAsk, blockOpen: indexDeskBlockReason(cfg.id, peers, day) }
+      { bid: optBid, ask: optAsk, blockOpen: indexDeskBlockReason(cfg.id, peers, day), evolve: flags }
     );
     if (cfg.buyOption && needsOption(next)) {
       const spot = underLast ?? (next.optionSymbol ? next.last : null) ?? 0;
@@ -1733,7 +2014,7 @@ async function runPaperTick(io) {
     });
   }
   const books = LIVE_PAPER_BOOKS.map((c) => nextById.get(c.id) || cur.books.find((b) => b.id === c.id));
-  return summarizePaper(books, {
+  const snap = summarizePaper(books, {
     running: true,
     day,
     startedAt: cur.startedAt || now.toISOString(),
@@ -1741,8 +2022,11 @@ async function runPaperTick(io) {
     source: "kite",
     kiteFunds: funds,
     kiteError: null,
-    liveOrders: paperLiveArmed(io.live, io.liveBooks)
+    liveOrders: paperLiveArmed(io.live, io.liveBooks),
+    evolve: evolved.state
   });
+  const after = evolvePaperDesk(nightLog(snap), evolved.state);
+  return { ...snap, evolve: after.state };
 }
 async function bindCheap(book, cfg, chain, spot, quotes, nowMin, io, pair, now) {
   const id = underOf(cfg.id);
@@ -2084,9 +2368,12 @@ function shiftDay(day, delta) {
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
   LIVE_PAPER_BOOKS,
+  emptyEvolve,
   emptySession,
+  evolvePaperDesk,
   istDay,
   keepPaperOnKite,
+  paperEvolveFlags,
   paperLiveArmedFor,
   runPaperTick,
   underOf

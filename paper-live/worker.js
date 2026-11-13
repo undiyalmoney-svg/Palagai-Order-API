@@ -196,6 +196,7 @@ async function tickOnce() {
         live: state.live,
         liveBooks: state.books,
         session: prevSession || eng.emptySession(eng.istDay()),
+        evolve: state.evolve || (eng.emptyEvolve ? eng.emptyEvolve() : prevSession?.evolve),
         fetchMargins: () => fetchUserMargins(authorization).catch(() => null),
         fetchCsv: () => dumpCsv(authorization),
         fetchQuotes: (keys) => (keys.length ? fetchQuotes(authorization, keys) : {}),
@@ -214,6 +215,7 @@ async function tickOnce() {
       }
       nextSession = { ...nextSession, books, liveOrders: store.liveArmed(state) };
       state.session = nextSession;
+      if (nextSession.evolve) state.evolve = nextSession.evolve;
     }
     state.lastError = null;
     state.lastTick = new Date().toISOString();

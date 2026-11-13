@@ -4,6 +4,7 @@
  */
 export { runPaperTick } from '../../../palagai/src/app/core/paper-desk/paper-tick.run';
 export { underOf, emptySession, istDay, LIVE_PAPER_BOOKS } from '../../../palagai/src/app/core/paper-desk/live-paper.engine';
+export { emptyEvolve, evolvePaperDesk, paperEvolveFlags } from '../../../palagai/src/app/core/paper-desk/paper-evolve.util';
 export {
   paperLiveArmedFor,
   keepPaperOnKite,

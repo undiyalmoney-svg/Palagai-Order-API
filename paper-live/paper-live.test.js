@@ -97,3 +97,8 @@ test('a new IST day keeps Live radio and book checks', () => {
   assert.equal(rolled.books.bank, true);
   assert.equal(store.liveArmed(rolled), true);
 });
+
+test('evolve ships bid-through so the judge can apply the next patch', () => {
+  const state = store.empty('2026-11-13');
+  assert.equal(state.evolve.applied[0].id, 'option-tick-exit-when-bid-through-level');
+});

@@ -17,6 +17,12 @@ function todayIst(now = new Date()) {
   return now.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
 }
 
+function emptyEvolve() {
+  return {
+    applied: [{ id: 'option-tick-exit-when-bid-through-level', at: 'shipped', day: '2026-11-13' }],
+  };
+}
+
 function empty(date) {
   return {
     date,
@@ -25,6 +31,7 @@ function empty(date) {
     books: emptyBooks(),
     userId: null,
     session: null,
+    evolve: emptyEvolve(),
     lastTick: null,
     lastError: null,
     lastMessage: null,
@@ -49,6 +56,7 @@ function load(now = new Date()) {
       books,
       userId: base.userId || null,
       session: base.session && typeof base.session === 'object' ? base.session : null,
+      evolve: base.evolve && typeof base.evolve === 'object' ? base.evolve : emptyEvolve(),
       sessionOk: base.sessionOk === true,
     };
   } catch {
@@ -83,4 +91,4 @@ function publicView(state) {
   };
 }
 
-module.exports = { FILE, UNDERS, empty, emptyBooks, load, save, liveArmed, publicView, todayIst };
+module.exports = { FILE, UNDERS, empty, emptyBooks, emptyEvolve, load, save, liveArmed, publicView, todayIst };
