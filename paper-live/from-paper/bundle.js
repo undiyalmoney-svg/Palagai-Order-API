@@ -1397,7 +1397,9 @@ function tickBook(book, cfg, bars, last, day, nowMin, instrument, optionBars = [
     }
     const tickExitPx = sellPx ?? last;
     const tooSoon = isOptionBuy(cfg) && next.entryMin != null && nowMin <= next.entryMin + barMin;
-    const barsHandleExit = isOptionBuy(cfg) && optionBars.length > 0;
+    const bid = exec.bid != null && exec.bid > 0 ? exec.bid : null;
+    const bidThrough = isOptionBuy(cfg) && bid != null && (next.sl != null && bid <= next.sl || next.scratch != null && bid <= next.scratch || next.tp != null && bid >= next.tp);
+    const barsHandleExit = isOptionBuy(cfg) && optionBars.length > 0 && !bidThrough;
     if ((next.side === "long" || next.side === "short") && tickExitPx != null && !tooSoon && !barsHandleExit) {
       hitExit(next, tickExitPx, tickExitPx, tickExitPx, cfg, day, tickExitPx, nowMin, exec.bid);
     }
