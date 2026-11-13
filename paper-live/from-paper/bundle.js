@@ -1108,6 +1108,10 @@ function bindOptionFill(book, cfg, prem, pick, rangePts = null, atMin) {
   next.optionToken = pick.instrument.instrumentToken;
   next.last = prem;
   next.reason = `open ${pick.side} ${pick.instrument.tradingSymbol}`;
+  next.kiteBuyOrderId = "";
+  next.kiteSlOrderId = "";
+  next.kiteNote = "";
+  next.kiteHalt = false;
   if (atMin != null) {
     next.entryMin = atMin;
     next.lastBarMin = Math.max(next.lastBarMin, atMin);
@@ -1531,7 +1535,8 @@ function keepPaperOnKite(paper, kite) {
     ...paper,
     kiteBuyOrderId: kite.kiteBuyOrderId ?? paper.kiteBuyOrderId,
     kiteSlOrderId: kite.kiteSlOrderId ?? paper.kiteSlOrderId,
-    kiteNote: kite.kiteNote ?? paper.kiteNote
+    kiteNote: kite.kiteNote ?? paper.kiteNote,
+    kiteHalt: kite.kiteHalt ?? paper.kiteHalt
   };
 }
 

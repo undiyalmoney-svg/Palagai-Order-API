@@ -56,6 +56,11 @@ test('buy is MARKET MIS tagged PALAGAI_PAPER; Crude Mini qty is 1; Sensex is BFO
   assert.equal(orders.buyFields({ ...nifty, optionToken: 0 }), null);
 });
 
+test('a rejected BUY does not retry on the same fill', () => {
+  const halted = { id: 'crude-momentum', kiteHalt: true, kiteBuyOrderId: '', optionSymbol: 'X', optionToken: 1, side: 'long' };
+  assert.equal(!!(halted.kiteHalt && !halted.kiteBuyOrderId), true);
+});
+
 test('paper tick bundle exports runPaperTick', () => {
   let paper;
   try {

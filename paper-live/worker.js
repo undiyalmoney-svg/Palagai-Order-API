@@ -83,6 +83,7 @@ async function overlayBook(authorization, state, prev, next) {
     ? eng.paperLiveArmedFor(state.live, state.books, under)
     : !!(state.live && state.books[under]);
   if (!armed) return next;
+  if (next.kiteHalt && !next.kiteBuyOrderId) return next;
   if (next.side !== 'flat' && next.optionSymbol && Number(next.optionToken) > 0) {
     return enterBook(authorization, next);
   }
@@ -100,9 +101,13 @@ async function enterBook(authorization, book) {
       if (!fields) return { ...next, kiteNote: 'No listed contract — Kite buy skipped.' };
       try {
         const id = await orders.place(authorization, fields);
-        next = { ...next, kiteBuyOrderId: id, kiteNote: `Kite buy ${id}` };
+        next = { ...next, kiteBuyOrderId: id, kiteHalt: false, kiteNote: `Kite buy ${id}` };
       } catch (err) {
-        return { ...next, kiteNote: err.message || 'Order failed' };
+        return {
+          ...next,
+          kiteHalt: true,
+          kiteNote: `Kite rejected — not retrying. ${err.message || 'Order failed'}`,
+        };
       }
     }
     if (next.kiteBuyOrderId && !next.kiteSlOrderId && Number(next.sl) > 0) {
