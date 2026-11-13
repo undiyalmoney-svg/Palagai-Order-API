@@ -84,6 +84,21 @@ function orderIdOf(res) {
   return s || null;
 }
 
+function openBuyId(orders, symbol) {
+  const want = String(symbol || '').trim().toUpperCase();
+  if (!want) return null;
+  for (const o of orders || []) {
+    if (String(o.tradingsymbol || '').trim().toUpperCase() !== want) continue;
+    if (String(o.transaction_type || '').toUpperCase() !== 'BUY') continue;
+    if (String(o.tag || '').toUpperCase() !== BUY_TAG) continue;
+    const status = String(o.status || '').trim().toUpperCase();
+    if (status === 'REJECTED' || status === 'CANCELLED' || status === 'EXPIRED') continue;
+    const id = o.order_id != null ? String(o.order_id).trim() : '';
+    if (id) return id;
+  }
+  return null;
+}
+
 function orderErrorOf(res, fallback) {
   return (
     res?.data?.message ||
@@ -120,6 +135,7 @@ module.exports = {
   exitFields,
   place,
   cancel,
+  openBuyId,
   ticketOk,
   qtyOf,
   exchangeOf,

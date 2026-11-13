@@ -56,9 +56,13 @@ test('buy is MARKET MIS tagged PALAGAI_PAPER; Crude Mini qty is 1; Sensex is BFO
   assert.equal(orders.buyFields({ ...nifty, optionToken: 0 }), null);
 });
 
-test('a rejected BUY does not retry on the same fill', () => {
-  const halted = { id: 'crude-momentum', kiteHalt: true, kiteBuyOrderId: '', optionSymbol: 'X', optionToken: 1, side: 'long' };
-  assert.equal(!!(halted.kiteHalt && !halted.kiteBuyOrderId), true);
+test('a successful BUY id blocks another place; a reject does not', () => {
+  const live = [
+    { order_id: '1', tradingsymbol: 'CRUDEOILM26NOV8300PE', transaction_type: 'BUY', tag: orders.BUY_TAG, status: 'REJECTED' },
+    { order_id: '2', tradingsymbol: 'CRUDEOILM26NOV8300PE', transaction_type: 'BUY', tag: orders.BUY_TAG, status: 'COMPLETE' },
+  ];
+  assert.equal(orders.openBuyId(live, 'CRUDEOILM26NOV8300PE'), '2');
+  assert.equal(orders.openBuyId(live.filter((o) => o.status === 'REJECTED'), 'CRUDEOILM26NOV8300PE'), null);
 });
 
 test('paper tick bundle exports runPaperTick', () => {

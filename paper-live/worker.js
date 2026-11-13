@@ -65,6 +65,16 @@ function candlesOf(rows) {
   return (rows || []).map((r) => [r.date, r.open, r.high, r.low, r.close]);
 }
 
+async function existingBuy(authorization, symbol) {
+  try {
+    const res = await kiteService.getOrders(authorization);
+    const rows = res.data?.data || res.data || [];
+    return orders.openBuyId(Array.isArray(rows) ? rows : [], symbol);
+  } catch {
+    return null;
+  }
+}
+
 async function overlayBook(authorization, state, prev, next) {
   const eng = loadEngine();
   const under = eng ? eng.underOf(next.id) : String(next.under || '').trim();
@@ -83,7 +93,6 @@ async function overlayBook(authorization, state, prev, next) {
     ? eng.paperLiveArmedFor(state.live, state.books, under)
     : !!(state.live && state.books[under]);
   if (!armed) return next;
-  if (next.kiteHalt && !next.kiteBuyOrderId) return next;
   if (next.side !== 'flat' && next.optionSymbol && Number(next.optionToken) > 0) {
     return enterBook(authorization, next);
   }
@@ -97,17 +106,18 @@ async function enterBook(authorization, book) {
   let next = { ...book };
   try {
     if (!next.kiteBuyOrderId) {
-      const fields = orders.buyFields(next);
-      if (!fields) return { ...next, kiteNote: 'No listed contract — Kite buy skipped.' };
-      try {
-        const id = await orders.place(authorization, fields);
-        next = { ...next, kiteBuyOrderId: id, kiteHalt: false, kiteNote: `Kite buy ${id}` };
-      } catch (err) {
-        return {
-          ...next,
-          kiteHalt: true,
-          kiteNote: `Kite rejected — not retrying. ${err.message || 'Order failed'}`,
-        };
+      const existing = await existingBuy(authorization, next.optionSymbol);
+      if (existing) {
+        next = { ...next, kiteBuyOrderId: existing, kiteHalt: true, kiteNote: `Kite buy ${existing} already on the book` };
+      } else {
+        const fields = orders.buyFields(next);
+        if (!fields) return { ...next, kiteNote: 'No listed contract — Kite buy skipped.' };
+        try {
+          const id = await orders.place(authorization, fields);
+          next = { ...next, kiteBuyOrderId: id, kiteHalt: true, kiteNote: `Kite buy ${id}` };
+        } catch (err) {
+          return { ...next, kiteHalt: false, kiteNote: `Kite rejected — will retry. ${err.message || 'Order failed'}` };
+        }
       }
     }
     if (next.kiteBuyOrderId && !next.kiteSlOrderId && Number(next.sl) > 0) {
