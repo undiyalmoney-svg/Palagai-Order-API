@@ -20,6 +20,7 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 var index_exports = {};
 __export(index_exports, {
   LIVE_PAPER_BOOKS: () => LIVE_PAPER_BOOKS,
+  compactHunt: () => compactHunt,
   emptyEvolve: () => emptyEvolve,
   emptySession: () => emptySession,
   evolvePaperDesk: () => evolvePaperDesk,
@@ -1233,7 +1234,9 @@ function emptyBook(cfg) {
     cooldownUntil: -1,
     entryMin: null,
     lastSignalMin: -1,
-    capitalUsed: capitalUsedOf(cfg, { last: null, entry: null })
+    capitalUsed: capitalUsedOf(cfg, { last: null, entry: null }),
+    peakPx: null,
+    troughPx: null
   };
 }
 function capitalUsedOf(cfg, book) {
@@ -1374,6 +1377,10 @@ function markLive(book, last, cfg) {
   const pts = isOptionBuy(cfg) ? px - book.entry : (book.side === "long" ? 1 : -1) * (px - book.entry);
   book.livePts = Math.round(pts * 10) / 10;
   book.liveRs = netRs(cfg, book, book.entry, px, pts);
+  if (px != null) {
+    book.peakPx = book.peakPx == null ? px : Math.max(book.peakPx, px);
+    book.troughPx = book.troughPx == null ? px : Math.min(book.troughPx, px);
+  }
 }
 function closeAt(book, cfg, exitPx, reason, day, nowMin) {
   if (book.side === "flat" || book.entry == null) return;
@@ -1381,6 +1388,10 @@ function closeAt(book, cfg, exitPx, reason, day, nowMin) {
   const rs = netRs(cfg, book, book.entry, exitPx, pts);
   const qty = book.lot || cfg.qty || cfg.rsPt;
   const charges = cfg.kind === "eq" ? equityMisRoundTripCharges(book.entry, Math.max(0, exitPx), qty) : cfg.kind === "fut" ? futuresRoundTripCharges(book.entry, Math.max(0, exitPx), qty, venueForBook(cfg.under || cfg.id)) : isOptionBuy(cfg) ? optionRoundTripCharges(book.entry, Math.max(0, exitPx), qty, venueForBook(cfg.under || cfg.id)) : LIVE_PAPER_CHARGE;
+  const hi = book.peakPx != null ? Math.max(book.peakPx, exitPx) : exitPx;
+  const lo = book.troughPx != null ? Math.min(book.troughPx, exitPx) : exitPx;
+  const mfePts = isOptionBuy(cfg) ? hi - book.entry : (book.side === "long" ? 1 : -1) * (hi - book.entry);
+  const maePts = isOptionBuy(cfg) ? lo - book.entry : (book.side === "long" ? 1 : -1) * (lo - book.entry);
   book.fills.push({
     day,
     book: book.id,
@@ -1412,7 +1423,11 @@ function closeAt(book, cfg, exitPx, reason, day, nowMin) {
     gaugeMove: book.gauge?.move ?? null,
     gaugeNeed: book.gauge?.need ?? null,
     exitMin: book.lastBarMin,
-    underEntry: book.last != null && book.optionSymbol ? null : book.last
+    underEntry: book.last != null && book.optionSymbol ? null : book.last,
+    maxPx: hi,
+    minPx: lo,
+    mfeRs: netRs(cfg, book, book.entry, isOptionBuy(cfg) || book.side === "long" ? hi : lo, mfePts),
+    maeRs: netRs(cfg, book, book.entry, isOptionBuy(cfg) || book.side === "long" ? lo : hi, maePts)
   });
   book.closedRs = Math.round((book.closedRs + rs) * 10) / 10;
   book.fund = Math.round((LIVE_PAPER_CAPITAL + book.closedRs) * 10) / 10;
@@ -1439,6 +1454,8 @@ function closeAt(book, cfg, exitPx, reason, day, nowMin) {
   book.entryAt = "";
   book.entryMin = null;
   book.signal = null;
+  book.peakPx = null;
+  book.troughPx = null;
 }
 function hitExit(book, high, low, close, cfg, day, open = close, nowMin, fillBid) {
   if (book.side === "flat" || book.entry == null || book.sl == null || book.tp == null || book.scratch == null) {
@@ -1536,6 +1553,8 @@ function openAt(book, cfg, dir, entry, mode, atMin, day) {
   book.pendingDir = 0;
   book.pendingSig = 0;
   book.pendingMode = "";
+  book.peakPx = entry;
+  book.troughPx = entry;
 }
 function pickSignal(bars, i, cfg, structure) {
   const primary = cfg.primary[structure];
@@ -1665,6 +1684,7 @@ function tickBook(book, cfg, bars, last, day, nowMin, instrument, optionBars = [
       const st = next.structure === "wait" ? "stand" : next.structure;
       const hit = pickSignal(done, i, cfg, st);
       if (!hit.dir) continue;
+      if (cfg.onlyDir && hit.dir !== cfg.onlyDir) continue;
       if (stale) {
         next.reason = `missed ${hit.dir === 1 ? "up" : "down"} signal at ${hhmm(bar.min + 5)} (desk was not checking)`;
         continue;
@@ -1727,6 +1747,7 @@ function summarizePaper(books, extra) {
     liveRs,
     closedRs,
     evolve: extra.evolve || emptyEvolve(),
+    hunt: extra.hunt,
     honest: live ? `Paper always records. LIVE Kite also sends a 1 lot MARKET buy and a resting SL on ticked books. A Kite reject does not drop the paper fill. Motto: buy CE/PE. ${fundsLine}${PAPER_TEST_HONEST}` : `Paper always records, Live on or off. No Kite order until Live Kite is selected and a book is ticked. Each book takes 1 lot at the live ask and shows that cash. Motto: buy CE/PE. SL, target, and live P/L come from the option. ${fundsLine}${PAPER_TEST_HONEST}`
   };
 }
@@ -1786,7 +1807,11 @@ function nightLog(session) {
     entryBid: f.entryBid ?? null,
     entryAsk: f.entryAsk ?? null,
     exitBid: f.exitBid ?? null,
-    exitAsk: f.exitAsk ?? null
+    exitAsk: f.exitAsk ?? null,
+    maxPx: f.maxPx ?? null,
+    minPx: f.minPx ?? null,
+    mfeRs: f.mfeRs ?? null,
+    maeRs: f.maeRs ?? null
   }));
   return {
     day: session.day,
@@ -1796,6 +1821,10 @@ function nightLog(session) {
     desks,
     fills: mapped,
     evolve: session.evolve || emptyEvolve(),
+    hunt: session.hunt ? {
+      trades: session.hunt.trades,
+      profitable: [...session.hunt.stats].filter((s) => s.closedRs > 0 && s.trades > 0).sort((a, b) => b.closedRs - a.closedRs).slice(0, 20)
+    } : null,
     review: reviewEvolvingDesk(
       { day: session.day, closedRs: session.closedRs, fills: mapped },
       session.evolve || emptyEvolve()
@@ -1881,8 +1910,215 @@ function buildSignalCard(i) {
   };
 }
 
+// ../palagai/src/app/core/paper-desk/paper-hunt.methods.ts
+var ALL2 = (mode) => ({ trend: mode, range: mode, quiet: mode, stand: mode });
+var TREND = (mode) => ({ trend: mode, range: "stand", quiet: "stand", stand: "stand" });
+var RANGE = (mode) => ({ trend: "stand", range: mode, quiet: "stand", stand: "stand" });
+var QUIET = (mode) => ({ trend: "stand", range: "stand", quiet: mode, stand: "stand" });
+var PAPER_HUNT_MAX_TRADES = 50;
+var PAPER_HUNT_CAP = PAPER_HUNT_MAX_TRADES * 4 * 50;
+var PAPER_HUNT_METHODS = [
+  { id: "mom-08", label: "mom 0.8\xD7 both", family: "momentum", patch: { strategy: "momentum", primary: ALL2("momentum"), momK: 0.8 } },
+  { id: "mom-06", label: "mom 0.6\xD7 both", family: "momentum", patch: { strategy: "momentum", primary: ALL2("momentum"), momK: 0.6 } },
+  { id: "mom-10", label: "mom 1.0\xD7 both", family: "momentum", patch: { strategy: "momentum", primary: ALL2("momentum"), momK: 1 } },
+  { id: "mom-12", label: "mom 1.2\xD7 both", family: "momentum", patch: { strategy: "momentum", primary: ALL2("momentum"), momK: 1.2 } },
+  { id: "mom-15", label: "mom 1.5\xD7 both", family: "momentum", patch: { strategy: "momentum", primary: ALL2("momentum"), momK: 1.5 } },
+  { id: "mom-08-skip-range", label: "mom 0.8\xD7 skip range", family: "momentum", patch: { strategy: "momentum", primary: ALL2("momentum"), momK: 0.8, skipStructures: ["range"] } },
+  { id: "mom-08-skip-quiet", label: "mom 0.8\xD7 skip quiet", family: "momentum", patch: { strategy: "momentum", primary: ALL2("momentum"), momK: 0.8, skipStructures: ["quiet"] } },
+  { id: "mom-08-ce", label: "mom 0.8\xD7 CE only", family: "momentum", patch: { strategy: "momentum", primary: ALL2("momentum"), momK: 0.8, onlyDir: 1 } },
+  { id: "mom-08-pe", label: "mom 0.8\xD7 PE only", family: "momentum", patch: { strategy: "momentum", primary: ALL2("momentum"), momK: 0.8, onlyDir: -1 } },
+  { id: "mom-08-hold15", label: "mom 0.8\xD7 hold 15m", family: "momentum", patch: { strategy: "momentum", primary: ALL2("momentum"), momK: 0.8, holdBars: 15 } },
+  { id: "mom-08-hold30", label: "mom 0.8\xD7 hold 30m", family: "momentum", patch: { strategy: "momentum", primary: ALL2("momentum"), momK: 0.8, holdBars: 30 } },
+  { id: "mom-08-hold90", label: "mom 0.8\xD7 hold 90m", family: "momentum", patch: { strategy: "momentum", primary: ALL2("momentum"), momK: 0.8, holdBars: 90 } },
+  { id: "mom-08-noconfirm", label: "mom 0.8\xD7 no confirm", family: "momentum", patch: { strategy: "momentum", primary: ALL2("momentum"), momK: 0.8, noConfirm: true } },
+  { id: "mom-08-gap0", label: "mom 0.8\xD7 no gap", family: "momentum", patch: { strategy: "momentum", primary: ALL2("momentum"), momK: 0.8, minGapMin: 0 } },
+  { id: "mom-08-stop200", label: "mom 0.8\xD7 stop \u20B9200", family: "momentum", patch: { strategy: "momentum", primary: ALL2("momentum"), momK: 0.8, stopRs: 200 } },
+  { id: "mom-08-stop500", label: "mom 0.8\xD7 stop \u20B9500", family: "momentum", patch: { strategy: "momentum", primary: ALL2("momentum"), momK: 0.8, stopRs: 500 } },
+  { id: "mom-08-tp200", label: "mom 0.8\xD7 target \u20B9200", family: "momentum", patch: { strategy: "momentum", primary: ALL2("momentum"), momK: 0.8, targetRs: 200 } },
+  { id: "mom-08-tp740", label: "mom 0.8\xD7 target \u20B9740", family: "momentum", patch: { strategy: "momentum", primary: ALL2("momentum"), momK: 0.8, targetRs: 740 } },
+  { id: "mom-10-skip-range", label: "mom 1.0\xD7 skip range", family: "momentum", patch: { strategy: "momentum", primary: ALL2("momentum"), momK: 1, skipStructures: ["range"] } },
+  { id: "mom-15-skip-range", label: "mom 1.5\xD7 skip range", family: "momentum", patch: { strategy: "momentum", primary: ALL2("momentum"), momK: 1.5, skipStructures: ["range"] } },
+  { id: "pdhl", label: "pdhl both", family: "pattern", patch: { strategy: "rules", primary: ALL2("pdhl"), backup: {}, freshCross: true } },
+  { id: "pdhl-noconfirm", label: "pdhl no confirm", family: "pattern", patch: { strategy: "rules", primary: ALL2("pdhl"), backup: {}, freshCross: true, noConfirm: true } },
+  { id: "orb-break", label: "orb break", family: "pattern", patch: { strategy: "rules", primary: ALL2("orb_break"), backup: {} } },
+  { id: "orb-fade", label: "orb fade", family: "pattern", patch: { strategy: "rules", primary: ALL2("orb_fade"), backup: {} } },
+  { id: "vwap-stretch", label: "vwap stretch", family: "pattern", patch: { strategy: "rules", primary: ALL2("vwap_fade"), backup: {} } },
+  { id: "trap", label: "failed-break trap", family: "pattern", patch: { strategy: "rules", primary: ALL2("trap"), backup: {} } },
+  { id: "fade-trap", label: "fade or trap", family: "pattern", patch: { strategy: "rules", primary: ALL2("fade_trap"), backup: {} } },
+  { id: "all-three", label: "pdhl or fade or trap", family: "pattern", patch: { strategy: "rules", primary: ALL2("all_three"), backup: {} } },
+  { id: "pdhl-fade", label: "pdhl or fade", family: "pattern", patch: { strategy: "rules", primary: ALL2("pdhl_fade"), backup: {} } },
+  { id: "orb-break-skip-range", label: "orb break skip range", family: "pattern", patch: { strategy: "rules", primary: ALL2("orb_break"), backup: {}, skipStructures: ["range"] } },
+  { id: "pdhl-trend", label: "pdhl on trend morning", family: "pattern", patch: { strategy: "rules", primary: TREND("pdhl"), backup: {}, freshCross: true } },
+  { id: "mom-trend", label: "mom 0.8\xD7 trend morning", family: "pattern", patch: { strategy: "momentum", primary: TREND("momentum"), momK: 0.8 } },
+  { id: "mom-range", label: "mom 0.8\xD7 range morning", family: "pattern", patch: { strategy: "momentum", primary: RANGE("momentum"), momK: 0.8 } },
+  { id: "vwap-quiet", label: "vwap stretch quiet morning", family: "pattern", patch: { strategy: "rules", primary: QUIET("vwap_fade"), backup: {} } },
+  { id: "orb-fade-range", label: "orb fade range morning", family: "pattern", patch: { strategy: "rules", primary: RANGE("orb_fade"), backup: {} } },
+  { id: "mix-mom08", label: "mix + mom 0.8\xD7", family: "mix", patch: { strategy: "momentum", primary: ALL2("momentum"), momK: 0.8, mix: true } },
+  { id: "mix-mom15", label: "mix + mom 1.5\xD7", family: "mix", patch: { strategy: "momentum", primary: ALL2("momentum"), momK: 1.5, mix: true } },
+  { id: "mix-pdhl", label: "mix + pdhl", family: "mix", patch: { strategy: "rules", primary: ALL2("pdhl"), backup: {}, mix: true, freshCross: true } },
+  { id: "mix-orb", label: "mix + orb break", family: "mix", patch: { strategy: "rules", primary: ALL2("orb_break"), backup: {}, mix: true } },
+  { id: "mix-skip-range", label: "mix + mom skip range", family: "mix", patch: { strategy: "momentum", primary: ALL2("momentum"), momK: 0.8, mix: true, skipStructures: ["range"] } },
+  { id: "mix-ce", label: "mix + CE only", family: "mix", patch: { strategy: "momentum", primary: ALL2("momentum"), momK: 0.8, mix: true, onlyDir: 1 } },
+  { id: "mix-pe", label: "mix + PE only", family: "mix", patch: { strategy: "momentum", primary: ALL2("momentum"), momK: 0.8, mix: true, onlyDir: -1 } },
+  { id: "mix-noconfirm", label: "mix + no confirm", family: "mix", patch: { strategy: "momentum", primary: ALL2("momentum"), momK: 0.8, mix: true, noConfirm: true } },
+  { id: "mix-hold30", label: "mix + hold 30m", family: "mix", patch: { strategy: "momentum", primary: ALL2("momentum"), momK: 0.8, mix: true, holdBars: 30 } },
+  { id: "mix-gap0", label: "mix + no gap", family: "mix", patch: { strategy: "momentum", primary: ALL2("momentum"), momK: 0.8, mix: true, minGapMin: 0 } },
+  { id: "rule-1-trade", label: "mom 0.8\xD7 one fill", family: "rule", patch: { strategy: "momentum", primary: ALL2("momentum"), momK: 0.8, maxTradesPerDay: 1 } },
+  { id: "rule-3-trades", label: "mom 0.8\xD7 three fills", family: "rule", patch: { strategy: "momentum", primary: ALL2("momentum"), momK: 0.8, maxTradesPerDay: 3 } },
+  { id: "rule-sit-370", label: "mom 0.8\xD7 sit at \u20B9370", family: "rule", patch: { strategy: "momentum", primary: ALL2("momentum"), momK: 0.8, minDayNetRs: 370 } },
+  { id: "rule-2-wins", label: "mom 0.8\xD7 sit after 2 wins", family: "rule", patch: { strategy: "momentum", primary: ALL2("momentum"), momK: 0.8, maxWinsPerDay: 2 } },
+  { id: "rule-dense", label: "mom 0.8\xD7 dense (no gap, no day stop)", family: "rule", patch: { strategy: "momentum", primary: ALL2("momentum"), momK: 0.8, minGapMin: 0, dayStops: false, noConfirm: true } }
+];
+
+// ../palagai/src/app/core/paper-desk/paper-hunt.engine.ts
+var UNDERS = ["nifty", "bank", "sensex", "crude"];
+function huntMethodCfg(under, def) {
+  const base = LIVE_PAPER_BOOKS.find((b) => underOf(b.id) === under) || LIVE_PAPER_BOOKS[0];
+  return {
+    ...base,
+    ...def.patch,
+    id: `${under}-${def.id}`,
+    under,
+    desk: "hunt",
+    label: `${base.label} \xB7 ${def.label}`,
+    buyOption: true,
+    atm: true,
+    barMinutes: 1,
+    maxTradesPerDay: def.patch.maxTradesPerDay ?? PAPER_HUNT_MAX_TRADES,
+    dayStops: def.patch.dayStops ?? false,
+    minGapMin: def.patch.minGapMin ?? 1,
+    backup: def.patch.backup ?? {}
+  };
+}
+function emptyHunt(day) {
+  const books = UNDERS.flatMap(
+    (under) => PAPER_HUNT_METHODS.map((def) => emptyBook(huntMethodCfg(under, def)))
+  );
+  return { day, trades: 0, stats: books.map((b) => statOf(b)), books };
+}
+function statOf(book) {
+  const under = book.under || underOf(book.id);
+  const method = book.id.slice(under.length + 1);
+  const def = PAPER_HUNT_METHODS.find((m) => m.id === method);
+  const fills = book.fills;
+  const closedRs = Math.round((book.closedRs || 0) * 10) / 10;
+  const wins = fills.filter((f) => f.rs > 0).length;
+  const losses = fills.filter((f) => f.rs < 0).length;
+  const maxPx = fills.reduce((m, f) => {
+    const px = f.maxPx ?? f.exit;
+    return m == null ? px : Math.max(m, px);
+  }, book.peakPx ?? null);
+  const minPx = fills.reduce((m, f) => {
+    const px = f.minPx ?? f.exit;
+    return m == null ? px : Math.min(m, px);
+  }, book.troughPx ?? null);
+  const mfeRs = fills.reduce((m, f) => Math.max(m, f.mfeRs ?? f.rs), 0);
+  const maeRs = fills.reduce((m, f) => Math.min(m, f.maeRs ?? f.rs), 0);
+  return {
+    id: book.id,
+    method,
+    label: def?.label || method,
+    family: def?.family || "momentum",
+    under,
+    trades: fills.length,
+    wins,
+    losses,
+    closedRs,
+    maxPx,
+    minPx,
+    mfeRs: Math.round(mfeRs * 10) / 10,
+    maeRs: Math.round(maeRs * 10) / 10,
+    avgRs: fills.length ? Math.round(closedRs / fills.length * 10) / 10 : 0
+  };
+}
+function compactHunt(state) {
+  return {
+    ...state,
+    books: state.books.map((b) => ({
+      ...b,
+      skips: [],
+      signal: null,
+      kiteNote: "",
+      kiteBuyOrderId: "",
+      kiteSlOrderId: "",
+      neededCe: "",
+      neededPe: "",
+      fills: b.fills.map((f) => ({ ...f, signal: null }))
+    }))
+  };
+}
+function huntBindOption(book, cfg, pair, side, nowMin, nowIso) {
+  const pick = book.side === "long" ? pair?.ce : pair?.pe;
+  if (!pick || !(pick.instrument.instrumentToken > 0)) {
+    return {
+      ...book,
+      side: "flat",
+      entry: null,
+      sl: null,
+      tp: null,
+      scratch: null,
+      status: "watching",
+      livePts: 0,
+      liveRs: 0,
+      reason: "skipped: no listed contract"
+    };
+  }
+  const fill = liveBuyPrice(side.ask, side.last);
+  if (fill.price == null) {
+    return {
+      ...book,
+      side: "flat",
+      entry: null,
+      sl: null,
+      tp: null,
+      scratch: null,
+      status: "watching",
+      livePts: 0,
+      liveRs: 0,
+      reason: "skipped: no live quote"
+    };
+  }
+  const bound = bindOptionFill(book, cfg, fill.price, pick, null, nowMin);
+  return { ...bound, entryBid: side.bid, entryAsk: side.ask, entryAt: nowIso };
+}
+function tickPaperHunt(args) {
+  const prev = args.prev?.day === args.day && args.prev.books.length === UNDERS.length * PAPER_HUNT_METHODS.length ? args.prev : emptyHunt(args.day);
+  const byId = new Map(prev.books.map((b) => [b.id, b]));
+  const nextBooks = [];
+  for (const under of UNDERS) {
+    const bars = args.barsByUnder.get(under) || [];
+    const q = args.quotesByUnder.get(under);
+    const pair = args.picksByUnder.get(under);
+    for (const def of PAPER_HUNT_METHODS) {
+      const cfg = huntMethodCfg(under, def);
+      const prevBook = byId.get(cfg.id) || emptyBook(cfg);
+      const side = prevBook.optionType === "PE" || prevBook.side === "short" ? q?.pe : q?.ce;
+      const mark = side?.last ?? side?.bid ?? q?.underLast ?? prevBook.last;
+      const bid = side?.bid ?? null;
+      const ask = side?.ask ?? null;
+      let next = tickBook(prevBook, cfg, bars, mark, args.day, args.nowMin, prevBook.optionSymbol || cfg.label, [], {
+        bid,
+        ask,
+        blockOpen: null,
+        evolve: args.evolve
+      });
+      if (next.side !== "flat" && !next.optionSymbol) {
+        next = huntBindOption(next, cfg, pair, next.side === "long" ? q?.ce || { bid: null, ask: null, last: null } : q?.pe || { bid: null, ask: null, last: null }, args.nowMin, args.nowIso);
+      }
+      nextBooks.push(next);
+    }
+  }
+  const stats = nextBooks.map(statOf);
+  return compactHunt({
+    day: args.day,
+    trades: stats.reduce((s, r) => s + r.trades, 0),
+    stats,
+    books: nextBooks
+  });
+}
+
 // ../palagai/src/app/core/paper-desk/paper-tick.run.ts
-var UNDERS = ["crude", "nifty", "bank", "sensex"];
+var UNDERS2 = ["crude", "nifty", "bank", "sensex"];
 var NO_BUDGET_CAP = 1e7;
 async function runPaperTick(io) {
   const now = io.now || /* @__PURE__ */ new Date();
@@ -1912,7 +2148,7 @@ async function runPaperTick(io) {
   const cheapByUnder = /* @__PURE__ */ new Map();
   const cheapKeys = [];
   const asOfCfg = LIVE_PAPER_BOOKS[0];
-  for (const under of UNDERS) {
+  for (const under of UNDERS2) {
     const inst = instOf(under, crude, nifty, bank, sensex);
     const spot = lastPrice(quotes, under, inst?.tradingSymbol || "") ?? 0;
     const pair = cheapPair(chain, under, spot, pickAsOf(asOfCfg, now), asOfCfg.atm ? 0 : void 0);
@@ -1929,7 +2165,7 @@ async function runPaperTick(io) {
   }
   const from = shiftDay(day, -8);
   const barCache = /* @__PURE__ */ new Map();
-  for (const under of UNDERS) {
+  for (const under of UNDERS2) {
     const inst = instOf(under, crude, nifty, bank, sensex);
     let bars = [];
     if (inst?.token) {
@@ -2014,6 +2250,26 @@ async function runPaperTick(io) {
     });
   }
   const books = LIVE_PAPER_BOOKS.map((c) => nextById.get(c.id) || cur.books.find((b) => b.id === c.id));
+  const quotesByUnder = /* @__PURE__ */ new Map();
+  for (const under of UNDERS2) {
+    const inst = instOf(under, crude, nifty, bank, sensex);
+    const pair = cheapByUnder.get(under);
+    quotesByUnder.set(under, {
+      ce: huntSideQuote(quotes, pair?.ce),
+      pe: huntSideQuote(quotes, pair?.pe),
+      underLast: lastPrice(quotes, under, inst?.tradingSymbol || "")
+    });
+  }
+  const hunt = tickPaperHunt({
+    prev: cur.hunt,
+    day,
+    nowMin,
+    nowIso: now.toISOString(),
+    barsByUnder: barCache,
+    quotesByUnder,
+    picksByUnder: cheapByUnder,
+    evolve: flags
+  });
   const snap = summarizePaper(books, {
     running: true,
     day,
@@ -2023,7 +2279,8 @@ async function runPaperTick(io) {
     kiteFunds: funds,
     kiteError: null,
     liveOrders: paperLiveArmed(io.live, io.liveBooks),
-    evolve: evolved.state
+    evolve: evolved.state,
+    hunt
   });
   const after = evolvePaperDesk(nightLog(snap), evolved.state);
   return { ...snap, evolve: after.state };
@@ -2326,6 +2583,13 @@ function findQuote(quotes, key) {
   }
   return null;
 }
+function huntSideQuote(quotes, pick) {
+  if (!pick?.instrument?.tradingSymbol) return { bid: null, ask: null, last: null };
+  const key = `${pick.instrument.exchange}:${pick.instrument.tradingSymbol}`;
+  const q = findQuote(quotes, key);
+  const { bid, ask } = bestBidAsk(q);
+  return { bid, ask, last: lastByKey(quotes, key) };
+}
 function bestBidAsk(q) {
   const bid = Number(q?.depth?.buy?.[0]?.price);
   const ask = Number(q?.depth?.sell?.[0]?.price);
@@ -2368,6 +2632,7 @@ function shiftDay(day, delta) {
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
   LIVE_PAPER_BOOKS,
+  compactHunt,
   emptyEvolve,
   emptySession,
   evolvePaperDesk,

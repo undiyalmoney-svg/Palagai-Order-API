@@ -213,7 +213,11 @@ async function tickOnce() {
         const prev = prevBooks.find((b) => b.id === next.id) || next;
         books.push(await overlayBook(authorization, state, prev, next));
       }
-      nextSession = { ...nextSession, books, liveOrders: store.liveArmed(state) };
+      const hunt =
+        nextSession.hunt && eng && typeof eng.compactHunt === 'function'
+          ? eng.compactHunt(nextSession.hunt)
+          : nextSession.hunt;
+      nextSession = { ...nextSession, books, hunt, liveOrders: store.liveArmed(state) };
       state.session = nextSession;
       if (nextSession.evolve) state.evolve = nextSession.evolve;
     }
