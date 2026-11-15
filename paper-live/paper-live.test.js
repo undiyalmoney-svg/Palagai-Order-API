@@ -103,7 +103,7 @@ test('evolve ships bid-through so the judge can apply the next patch', () => {
   assert.equal(state.evolve.applied[0].id, 'option-tick-exit-when-bid-through-level');
 });
 
-test('paper tick bundle hunts 50 methods per name as paper tickets', () => {
+test('paper tick bundle hunts named methods including algos as paper tickets', () => {
   const fs = require('fs');
   const path = require('path');
   const js = fs.readFileSync(path.join(__dirname, 'from-paper/bundle.js'), 'utf8');
@@ -111,4 +111,8 @@ test('paper tick bundle hunts 50 methods per name as paper tickets', () => {
   assert.match(js, /tickPaperHunt/);
   assert.match(js, /rule-dense/);
   assert.match(js, /compactHunt/);
+  assert.match(js, /algo-ema-cross/);
+  assert.match(js, /algo-donch20/);
+  assert.match(js, /ema_cross/);
+  assert.match(js, /supertrend/);
 });

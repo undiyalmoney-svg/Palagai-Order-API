@@ -615,6 +615,102 @@ function prevHl(bars, day) {
   if (!prev.length) return null;
   return { hi: Math.max(...prev.map((b) => b.high)), lo: Math.min(...prev.map((b) => b.low)) };
 }
+function closesTo(bars, i) {
+  return bars.slice(0, i + 1).map((x) => x.close);
+}
+function emaLast(xs, period) {
+  if (xs.length < period) return null;
+  const k = 2 / (period + 1);
+  let ema = xs.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  for (let j = period; j < xs.length; j++) ema = xs[j] * k + ema * (1 - k);
+  return ema;
+}
+function smaLast(xs, period) {
+  if (xs.length < period) return null;
+  const slice = xs.slice(xs.length - period);
+  return slice.reduce((a, b) => a + b, 0) / period;
+}
+function stdevLast(xs, period) {
+  const mean = smaLast(xs, period);
+  if (mean == null) return null;
+  const slice = xs.slice(xs.length - period);
+  const varSum = slice.reduce((s, x) => s + (x - mean) ** 2, 0) / period;
+  return Math.sqrt(varSum);
+}
+function rsiLast(xs, period = 14) {
+  if (xs.length < period + 1) return null;
+  let gain = 0;
+  let loss = 0;
+  for (let j = 1; j <= period; j++) {
+    const d = xs[j] - xs[j - 1];
+    if (d >= 0) gain += d;
+    else loss -= d;
+  }
+  gain /= period;
+  loss /= period;
+  for (let j = period + 1; j < xs.length; j++) {
+    const d = xs[j] - xs[j - 1];
+    gain = (gain * (period - 1) + Math.max(d, 0)) / period;
+    loss = (loss * (period - 1) + Math.max(-d, 0)) / period;
+  }
+  if (loss === 0) return 100;
+  return 100 - 100 / (1 + gain / loss);
+}
+function macdLast(xs) {
+  if (xs.length < 35) return null;
+  const line = [];
+  for (let j = 25; j < xs.length; j++) {
+    const slice = xs.slice(0, j + 1);
+    const fast = emaLast(slice, 12);
+    const slow = emaLast(slice, 26);
+    if (fast == null || slow == null) return null;
+    line.push(fast - slow);
+  }
+  const signal = emaLast(line, 9);
+  if (signal == null) return null;
+  return { macd: line[line.length - 1], signal };
+}
+function trAt(bars, j) {
+  const c = bars[j];
+  const p = bars[j - 1];
+  if (!p) return c.high - c.low;
+  return Math.max(c.high - c.low, Math.abs(c.high - p.close), Math.abs(c.low - p.close));
+}
+function supertrendFlip(bars, i, period = 10, mult = 3) {
+  if (i < period + 1) return 0;
+  let atr = 0;
+  for (let j = 1; j <= period; j++) atr += trAt(bars, j);
+  atr /= period;
+  let dir = 1;
+  let up = (bars[period].high + bars[period].low) / 2 - mult * atr;
+  let dn = (bars[period].high + bars[period].low) / 2 + mult * atr;
+  for (let j = period + 1; j <= i; j++) {
+    atr = (atr * (period - 1) + trAt(bars, j)) / period;
+    const mid = (bars[j].high + bars[j].low) / 2;
+    let nextUp = mid - mult * atr;
+    let nextDn = mid + mult * atr;
+    const prevClose = bars[j - 1].close;
+    if (prevClose > up) nextUp = Math.max(nextUp, up);
+    if (prevClose < dn) nextDn = Math.min(nextDn, dn);
+    const prevDir = dir;
+    if (bars[j].close > dn) dir = 1;
+    else if (bars[j].close < up) dir = -1;
+    up = nextUp;
+    dn = nextDn;
+    if (j === i && dir !== prevDir) return dir;
+  }
+  return 0;
+}
+function donchBreak(bars, i, lookback) {
+  if (i < lookback) return 0;
+  const win = bars.slice(i - lookback, i);
+  const hi = Math.max(...win.map((x) => x.high));
+  const lo = Math.min(...win.map((x) => x.low));
+  const b = bars[i];
+  if (b.close > hi && b.close > b.open) return 1;
+  if (b.close < lo && b.close < b.open) return -1;
+  return 0;
+}
 function bookSignal(mode, bars, i, cfg) {
   const b = bars[i];
   const up = b.close > b.open;
@@ -677,6 +773,107 @@ function bookSignal(mode, bars, i, cfg) {
   if (mode === "pdhl_fade") return pdhl() || fade();
   if (mode === "fade_trap") return fade() || trap();
   if (mode === "all_three") return pdhl() || fade() || trap();
+  if (mode === "ema_cross") {
+    const xs = closesTo(bars, i);
+    const fast = emaLast(xs, 9);
+    const slow = emaLast(xs, 21);
+    const prevFast = emaLast(xs.slice(0, -1), 9);
+    const prevSlow = emaLast(xs.slice(0, -1), 21);
+    if (fast == null || slow == null || prevFast == null || prevSlow == null) return 0;
+    if (prevFast <= prevSlow && fast > slow) return 1;
+    if (prevFast >= prevSlow && fast < slow) return -1;
+    return 0;
+  }
+  if (mode === "ema_pull") {
+    const xs = closesTo(bars, i);
+    const e = emaLast(xs, 21);
+    const prevE = emaLast(xs.slice(0, -1), 21);
+    if (e == null || prevE == null) return 0;
+    if (e > prevE && b.low <= e && b.close > e && up) return 1;
+    if (e < prevE && b.high >= e && b.close < e && dn) return -1;
+    return 0;
+  }
+  if (mode === "donch20") return donchBreak(bars, i, 20);
+  if (mode === "donch55") return donchBreak(bars, i, 55);
+  if (mode === "inside_break") {
+    if (i < 2) return 0;
+    const mother = bars[i - 2];
+    const inside = bars[i - 1];
+    if (inside.high > mother.high || inside.low < mother.low) return 0;
+    if (b.close > inside.high && up) return 1;
+    if (b.close < inside.low && dn) return -1;
+    return 0;
+  }
+  if (mode === "vwap_reclaim") {
+    if (i < 1) return 0;
+    const vwap = sessionVwap(bars, i);
+    const prevV = sessionVwap(bars, i - 1);
+    const prior = bars[i - 1];
+    if (vwap == null || prevV == null) return 0;
+    const need = cfg.vwapPct != null && prevV > 0 ? prevV * cfg.vwapPct : cfg.vwapMin;
+    if (Math.abs(prior.close - prevV) < need) return 0;
+    if (prior.close < prevV && b.close > vwap && up) return 1;
+    if (prior.close > prevV && b.close < vwap && dn) return -1;
+    return 0;
+  }
+  if (mode === "gap_fade") {
+    const days = [...new Set(bars.map((x) => x.day))].sort();
+    const di = days.indexOf(b.day);
+    if (di <= 0) return 0;
+    const prev = bars.filter((x) => x.day === days[di - 1]);
+    const today = bars.filter((x) => x.day === b.day && x.min <= b.min);
+    if (!prev.length || !today.length) return 0;
+    if (b.min > cfg.orE + 45) return 0;
+    const open0 = today[0].open;
+    const gap = open0 - prev[prev.length - 1].close;
+    const need = Math.max(1, Math.abs(prev[prev.length - 1].close) * 15e-4);
+    const prior = i > 0 && bars[i - 1].day === b.day ? bars[i - 1] : null;
+    if (gap > need && dn && b.close < open0 && (!prior || prior.close >= open0)) return -1;
+    if (gap < -need && up && b.close > open0 && (!prior || prior.close <= open0)) return 1;
+    return 0;
+  }
+  if (mode === "rsi14") {
+    const xs = closesTo(bars, i);
+    const cur = rsiLast(xs, 14);
+    const prev = rsiLast(xs.slice(0, -1), 14);
+    if (cur == null || prev == null) return 0;
+    if (prev < 30 && cur >= 30 && up) return 1;
+    if (prev > 70 && cur <= 70 && dn) return -1;
+    return 0;
+  }
+  if (mode === "macd") {
+    const xs = closesTo(bars, i);
+    const cur = macdLast(xs);
+    const prev = macdLast(xs.slice(0, -1));
+    if (!cur || !prev) return 0;
+    if (prev.macd <= prev.signal && cur.macd > cur.signal) return 1;
+    if (prev.macd >= prev.signal && cur.macd < cur.signal) return -1;
+    return 0;
+  }
+  if (mode === "bb_mean") {
+    const xs = closesTo(bars, i);
+    const mean = smaLast(xs, 20);
+    const sd = stdevLast(xs, 20);
+    const prevMean = smaLast(xs.slice(0, -1), 20);
+    const prevSd = stdevLast(xs.slice(0, -1), 20);
+    if (mean == null || sd == null || prevMean == null || prevSd == null || i < 1) return 0;
+    const prior = bars[i - 1];
+    if (prior.close > prevMean + 2 * prevSd && b.close <= mean + 2 * sd && dn) return -1;
+    if (prior.close < prevMean - 2 * prevSd && b.close >= mean - 2 * sd && up) return 1;
+    return 0;
+  }
+  if (mode === "supertrend") return supertrendFlip(bars, i);
+  if (mode === "or_retest") {
+    if (b.min <= cfg.orE) return 0;
+    const orb = sessionOr(bars, b.day, cfg.orS, cfg.orE);
+    if (!orb) return 0;
+    const after = bars.filter((x) => x.day === b.day && x.min > cfg.orE && x.min < b.min);
+    const brokeHi = after.some((x) => x.close > orb.hi);
+    const brokeLo = after.some((x) => x.close < orb.lo);
+    if (brokeHi && b.low <= orb.hi && b.close > orb.hi && up) return 1;
+    if (brokeLo && b.high >= orb.lo && b.close < orb.lo && dn) return -1;
+    return 0;
+  }
   return 0;
 }
 
@@ -1916,7 +2113,6 @@ var TREND = (mode) => ({ trend: mode, range: "stand", quiet: "stand", stand: "st
 var RANGE = (mode) => ({ trend: "stand", range: mode, quiet: "stand", stand: "stand" });
 var QUIET = (mode) => ({ trend: "stand", range: "stand", quiet: mode, stand: "stand" });
 var PAPER_HUNT_MAX_TRADES = 50;
-var PAPER_HUNT_CAP = PAPER_HUNT_MAX_TRADES * 4 * 50;
 var PAPER_HUNT_METHODS = [
   { id: "mom-08", label: "mom 0.8\xD7 both", family: "momentum", patch: { strategy: "momentum", primary: ALL2("momentum"), momK: 0.8 } },
   { id: "mom-06", label: "mom 0.6\xD7 both", family: "momentum", patch: { strategy: "momentum", primary: ALL2("momentum"), momK: 0.6 } },
@@ -1967,8 +2163,26 @@ var PAPER_HUNT_METHODS = [
   { id: "rule-3-trades", label: "mom 0.8\xD7 three fills", family: "rule", patch: { strategy: "momentum", primary: ALL2("momentum"), momK: 0.8, maxTradesPerDay: 3 } },
   { id: "rule-sit-370", label: "mom 0.8\xD7 sit at \u20B9370", family: "rule", patch: { strategy: "momentum", primary: ALL2("momentum"), momK: 0.8, minDayNetRs: 370 } },
   { id: "rule-2-wins", label: "mom 0.8\xD7 sit after 2 wins", family: "rule", patch: { strategy: "momentum", primary: ALL2("momentum"), momK: 0.8, maxWinsPerDay: 2 } },
-  { id: "rule-dense", label: "mom 0.8\xD7 dense (no gap, no day stop)", family: "rule", patch: { strategy: "momentum", primary: ALL2("momentum"), momK: 0.8, minGapMin: 0, dayStops: false, noConfirm: true } }
+  { id: "rule-dense", label: "mom 0.8\xD7 dense (no gap, no day stop)", family: "rule", patch: { strategy: "momentum", primary: ALL2("momentum"), momK: 0.8, minGapMin: 0, dayStops: false, noConfirm: true } },
+  { id: "algo-ema-cross", label: "algo EMA 9/21 cross", family: "algo", patch: { strategy: "rules", primary: ALL2("ema_cross"), backup: {} } },
+  { id: "algo-ema-pull", label: "algo EMA 21 pullback", family: "algo", patch: { strategy: "rules", primary: ALL2("ema_pull"), backup: {} } },
+  { id: "algo-donch20", label: "algo Donchian 20", family: "algo", patch: { strategy: "rules", primary: ALL2("donch20"), backup: {} } },
+  { id: "algo-donch55", label: "algo Donchian 55 turtle", family: "algo", patch: { strategy: "rules", primary: ALL2("donch55"), backup: {} } },
+  { id: "algo-inside", label: "algo inside-bar break", family: "algo", patch: { strategy: "rules", primary: ALL2("inside_break"), backup: {} } },
+  { id: "algo-vwap-reclaim", label: "algo VWAP reclaim", family: "algo", patch: { strategy: "rules", primary: ALL2("vwap_reclaim"), backup: {} } },
+  { id: "algo-gap-fade", label: "algo gap fade", family: "algo", patch: { strategy: "rules", primary: ALL2("gap_fade"), backup: {} } },
+  { id: "algo-rsi", label: "algo RSI 14 bounce", family: "algo", patch: { strategy: "rules", primary: ALL2("rsi14"), backup: {} } },
+  { id: "algo-macd", label: "algo MACD cross", family: "algo", patch: { strategy: "rules", primary: ALL2("macd"), backup: {} } },
+  { id: "algo-bb", label: "algo Bollinger mean", family: "algo", patch: { strategy: "rules", primary: ALL2("bb_mean"), backup: {} } },
+  { id: "algo-supertrend", label: "algo Supertrend flip", family: "algo", patch: { strategy: "rules", primary: ALL2("supertrend"), backup: {} } },
+  { id: "algo-or-retest", label: "algo OR retest", family: "algo", patch: { strategy: "rules", primary: ALL2("or_retest"), backup: {} } },
+  { id: "algo-ema-skip-range", label: "algo EMA 9/21 skip range", family: "algo", patch: { strategy: "rules", primary: ALL2("ema_cross"), backup: {}, skipStructures: ["range"] } },
+  { id: "algo-donch20-skip-range", label: "algo Donchian 20 skip range", family: "algo", patch: { strategy: "rules", primary: ALL2("donch20"), backup: {}, skipStructures: ["range"] } },
+  { id: "mix-algo-ema", label: "mix + EMA 9/21", family: "mix", patch: { strategy: "rules", primary: ALL2("ema_cross"), backup: {}, mix: true } }
 ];
+var PAPER_HUNT_CAP = PAPER_HUNT_MAX_TRADES * 4 * PAPER_HUNT_METHODS.length;
+var huntCapText = PAPER_HUNT_CAP.toLocaleString("en-IN");
+var PAPER_HUNT_HONEST = `Each of Nifty, Bank, Sensex and Crude Mini runs the same ${PAPER_HUNT_METHODS.length} methods (momentum, pattern, mix, rule and algo) as paper tickets. Each method may take up to 50 fills, so a full session can print up to ${huntCapText} paper tickets \u2014 not ${huntCapText} Kite orders. Every ticket stores max price reached and max loss reached. EOD ranks the method. Start from the open; a late Start does not catch up stale bars. Live Kite never sees the hunt. Not a guaranteed profit.`;
 
 // ../palagai/src/app/core/paper-desk/paper-hunt.engine.ts
 var UNDERS = ["nifty", "bank", "sensex", "crude"];
