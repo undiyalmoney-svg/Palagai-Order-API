@@ -115,4 +115,6 @@ test('paper tick bundle hunts named methods including algos as paper tickets', (
   assert.match(js, /algo-donch20/);
   assert.match(js, /ema_cross/);
   assert.match(js, /supertrend/);
+  assert.match(js, /algo-ema-ce/);
+  assert.match(js, /mix-supertrend/);
 });
