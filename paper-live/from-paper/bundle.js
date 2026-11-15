@@ -452,6 +452,7 @@ function replayBudgetSkips(book) {
 var LIVE_ASSUME_CAPITAL = 14e3;
 var LIVE_ASSUME_CHARGE = 50;
 var LIVE_ASSUME_CRUDE_MIN = 8e3;
+var OPEN5_ZONE_PCT = 4011e-6;
 function momentumGauge(bars, i) {
   const b = bars[i];
   if (!b || i < 20) return null;
@@ -606,6 +607,11 @@ function sessionOr(bars, day, orS, orE) {
   const or = bars.filter((b) => b.day === day && b.min >= orS && b.min <= orE);
   if (!or.length) return null;
   return { hi: Math.max(...or.map((b) => b.high)), lo: Math.min(...or.map((b) => b.low)) };
+}
+function first5MinClose(bars, day, openMin) {
+  const win = bars.filter((x) => x.day === day && x.min >= openMin && x.min < openMin + 5);
+  if (!win.length) return null;
+  return win[win.length - 1].close;
 }
 function prevHl(bars, day) {
   const days = [...new Set(bars.map((b) => b.day))].sort();
@@ -872,6 +878,18 @@ function bookSignal(mode, bars, i, cfg) {
     const brokeLo = after.some((x) => x.close < orb.lo);
     if (brokeHi && b.low <= orb.hi && b.close > orb.hi && up) return 1;
     if (brokeLo && b.high >= orb.lo && b.close < orb.lo && dn) return -1;
+    return 0;
+  }
+  if (mode === "open5_zone") {
+    const openMin = cfg.orS;
+    if (b.min < openMin + 5) return 0;
+    const c0 = first5MinClose(bars, b.day, openMin);
+    if (c0 == null || c0 <= 0) return 0;
+    const zone = c0 * (1 - OPEN5_ZONE_PCT);
+    const prior = i > 0 && bars[i - 1].day === b.day ? bars[i - 1] : null;
+    if (!prior) return 0;
+    if (prior.close > zone && b.low <= zone && b.close > zone) return 1;
+    if (prior.close >= zone && b.close < zone) return -1;
     return 0;
   }
   return 0;
@@ -2213,7 +2231,10 @@ var PAPER_HUNT_METHODS = [
   { id: "algo-or-retest-skip-range", label: "algo OR retest skip range", family: "algo", patch: { strategy: "rules", primary: ALL2("or_retest"), backup: {}, skipStructures: ["range"] } },
   { id: "algo-inside-skip-range", label: "algo inside-bar skip range", family: "algo", patch: { strategy: "rules", primary: ALL2("inside_break"), backup: {}, skipStructures: ["range"] } },
   { id: "algo-bb-skip-range", label: "algo Bollinger skip range", family: "algo", patch: { strategy: "rules", primary: ALL2("bb_mean"), backup: {}, skipStructures: ["range"] } },
-  { id: "algo-st-ce", label: "algo Supertrend CE only", family: "algo", patch: { strategy: "rules", primary: ALL2("supertrend"), backup: {}, onlyDir: 1 } }
+  { id: "algo-st-ce", label: "algo Supertrend CE only", family: "algo", patch: { strategy: "rules", primary: ALL2("supertrend"), backup: {}, onlyDir: 1 } },
+  { id: "open5-zone", label: "open5 zone \u22120.4011%", family: "pattern", patch: { strategy: "rules", primary: ALL2("open5_zone"), backup: {} } },
+  { id: "open5-zone-ce", label: "open5 zone bounce CE", family: "pattern", patch: { strategy: "rules", primary: ALL2("open5_zone"), backup: {}, onlyDir: 1 } },
+  { id: "open5-zone-pe", label: "open5 zone lose PE", family: "pattern", patch: { strategy: "rules", primary: ALL2("open5_zone"), backup: {}, onlyDir: -1 } }
 ];
 var PAPER_HUNT_CAP = PAPER_HUNT_MAX_TRADES * 4 * PAPER_HUNT_METHODS.length;
 var huntCapText = PAPER_HUNT_CAP.toLocaleString("en-IN");
@@ -2223,6 +2244,7 @@ var PAPER_HUNT_HONEST = `Each of Nifty, Bank, Sensex and Crude Mini runs the sam
 var UNDERS = ["nifty", "bank", "sensex", "crude"];
 function huntMethodCfg(under, def) {
   const base = LIVE_PAPER_BOOKS.find((b) => underOf(b.id) === under) || LIVE_PAPER_BOOKS[0];
+  const open5 = def.id.startsWith("open5-zone");
   return {
     ...base,
     ...def.patch,
@@ -2236,7 +2258,8 @@ function huntMethodCfg(under, def) {
     maxTradesPerDay: def.patch.maxTradesPerDay ?? PAPER_HUNT_MAX_TRADES,
     dayStops: def.patch.dayStops ?? false,
     minGapMin: def.patch.minGapMin ?? 1,
-    backup: def.patch.backup ?? {}
+    backup: def.patch.backup ?? {},
+    ...open5 ? { entryS: (base.orS ?? 9 * 60 + 15) + 5 } : {}
   };
 }
 function emptyHunt(day) {
