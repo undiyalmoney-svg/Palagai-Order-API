@@ -111,6 +111,8 @@ test('paper tick bundle hunts named methods including algos as paper tickets', (
   assert.match(js, /tickPaperHunt/);
   assert.match(js, /rule-dense/);
   assert.match(js, /compactHunt/);
+  assert.match(js, /slimHunt/);
+  assert.match(js, /mergeHunt/);
   assert.match(js, /algo-ema-cross/);
   assert.match(js, /algo-donch20/);
   assert.match(js, /ema_cross/);

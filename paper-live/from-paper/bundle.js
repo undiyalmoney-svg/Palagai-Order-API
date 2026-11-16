@@ -26,9 +26,11 @@ __export(index_exports, {
   evolvePaperDesk: () => evolvePaperDesk,
   istDay: () => istDay,
   keepPaperOnKite: () => keepPaperOnKite,
+  mergeHunt: () => mergeHunt,
   paperEvolveFlags: () => paperEvolveFlags,
   paperLiveArmedFor: () => paperLiveArmedFor,
   runPaperTick: () => runPaperTick,
+  slimHunt: () => slimHunt,
   underOf: () => underOf
 });
 module.exports = __toCommonJS(index_exports);
@@ -2301,11 +2303,8 @@ function huntMethodCfg(under, def) {
     ...open5 ? { entryS: (base.orS ?? 9 * 60 + 15) + 5 } : {}
   };
 }
-function emptyHunt(day) {
-  const books = UNDERS.flatMap(
-    (under) => PAPER_HUNT_METHODS.map((def) => emptyBook(huntMethodCfg(under, def)))
-  );
-  return { day, trades: 0, stats: books.map((b) => statOf(b)), books, feed: "" };
+function huntBookId(under, methodId) {
+  return `${under}-${methodId}`;
 }
 var HUNT_MAX_ABS_RS = 5e4;
 function scrubHuntBook(book) {
@@ -2390,6 +2389,49 @@ function compactHunt(state) {
     }))
   };
 }
+function slimHunt(state) {
+  return compactHunt({
+    ...state,
+    books: state.books.filter((b) => b.fills && b.fills.length > 0 || b.side !== "flat")
+  });
+}
+function bookTickets(book) {
+  if (!book) return 0;
+  return (book.fills?.length || 0) + (book.side !== "flat" ? 1 : 0);
+}
+function richerBook(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  const aN = bookTickets(a);
+  const bN = bookTickets(b);
+  if (aN !== bN) return aN > bN ? a : b;
+  if (a.side !== "flat" && b.side === "flat") return a;
+  if (b.side !== "flat" && a.side === "flat") return b;
+  return (a.closedRs || 0) >= (b.closedRs || 0) ? a : b;
+}
+function mergeHunt(local, remote, day) {
+  const a = local?.day === day ? local : null;
+  const b = remote?.day === day ? remote : null;
+  const byId = /* @__PURE__ */ new Map();
+  for (const book of [...b?.books || [], ...a?.books || []]) {
+    const keep = richerBook(byId.get(book.id), book);
+    if (keep) byId.set(book.id, keep);
+  }
+  const books = UNDERS.flatMap(
+    (under) => PAPER_HUNT_METHODS.map((def) => {
+      const id = huntBookId(under, def.id);
+      return byId.get(id) || emptyBook(huntMethodCfg(under, def));
+    })
+  );
+  const stats = books.map(statOf);
+  return compactHunt({
+    day,
+    trades: stats.reduce((s, r) => s + r.trades, 0),
+    stats,
+    books,
+    feed: a?.feed || b?.feed || ""
+  });
+}
 function huntBindOption(book, cfg, pair, side, nowMin, nowIso, day = "") {
   const pick = book.side === "long" ? pair?.ce : pair?.pe;
   if (!pick || !(pick.instrument.instrumentToken > 0)) {
@@ -2461,7 +2503,7 @@ function huntBindOption(book, cfg, pair, side, nowMin, nowIso, day = "") {
   return { ...bound, entryBid: side.bid, entryAsk: side.ask, entryAt: nowIso };
 }
 function tickPaperHunt(args) {
-  const prev = args.prev?.day === args.day && args.prev.books.length === UNDERS.length * PAPER_HUNT_METHODS.length ? args.prev : emptyHunt(args.day);
+  const prev = mergeHunt(args.prev, null, args.day);
   const byId = new Map(prev.books.map((b) => [b.id, scrubHuntBook(b)]));
   const nextBooks = [];
   for (const under of UNDERS) {
@@ -3104,8 +3146,10 @@ function shiftDay(day, delta) {
   evolvePaperDesk,
   istDay,
   keepPaperOnKite,
+  mergeHunt,
   paperEvolveFlags,
   paperLiveArmedFor,
   runPaperTick,
+  slimHunt,
   underOf
 });

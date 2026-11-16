@@ -214,9 +214,11 @@ async function tickOnce() {
         books.push(await overlayBook(authorization, state, prev, next));
       }
       const hunt =
-        nextSession.hunt && eng && typeof eng.compactHunt === 'function'
-          ? eng.compactHunt(nextSession.hunt)
-          : nextSession.hunt;
+        nextSession.hunt && eng && typeof eng.slimHunt === 'function'
+          ? eng.slimHunt(nextSession.hunt)
+          : nextSession.hunt && eng && typeof eng.compactHunt === 'function'
+            ? eng.compactHunt(nextSession.hunt)
+            : nextSession.hunt;
       nextSession = { ...nextSession, books, hunt, liveOrders: store.liveArmed(state) };
       state.session = nextSession;
       if (nextSession.evolve) state.evolve = nextSession.evolve;
