@@ -2424,7 +2424,9 @@ function huntBindOption(book, cfg, pair, side, nowMin, nowIso, day = "") {
     };
   }
   const fill = liveBuyPrice(side.ask, side.last);
-  if (fill.price == null || optionPremiumPx(fill.price) == null) {
+  const chainPrem = pick.source === "chain" ? optionPremiumPx(pick.instrument.lastPrice) : null;
+  const prem = fill.price != null && optionPremiumPx(fill.price) != null ? fill.price : chainPrem;
+  if (prem == null) {
     return {
       ...book,
       side: "flat",
@@ -2455,7 +2457,7 @@ function huntBindOption(book, cfg, pair, side, nowMin, nowIso, day = "") {
       ].slice(-20)
     };
   }
-  const bound = bindOptionFill(book, cfg, fill.price, pick, null, nowMin);
+  const bound = bindOptionFill(book, cfg, prem, pick, null, nowMin);
   return { ...bound, entryBid: side.bid, entryAsk: side.ask, entryAt: nowIso };
 }
 function tickPaperHunt(args) {
@@ -2522,6 +2524,33 @@ function tickPaperHunt(args) {
     books: nextBooks,
     feed: skipNote
   });
+}
+
+// ../palagai/src/app/core/live-desk/live-start-guard.util.ts
+function parseIstTimestamp(value) {
+  if (!value) {
+    return 0;
+  }
+  const raw = value.trim().replace(" ", "T");
+  const hasZone = /(?:Z|[+-]\d{2}:?\d{2})$/.test(raw);
+  const ms = Date.parse(hasZone ? raw : `${raw}+05:30`);
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+// ../palagai/src/app/core/paper-desk/kite-bar.util.ts
+function kiteBar(row) {
+  const raw = String(row[0] || "");
+  const ms = parseIstTimestamp(raw);
+  if (!ms) return { day: "", min: 0, open: 0, high: 0, low: 0, close: 0 };
+  const ist = new Date(ms + 330 * 60 * 1e3);
+  return {
+    day: ist.toISOString().slice(0, 10),
+    min: ist.getUTCHours() * 60 + ist.getUTCMinutes(),
+    open: Number(row[1]) || 0,
+    high: Number(row[2]) || 0,
+    low: Number(row[3]) || 0,
+    close: Number(row[4]) || 0
+  };
 }
 
 // ../palagai/src/app/core/paper-desk/paper-tick.run.ts
@@ -2709,6 +2738,8 @@ async function bindCheap(book, cfg, chain, spot, quotes, nowMin, io, pair, now) 
   const { bid, ask } = bestBidAsk(q);
   const liveLast = listed ? lastByKey(quotes, key) : null;
   const fill = liveBuyPrice(ask, liveLast);
+  const chainPrem = pick.source === "chain" ? optionPremiumPx(pick.instrument.lastPrice) : null;
+  const premPx = fill.price != null && optionPremiumPx(fill.price) != null ? fill.price : chainPrem;
   const flat = (reason, skip) => ({
     ...book,
     side: "flat",
@@ -2741,7 +2772,7 @@ async function bindCheap(book, cfg, chain, spot, quotes, nowMin, io, pair, now) 
       });
     }
   }
-  if (!listed || fill.price == null || optionPremiumPx(fill.price) == null) {
+  if (!listed || premPx == null) {
     const skip = {
       at: now.toISOString(),
       day: istDay(now),
@@ -2758,7 +2789,7 @@ async function bindCheap(book, cfg, chain, spot, quotes, nowMin, io, pair, now) 
     };
     return flat(listed ? "skipped: no live quote" : "skipped: no listed contract", skip);
   }
-  const prem = fill.price;
+  const prem = premPx;
   const cost = lotCostRs(prem, pick.lotSize);
   const range = await optionRange(pick.instrument.instrumentToken, istDay(now), nowMin, io);
   const stop = optionBoundStops(cfg, prem, pick.lotSize, range);
@@ -2921,15 +2952,16 @@ function findCrudeMini(csv, today) {
     if (cols.length < 12) continue;
     if (cols[11].trim().toUpperCase() !== "MCX" || cols[9].trim().toUpperCase() !== "FUT") continue;
     if (!cols[2].toUpperCase().startsWith("CRUDEOILM")) continue;
+    const exp = /^(\d{4}-\d{2}-\d{2})/.exec((cols[5] || "").trim());
     rows.push({
       token: Number(cols[0]) || 0,
       tradingSymbol: cols[2].trim(),
       exchange: "MCX",
-      expiry: (cols[5] || "").slice(0, 10)
+      expiry: exp ? exp[1] : ""
     });
   }
   rows.sort((a, b) => a.expiry.localeCompare(b.expiry));
-  return rows.find((r) => !r.expiry || r.expiry > today) || null;
+  return rows.find((r) => !r.expiry || r.expiry > today) || rows.find((r) => r.expiry >= today) || rows[0] || null;
 }
 function findNamed(csv, names) {
   const want = names.map((n) => n.toUpperCase());
@@ -2974,22 +3006,6 @@ function barFeedLine(barsByUnder, day) {
   }
   return "";
 }
-function kiteBar(row) {
-  const raw = String(row[0] || "");
-  const d = new Date(raw);
-  const ist = new Date(d.getTime() + 330 * 60 * 1e3);
-  const day = raw.slice(0, 10);
-  const hh = Number.isNaN(d.getTime()) ? Number(raw.slice(11, 13)) : ist.getUTCHours();
-  const mm = Number.isNaN(d.getTime()) ? Number(raw.slice(14, 16)) : ist.getUTCMinutes();
-  return {
-    day,
-    min: hh * 60 + mm,
-    open: Number(row[1]) || 0,
-    high: Number(row[2]) || 0,
-    low: Number(row[3]) || 0,
-    close: Number(row[4]) || 0
-  };
-}
 function needsOption(next) {
   return next.side !== "flat" && !next.optionSymbol;
 }
@@ -3025,7 +3041,9 @@ function huntSideQuote(quotes, pick) {
   const key = `${pick.instrument.exchange}:${pick.instrument.tradingSymbol}`;
   const q = findQuote(quotes, key);
   const { bid, ask } = bestBidAsk(q);
-  return { bid, ask, last: lastByKey(quotes, key) };
+  const live = lastByKey(quotes, key);
+  const chain = pick.source === "chain" ? optionPremiumPx(pick.instrument.lastPrice) : null;
+  return { bid, ask, last: live ?? chain };
 }
 function bestBidAsk(q) {
   const bid = Number(q?.depth?.buy?.[0]?.price);
@@ -3054,10 +3072,16 @@ function lastPrice(quotes, id, symbol) {
     const n = Number(findQuote(quotes, want)?.last_price);
     return Number.isFinite(n) && n > 0 ? n : null;
   }
+  if (id === "crude" && symbol) {
+    const exact = findQuote(quotes, `MCX:${symbol}`);
+    const n = Number(exact?.last_price);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
   for (const [k, v] of Object.entries(quotes)) {
     const key = k.toUpperCase();
     if (id === "crude" && key.includes("CRUDEOILM") && !key.includes("CE") && !key.includes("PE")) {
-      return Number(v.last_price) || null;
+      const n = Number(v.last_price);
+      if (Number.isFinite(n) && n > 0) return n;
     }
     if (symbol && key.includes(symbol.toUpperCase()) && !key.includes("CE") && !key.includes("PE")) {
       const n = Number(v.last_price);
