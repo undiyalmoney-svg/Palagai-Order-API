@@ -411,6 +411,14 @@ function pickCheapOtm(params) {
 }
 
 // ../palagai/src/app/core/paper-desk/live-fill.util.ts
+function optionPremiumPx(px, underLast) {
+  const p = Number(px);
+  if (!Number.isFinite(p) || p <= 0) return null;
+  if (p >= 5e3) return null;
+  const spot = Number(underLast);
+  if (Number.isFinite(spot) && spot > 1e3 && p >= spot * 0.2) return null;
+  return p;
+}
 function liveBuyPrice(ask, last) {
   const a = Number(ask);
   if (Number.isFinite(a) && a > 0) return { price: a, atAsk: true };
@@ -1507,6 +1515,7 @@ function optionBoundStops(cfg, prem, lot, rangePts = null) {
 }
 function bindOptionFill(book, cfg, prem, pick, rangePts = null, atMin) {
   if (book.side === "flat" || prem <= 0) return book;
+  if (isOptionBuy(cfg) && optionPremiumPx(prem) == null) return book;
   const next = { ...book, fills: [...book.fills] };
   const stop = optionBoundStops(cfg, prem, pick.lotSize, rangePts);
   const tpPts = cfg.targetRs != null && pick.lotSize > 0 ? optionNetTargetPts(cfg, prem, pick.lotSize) : stop.tp;
@@ -1581,14 +1590,19 @@ function netRs(cfg, book, entry, exit, pts) {
   const charges = optionRoundTripCharges(entry, Math.max(0, exit), qty, venueForBook(cfg.under || cfg.id));
   return Math.round((pts * qty - charges) * 10) / 10;
 }
-function markLive(book, last, cfg) {
-  book.last = last;
+function markLive(book, last, cfg, underLast) {
+  const mark = isOptionBuy(cfg) ? optionPremiumPx(last, underLast) ?? optionPremiumPx(book.last, underLast) : last;
+  if (isOptionBuy(cfg)) {
+    if (mark != null) book.last = mark;
+  } else {
+    book.last = mark ?? last;
+  }
   if (book.side === "flat" || book.entry == null) {
     book.livePts = 0;
     book.liveRs = 0;
     return;
   }
-  const px = last ?? book.entry;
+  const px = (isOptionBuy(cfg) ? mark : last) ?? book.entry;
   const pts = isOptionBuy(cfg) ? px - book.entry : (book.side === "long" ? 1 : -1) * (px - book.entry);
   book.livePts = Math.round(pts * 10) / 10;
   book.liveRs = netRs(cfg, book, book.entry, px, pts);
@@ -1597,8 +1611,9 @@ function markLive(book, last, cfg) {
     book.troughPx = book.troughPx == null ? px : Math.min(book.troughPx, px);
   }
 }
-function closeAt(book, cfg, exitPx, reason, day, nowMin) {
+function closeAt(book, cfg, exitPx, reason, day, nowMin, underLast) {
   if (book.side === "flat" || book.entry == null) return;
+  if (isOptionBuy(cfg) && optionPremiumPx(exitPx, underLast) == null) return;
   const pts = isOptionBuy(cfg) ? exitPx - book.entry : (book.side === "long" ? 1 : -1) * (exitPx - book.entry);
   const rs = netRs(cfg, book, book.entry, exitPx, pts);
   const qty = book.lot || cfg.qty || cfg.rsPt;
@@ -1672,40 +1687,60 @@ function closeAt(book, cfg, exitPx, reason, day, nowMin) {
   book.peakPx = null;
   book.troughPx = null;
 }
-function hitExit(book, high, low, close, cfg, day, open = close, nowMin, fillBid) {
+function hitExit(book, high, low, close, cfg, day, open = close, nowMin, fillBid, underLast) {
   if (book.side === "flat" || book.entry == null || book.sl == null || book.tp == null || book.scratch == null) {
     return false;
   }
-  const long = isOptionBuy(cfg) || book.side === "long";
+  if (isOptionBuy(cfg)) {
+    const bidPx = optionPremiumPx(fillBid, underLast);
+    const hi = optionPremiumPx(high, underLast);
+    const lo = optionPremiumPx(low, underLast);
+    const openPx = optionPremiumPx(open, underLast) ?? hi ?? lo;
+    if (bidPx == null && hi == null && lo == null) return false;
+    const fill = (reason, px) => {
+      closeAt(book, cfg, px, reason, day, nowMin, underLast);
+      return book.side === "flat";
+    };
+    if (bidPx != null && bidPx <= book.sl) return fill("sl", bidPx);
+    if (bidPx == null && lo != null && lo <= book.sl) return fill("sl", Math.min(book.sl, openPx ?? book.sl));
+    if (bidPx != null && bidPx <= book.scratch) return fill("scratch", bidPx);
+    if (bidPx == null && lo != null && lo <= book.scratch) {
+      return fill("scratch", Math.min(book.scratch, openPx ?? book.scratch));
+    }
+    if (bidPx != null && bidPx >= book.tp) return fill("tp", bidPx);
+    if (bidPx == null && hi != null && hi >= book.tp) return fill("tp", book.tp);
+    return false;
+  }
+  const long = book.side === "long";
   const hasBid = fillBid != null && fillBid > 0;
   if (long) {
     const throughSl = hasBid ? fillBid <= book.sl : low <= book.sl;
     if (throughSl) {
-      closeAt(book, cfg, hasBid ? fillBid : Math.min(book.sl, open), "sl", day, nowMin);
+      closeAt(book, cfg, hasBid ? fillBid : Math.min(book.sl, open), "sl", day, nowMin, underLast);
       return true;
     }
     const throughScratch = hasBid ? fillBid <= book.scratch : low <= book.scratch;
     if (throughScratch) {
-      closeAt(book, cfg, hasBid ? fillBid : Math.min(book.scratch, open), "scratch", day, nowMin);
+      closeAt(book, cfg, hasBid ? fillBid : Math.min(book.scratch, open), "scratch", day, nowMin, underLast);
       return true;
     }
     const throughTp = hasBid ? fillBid >= book.tp : high >= book.tp;
     if (throughTp) {
-      closeAt(book, cfg, hasBid ? fillBid : book.tp, "tp", day, nowMin);
+      closeAt(book, cfg, hasBid ? fillBid : book.tp, "tp", day, nowMin, underLast);
       return true;
     }
     return false;
   }
   if (high >= book.sl) {
-    closeAt(book, cfg, book.sl, "sl", day, nowMin);
+    closeAt(book, cfg, book.sl, "sl", day, nowMin, underLast);
     return true;
   }
   if (high >= book.scratch) {
-    closeAt(book, cfg, book.scratch, "scratch", day, nowMin);
+    closeAt(book, cfg, book.scratch, "scratch", day, nowMin, underLast);
     return true;
   }
   if (low <= book.tp) {
-    closeAt(book, cfg, book.tp, "tp", day, nowMin);
+    closeAt(book, cfg, book.tp, "tp", day, nowMin, underLast);
     return true;
   }
   return false;
@@ -1790,6 +1825,10 @@ function tickBook(book, cfg, bars, last, day, nowMin, instrument, optionBars = [
     instrument: instrument || book.instrument
   };
   const done = completedBars(bars, day, nowMin, cfg.barMinutes ?? 5);
+  const underLast = [...done].reverse().find((b) => b.day === day)?.close ?? null;
+  const optBid = optionPremiumPx(exec.bid, underLast);
+  const optAsk = optionPremiumPx(exec.ask, underLast);
+  const optLast = isOptionBuy(cfg) ? optionPremiumPx(last, underLast) ?? optionPremiumPx(next.last, underLast) : last;
   if (cfg.strategy === "momentum" && done.length) {
     const g = done[done.length - 1].day === day ? momentumGauge(done, done.length - 1) : null;
     next.gauge = g ? {
@@ -1812,7 +1851,7 @@ function tickBook(book, cfg, bars, last, day, nowMin, instrument, optionBars = [
   }
   const fillsBefore = next.fills.length;
   const barMin = cfg.barMinutes ?? 5;
-  const sellPx = isOptionBuy(cfg) && exec.bid != null && exec.bid > 0 ? exec.bid : last;
+  const sellPx = isOptionBuy(cfg) ? optBid ?? optLast : last;
   if (next.side === "long" || next.side === "short") {
     const exitBars = isOptionBuy(cfg) ? completedBars(optionBars, day, nowMin, barMin) : done;
     for (const bar of exitBars) {
@@ -1823,25 +1862,25 @@ function tickBook(book, cfg, bars, last, day, nowMin, instrument, optionBars = [
       }
       const lagged = isOptionBuy(cfg) && bar.min + barMin < nowMin;
       const barBid = lagged && exec.evolve?.barCatchupIgnoresLiveBid ? null : exec.bid;
-      if (hitExit(next, bar.high, bar.low, bar.close, cfg, day, bar.open, nowMin, barBid)) {
+      if (hitExit(next, bar.high, bar.low, bar.close, cfg, day, bar.open, nowMin, barBid, underLast)) {
         next.lastBarMin = bar.min;
         break;
       }
       next.lastBarMin = bar.min;
     }
     if ((next.side === "long" || next.side === "short") && nowMin >= cfg.flat && last != null) {
-      closeAt(next, cfg, sellPx ?? last, "eod", day, nowMin);
+      closeAt(next, cfg, sellPx ?? last, "eod", day, nowMin, underLast);
     }
     if ((next.side === "long" || next.side === "short") && cfg.holdBars != null && next.entryMin != null && nowMin >= next.entryMin + cfg.holdBars * barMin && last != null) {
-      closeAt(next, cfg, sellPx ?? last, "time", day, nowMin);
+      closeAt(next, cfg, sellPx ?? last, "time", day, nowMin, underLast);
     }
     const tickExitPx = sellPx ?? last;
     const tooSoon = isOptionBuy(cfg) && next.entryMin != null && nowMin <= next.entryMin + barMin;
-    const bid = exec.bid != null && exec.bid > 0 ? exec.bid : null;
+    const bid = optBid;
     const bidThrough = exec.evolve?.bidThroughTick !== false && isOptionBuy(cfg) && bid != null && (next.sl != null && bid <= next.sl || next.scratch != null && bid <= next.scratch || next.tp != null && bid >= next.tp);
     const barsHandleExit = isOptionBuy(cfg) && optionBars.length > 0 && !bidThrough;
     if ((next.side === "long" || next.side === "short") && tickExitPx != null && !tooSoon && !barsHandleExit) {
-      hitExit(next, tickExitPx, tickExitPx, tickExitPx, cfg, day, tickExitPx, nowMin, exec.bid);
+      hitExit(next, tickExitPx, tickExitPx, tickExitPx, cfg, day, tickExitPx, nowMin, bid, underLast);
     }
   }
   const closedNow = next.fills.slice(fillsBefore);
@@ -1881,7 +1920,7 @@ function tickBook(book, cfg, bars, last, day, nowMin, instrument, optionBars = [
         }
         const ok = next.pendingDir === 1 ? bar.close > bar.open && bar.close > next.pendingSig : bar.close < bar.open && bar.close < next.pendingSig;
         if (ok) {
-          openAt(next, cfg, next.pendingDir, bar.open, next.pendingMode || next.mode, bar.min, day);
+          openAt(next, cfg, next.pendingDir, isOptionBuy(cfg) ? optAsk ?? optLast ?? bar.open : bar.open, next.pendingMode || next.mode, bar.min, day);
         } else {
           next.pendingDir = 0;
           next.pendingSig = 0;
@@ -1925,7 +1964,7 @@ function tickBook(book, cfg, bars, last, day, nowMin, instrument, optionBars = [
       }
       if (cfg.noConfirm) {
         next.mode = hit.mode;
-        openAt(next, cfg, hit.dir, bar.close, hit.mode, bar.min, day);
+        openAt(next, cfg, hit.dir, isOptionBuy(cfg) ? optAsk ?? optLast ?? bar.close : bar.close, hit.mode, bar.min, day);
         if (next.side !== "flat") break;
         continue;
       }
@@ -1937,7 +1976,7 @@ function tickBook(book, cfg, bars, last, day, nowMin, instrument, optionBars = [
       next.reason = `confirm ${hit.mode}`;
     }
   }
-  markLive(next, next.side !== "flat" && isOptionBuy(cfg) && sellPx != null ? sellPx : last, cfg);
+  markLive(next, next.side !== "flat" && isOptionBuy(cfg) && sellPx != null ? sellPx : optLast ?? last, cfg, underLast);
   next.capitalUsed = capitalUsedOf(cfg, next);
   return next;
 }
@@ -2268,6 +2307,38 @@ function emptyHunt(day) {
   );
   return { day, trades: 0, stats: books.map((b) => statOf(b)), books, feed: "" };
 }
+var HUNT_MAX_ABS_RS = 5e4;
+function scrubHuntBook(book) {
+  const fills = (book.fills || []).filter((f) => {
+    if (optionPremiumPx(f.entry) == null || optionPremiumPx(f.exit) == null) return false;
+    return Math.abs(Number(f.rs) || 0) <= HUNT_MAX_ABS_RS;
+  });
+  const closedRs = Math.round(fills.reduce((s, f) => s + (f.rs || 0), 0) * 10) / 10;
+  const entryOk = optionPremiumPx(book.entry) != null;
+  if (book.side !== "flat" && !entryOk) {
+    return {
+      ...book,
+      fills,
+      closedRs,
+      side: "flat",
+      entry: null,
+      sl: null,
+      tp: null,
+      scratch: null,
+      last: optionPremiumPx(book.last),
+      livePts: 0,
+      liveRs: 0,
+      status: "watching",
+      reason: "dropped index-priced ticket",
+      optionSymbol: "",
+      optionType: "",
+      strike: null,
+      peakPx: null,
+      troughPx: null
+    };
+  }
+  return { ...book, fills, closedRs, last: optionPremiumPx(book.last) ?? book.last };
+}
 function statOf(book) {
   const under = book.under || underOf(book.id);
   const method = book.id.slice(under.length + 1);
@@ -2353,7 +2424,9 @@ function huntBindOption(book, cfg, pair, side, nowMin, nowIso, day = "") {
     };
   }
   const fill = liveBuyPrice(side.ask, side.last);
-  if (fill.price == null) {
+  const chainPrem = pick.source === "chain" ? optionPremiumPx(pick.instrument.lastPrice) : null;
+  const prem = fill.price != null && optionPremiumPx(fill.price) != null ? fill.price : chainPrem;
+  if (prem == null) {
     return {
       ...book,
       side: "flat",
@@ -2384,12 +2457,12 @@ function huntBindOption(book, cfg, pair, side, nowMin, nowIso, day = "") {
       ].slice(-20)
     };
   }
-  const bound = bindOptionFill(book, cfg, fill.price, pick, null, nowMin);
+  const bound = bindOptionFill(book, cfg, prem, pick, null, nowMin);
   return { ...bound, entryBid: side.bid, entryAsk: side.ask, entryAt: nowIso };
 }
 function tickPaperHunt(args) {
   const prev = args.prev?.day === args.day && args.prev.books.length === UNDERS.length * PAPER_HUNT_METHODS.length ? args.prev : emptyHunt(args.day);
-  const byId = new Map(prev.books.map((b) => [b.id, b]));
+  const byId = new Map(prev.books.map((b) => [b.id, scrubHuntBook(b)]));
   const nextBooks = [];
   for (const under of UNDERS) {
     const bars = args.barsByUnder.get(under) || [];
@@ -2399,9 +2472,9 @@ function tickPaperHunt(args) {
       const cfg = huntMethodCfg(under, def);
       const prevBook = byId.get(cfg.id) || emptyBook(cfg);
       const side = prevBook.optionType === "PE" || prevBook.side === "short" ? q?.pe : q?.ce;
-      const mark = side?.last ?? side?.bid ?? q?.underLast ?? prevBook.last;
-      const bid = side?.bid ?? null;
-      const ask = side?.ask ?? null;
+      const mark = optionPremiumPx(side?.last, q?.underLast) ?? optionPremiumPx(side?.bid, q?.underLast) ?? optionPremiumPx(prevBook.last, q?.underLast);
+      const bid = optionPremiumPx(side?.bid, q?.underLast);
+      const ask = optionPremiumPx(side?.ask, q?.underLast);
       let next = tickBook(prevBook, cfg, bars, mark, args.day, args.nowMin, prevBook.optionSymbol || cfg.label, [], {
         bid,
         ask,
@@ -2419,6 +2492,26 @@ function tickPaperHunt(args) {
           args.day
         );
       }
+      if (next.side !== "flat" && optionPremiumPx(next.entry) == null) {
+        next = {
+          ...next,
+          side: "flat",
+          entry: null,
+          sl: null,
+          tp: null,
+          scratch: null,
+          last: optionPremiumPx(next.last),
+          livePts: 0,
+          liveRs: 0,
+          status: "watching",
+          reason: "dropped index-priced ticket",
+          optionSymbol: "",
+          optionType: "",
+          strike: null,
+          peakPx: null,
+          troughPx: null
+        };
+      }
       nextBooks.push(next);
     }
   }
@@ -2431,6 +2524,33 @@ function tickPaperHunt(args) {
     books: nextBooks,
     feed: skipNote
   });
+}
+
+// ../palagai/src/app/core/live-desk/live-start-guard.util.ts
+function parseIstTimestamp(value) {
+  if (!value) {
+    return 0;
+  }
+  const raw = value.trim().replace(" ", "T");
+  const hasZone = /(?:Z|[+-]\d{2}:?\d{2})$/.test(raw);
+  const ms = Date.parse(hasZone ? raw : `${raw}+05:30`);
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+// ../palagai/src/app/core/paper-desk/kite-bar.util.ts
+function kiteBar(row) {
+  const raw = String(row[0] || "");
+  const ms = parseIstTimestamp(raw);
+  if (!ms) return { day: "", min: 0, open: 0, high: 0, low: 0, close: 0 };
+  const ist = new Date(ms + 330 * 60 * 1e3);
+  return {
+    day: ist.toISOString().slice(0, 10),
+    min: ist.getUTCHours() * 60 + ist.getUTCMinutes(),
+    open: Number(row[1]) || 0,
+    high: Number(row[2]) || 0,
+    low: Number(row[3]) || 0,
+    close: Number(row[4]) || 0
+  };
 }
 
 // ../palagai/src/app/core/paper-desk/paper-tick.run.ts
@@ -2523,11 +2643,11 @@ async function runPaperTick(io) {
       { bid: optBid, ask: optAsk, blockOpen: indexDeskBlockReason(cfg.id, peers, day), evolve: flags }
     );
     if (cfg.buyOption && needsOption(next)) {
-      const spot = underLast ?? (next.optionSymbol ? next.last : null) ?? 0;
+      const spot = underLast ?? 0;
       const pair = cheapByUnder.get(under);
       next = await bindCheap(next, cfg, chain, spot, quotes, nowMin, io, pair, now);
     }
-    if (cfg.buyOption && next.side !== "flat" && !next.optionSymbol) {
+    if (cfg.buyOption && next.side !== "flat" && (!next.optionSymbol || optionPremiumPx(next.entry) == null)) {
       next = {
         ...next,
         side: "flat",
@@ -2541,8 +2661,9 @@ async function runPaperTick(io) {
         reason: "skipped: no option fill"
       };
     } else if (next.side !== "flat" && next.optionSymbol && optLast != null) {
-      const mark = optBid != null && optLast < optBid ? optBid : optLast;
-      next = { ...next, last: mark };
+      const raw2 = optBid != null && optLast < optBid ? optBid : optLast;
+      const mark = optionPremiumPx(raw2, underLast);
+      if (mark != null) next = { ...next, last: mark };
     }
     if (next.fills.length > prev.fills.length && prev.optionSymbol) {
       const q = findQuote(quotes, optionKey(prev));
@@ -2617,6 +2738,8 @@ async function bindCheap(book, cfg, chain, spot, quotes, nowMin, io, pair, now) 
   const { bid, ask } = bestBidAsk(q);
   const liveLast = listed ? lastByKey(quotes, key) : null;
   const fill = liveBuyPrice(ask, liveLast);
+  const chainPrem = pick.source === "chain" ? optionPremiumPx(pick.instrument.lastPrice) : null;
+  const premPx = fill.price != null && optionPremiumPx(fill.price) != null ? fill.price : chainPrem;
   const flat = (reason, skip) => ({
     ...book,
     side: "flat",
@@ -2649,7 +2772,7 @@ async function bindCheap(book, cfg, chain, spot, quotes, nowMin, io, pair, now) 
       });
     }
   }
-  if (!listed || fill.price == null) {
+  if (!listed || premPx == null) {
     const skip = {
       at: now.toISOString(),
       day: istDay(now),
@@ -2666,7 +2789,7 @@ async function bindCheap(book, cfg, chain, spot, quotes, nowMin, io, pair, now) 
     };
     return flat(listed ? "skipped: no live quote" : "skipped: no listed contract", skip);
   }
-  const prem = fill.price;
+  const prem = premPx;
   const cost = lotCostRs(prem, pick.lotSize);
   const range = await optionRange(pick.instrument.instrumentToken, istDay(now), nowMin, io);
   const stop = optionBoundStops(cfg, prem, pick.lotSize, range);
@@ -2829,15 +2952,16 @@ function findCrudeMini(csv, today) {
     if (cols.length < 12) continue;
     if (cols[11].trim().toUpperCase() !== "MCX" || cols[9].trim().toUpperCase() !== "FUT") continue;
     if (!cols[2].toUpperCase().startsWith("CRUDEOILM")) continue;
+    const exp = /^(\d{4}-\d{2}-\d{2})/.exec((cols[5] || "").trim());
     rows.push({
       token: Number(cols[0]) || 0,
       tradingSymbol: cols[2].trim(),
       exchange: "MCX",
-      expiry: (cols[5] || "").slice(0, 10)
+      expiry: exp ? exp[1] : ""
     });
   }
   rows.sort((a, b) => a.expiry.localeCompare(b.expiry));
-  return rows.find((r) => !r.expiry || r.expiry > today) || null;
+  return rows.find((r) => !r.expiry || r.expiry > today) || rows.find((r) => r.expiry >= today) || rows[0] || null;
 }
 function findNamed(csv, names) {
   const want = names.map((n) => n.toUpperCase());
@@ -2882,30 +3006,14 @@ function barFeedLine(barsByUnder, day) {
   }
   return "";
 }
-function kiteBar(row) {
-  const raw = String(row[0] || "");
-  const d = new Date(raw);
-  const ist = new Date(d.getTime() + 330 * 60 * 1e3);
-  const day = raw.slice(0, 10);
-  const hh = Number.isNaN(d.getTime()) ? Number(raw.slice(11, 13)) : ist.getUTCHours();
-  const mm = Number.isNaN(d.getTime()) ? Number(raw.slice(14, 16)) : ist.getUTCMinutes();
-  return {
-    day,
-    min: hh * 60 + mm,
-    open: Number(row[1]) || 0,
-    high: Number(row[2]) || 0,
-    low: Number(row[3]) || 0,
-    close: Number(row[4]) || 0
-  };
-}
 function needsOption(next) {
   return next.side !== "flat" && !next.optionSymbol;
 }
 function optionMarkLast(args) {
   if (!args.buyOption) return args.underLast;
-  if (args.side !== "flat" && args.optionSymbol) return args.optLast ?? args.prevLast;
-  if (args.side !== "flat") return args.prevLast;
-  return args.underLast;
+  const prem = optionPremiumPx(args.optLast, args.underLast) ?? optionPremiumPx(args.prevLast, args.underLast);
+  if (args.side !== "flat") return prem;
+  return prem;
 }
 function instOf(under, crude, nifty, bank, sensex) {
   return under === "crude" ? crude : under === "nifty" ? nifty : under === "bank" ? bank : sensex;
@@ -2933,7 +3041,9 @@ function huntSideQuote(quotes, pick) {
   const key = `${pick.instrument.exchange}:${pick.instrument.tradingSymbol}`;
   const q = findQuote(quotes, key);
   const { bid, ask } = bestBidAsk(q);
-  return { bid, ask, last: lastByKey(quotes, key) };
+  const live = lastByKey(quotes, key);
+  const chain = pick.source === "chain" ? optionPremiumPx(pick.instrument.lastPrice) : null;
+  return { bid, ask, last: live ?? chain };
 }
 function bestBidAsk(q) {
   const bid = Number(q?.depth?.buy?.[0]?.price);
@@ -2957,15 +3067,26 @@ function lastByKey(quotes, key) {
   return null;
 }
 function lastPrice(quotes, id, symbol) {
+  const want = id === "nifty" ? "NSE:NIFTY 50" : id === "bank" ? "NSE:NIFTY BANK" : id === "sensex" ? "BSE:SENSEX" : "";
+  if (want) {
+    const n = Number(findQuote(quotes, want)?.last_price);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  }
+  if (id === "crude" && symbol) {
+    const exact = findQuote(quotes, `MCX:${symbol}`);
+    const n = Number(exact?.last_price);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
   for (const [k, v] of Object.entries(quotes)) {
     const key = k.toUpperCase();
     if (id === "crude" && key.includes("CRUDEOILM") && !key.includes("CE") && !key.includes("PE")) {
-      return Number(v.last_price) || null;
+      const n = Number(v.last_price);
+      if (Number.isFinite(n) && n > 0) return n;
     }
-    if (id === "nifty" && key.includes("NIFTY 50")) return Number(v.last_price) || null;
-    if (id === "bank" && key.includes("BANK")) return Number(v.last_price) || null;
-    if (id === "sensex" && key.includes("SENSEX")) return Number(v.last_price) || null;
-    if (symbol && key.includes(symbol.toUpperCase())) return Number(v.last_price) || null;
+    if (symbol && key.includes(symbol.toUpperCase()) && !key.includes("CE") && !key.includes("PE")) {
+      const n = Number(v.last_price);
+      if (Number.isFinite(n) && n > 0) return n;
+    }
   }
   return null;
 }
