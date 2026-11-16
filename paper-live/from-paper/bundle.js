@@ -1261,7 +1261,11 @@ var EXIT = {
   freshCross: true
 };
 var PAPER_DESKS = [
-  { id: "momentum", label: "Daily \u20B9370", rule: "Nifty, Bank, Sensex and Crude Mini each take their own ATM CE/PE. Paper always records, Live on or off. Target nets \u20B9370 after charges, fill at the live bid. All four: up to five fills so a wrong trade can be corrected. Crude Mini from 09:00. Live Kite on a ticked book adds a real order" }
+  {
+    id: "momentum",
+    label: "Daily \u20B9370",
+    rule: "Paper always records. Live Kite on the Crude Mini tab is Bank Nifty algo OR retest and Sensex mix + no confirm only. Target nets \u20B9370 after charges, fill at the live bid. When target hits, Live cancels the resting SL and sells MARKET. Hunt stays paper-only. Not a guaranteed profit."
+  }
 ];
 function deskPatch(under) {
   if (under === "crude") {
@@ -1280,6 +1284,42 @@ function deskPatch(under) {
       targetRs: LIVE_PAPER_CRUDE_TARGET_RS
     };
   }
+  if (under === "bank") {
+    return {
+      strategy: "rules",
+      primary: ALL("or_retest"),
+      backup: {},
+      orS: 9 * 60 + 15,
+      orE: 9 * 60 + 30,
+      entryS: 9 * 60 + 45,
+      maxTradesPerDay: 5,
+      barMinutes: 1,
+      minGapMin: 10,
+      holdBars: 60,
+      stopRs: LIVE_PAPER_STOP_RS,
+      targetRs: LIVE_PAPER_TARGET_RS,
+      label: "Bank Nifty \xB7 algo OR retest"
+    };
+  }
+  if (under === "sensex") {
+    return {
+      strategy: "momentum",
+      primary: ALL("momentum"),
+      momK: 0.8,
+      mix: true,
+      noConfirm: true,
+      orS: 9 * 60 + 15,
+      orE: 9 * 60 + 30,
+      entryS: 9 * 60 + 45,
+      maxTradesPerDay: 5,
+      barMinutes: 1,
+      minGapMin: 10,
+      holdBars: 60,
+      stopRs: LIVE_PAPER_STOP_RS,
+      targetRs: LIVE_PAPER_TARGET_RS,
+      label: "Sensex \xB7 mix + no confirm"
+    };
+  }
   return {
     strategy: "momentum",
     primary: ALL("momentum"),
@@ -1296,7 +1336,7 @@ function deskPatch(under) {
   };
 }
 var PAPER_MOMENTUM = { ...EXIT, ...deskPatch("nifty") };
-var PAPER_TEST_HONEST = "Index-proxy pick, not a lock. ATM CE (up) or PE (down), 1 lot at the live ask, next 1-min confirm, exact charges. Daily bank \u20B9370 net after charges / stop \u20B9370, 0.8\xD7 1-min thrust from 09:45. Nifty, Bank, Sensex and Crude Mini each take their own fill, up to five, so a wrong trade can be corrected. Target fills at the live bid when it is already through. A +\u20B9370 win does not sit the book. Each closed fill is graded A\u2013F (A banks \u20B9370, F is a stop). Crude Mini: from 09:00 MCX open, 0.8\xD7 thrust, up to five fills, flatten 23:10. Same \u20B9370 target. Paper always records, Live on or off. Live Kite on a ticked book adds a 1 lot MARKET buy and a resting SL \u2014 a Kite reject does not drop the paper fill. A refresh does not arm Live. Cousin \u20B9375 rule on 15 live 1-min sessions tagged 3 wins on 11 days \u2014 not every day, not 8 months. Nothing here is a guaranteed \u20B9370. Forward paper is unproven until 400 trades and a one-sided 95% lower bound above zero on live asks. Not a guaranteed profit.";
+var PAPER_TEST_HONEST = "Index-proxy pick, not a lock. ATM CE (up) or PE (down), 1 lot at the live ask, exact charges. Live Kite on the Crude Mini tab is Bank Nifty algo OR retest and Sensex mix + no confirm only \u2014 today's paper hunt leaders, sample only. Daily bank \u20B9370 net after charges / stop \u20B9370. When the paper target hits, Live cancels the resting SL and sells MARKET. Hunt on all four names stays paper tickets \u2014 Live Kite never sees the hunt. Paper always records, Live on or off. Live Kite on a ticked book adds a 1 lot MARKET buy and a resting SL \u2014 a Kite reject does not drop the paper fill. A refresh does not arm Live. Nothing here is a guaranteed \u20B9370. Not a guaranteed profit.";
 var LIVE_PAPER_BOOKS = OPTION_14K_LIST.map((plan) => ({
   ...option14kToPaperCfg(plan),
   ...EXIT,
