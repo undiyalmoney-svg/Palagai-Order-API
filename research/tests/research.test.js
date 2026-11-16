@@ -12,7 +12,7 @@ const { sizePosition, assessEntry } = require('../risk');
 const { indexBooks, isIndexBook, resolveCrudeContract, sessionWindow } = require('../universe');
 const { summarizeTrades, maxDrawdown } = require('../metrics');
 const { parseTicks, KiteFeed, resolveWebSocket } = require('../feed');
-const { kiteDateParam, kiteDay, historicalChunks } = require('../../services/kite-market');
+const { kiteDateParam, kiteDay, historicalChunks, maxDaysForInterval } = require('../../services/kite-market');
 const { MemoryStore } = require('../store');
 const { ResearchService, START_PHRASE } = require('../service');
 const { createResearchRouter } = require('../api/routes');
@@ -553,6 +553,14 @@ test('Kite history dates are calendar stamps, not ISO instants', () => {
   const chunks = historicalChunks(new Date('2026-10-08T04:45:40.777Z'), new Date('2026-10-13T04:45:40.777Z'), 50);
   assert.equal(chunks.length, 1);
   assert.equal(chunks[0][0], '2026-10-08');
+});
+
+test('1-minute history is chunked by calendar day so Kite 2000-candle cap is not blown', () => {
+  assert.equal(maxDaysForInterval('minute'), 1);
+  const chunks = historicalChunks('2026-11-08', '2026-11-16', maxDaysForInterval('minute'));
+  assert.equal(chunks.length, 9);
+  assert.deepEqual(chunks[0], ['2026-11-08', '2026-11-08']);
+  assert.deepEqual(chunks[chunks.length - 1], ['2026-11-16', '2026-11-16']);
 });
 
 test('feed opens the Kite ticker and records a quote tick', async () => {

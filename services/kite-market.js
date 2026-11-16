@@ -246,7 +246,8 @@ function historicalChunks(fromDate, toDate, maxDays = 90) {
 
 function maxDaysForInterval(interval) {
   const iv = String(interval || '5minute').toLowerCase();
-  if (iv === 'minute') return 50;
+  // Kite caps each request at 2000 candles. Crude Mini 1-min is ~870 bars/day.
+  if (iv === 'minute') return 1;
   if (iv === '3minute' || iv === '5minute' || iv === '10minute' || iv === '15minute') return 60;
   if (iv === '30minute') return 180;
   if (iv === '60minute') return 360;
@@ -469,4 +470,5 @@ module.exports = {
   fetchUserMargins,
   kiteDateParam,
   kiteDay,
+  maxDaysForInterval,
 };

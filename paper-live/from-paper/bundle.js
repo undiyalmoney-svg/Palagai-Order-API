@@ -2266,7 +2266,7 @@ function emptyHunt(day) {
   const books = UNDERS.flatMap(
     (under) => PAPER_HUNT_METHODS.map((def) => emptyBook(huntMethodCfg(under, def)))
   );
-  return { day, trades: 0, stats: books.map((b) => statOf(b)), books };
+  return { day, trades: 0, stats: books.map((b) => statOf(b)), books, feed: "" };
 }
 function statOf(book) {
   const under = book.under || underOf(book.id);
@@ -2308,7 +2308,7 @@ function compactHunt(state) {
     ...state,
     books: state.books.map((b) => ({
       ...b,
-      skips: [],
+      skips: (b.skips || []).slice(-1),
       signal: null,
       kiteNote: "",
       kiteBuyOrderId: "",
@@ -2319,7 +2319,7 @@ function compactHunt(state) {
     }))
   };
 }
-function huntBindOption(book, cfg, pair, side, nowMin, nowIso) {
+function huntBindOption(book, cfg, pair, side, nowMin, nowIso, day = "") {
   const pick = book.side === "long" ? pair?.ce : pair?.pe;
   if (!pick || !(pick.instrument.instrumentToken > 0)) {
     return {
@@ -2332,7 +2332,24 @@ function huntBindOption(book, cfg, pair, side, nowMin, nowIso) {
       status: "watching",
       livePts: 0,
       liveRs: 0,
-      reason: "skipped: no listed contract"
+      reason: "skipped: no listed contract",
+      skips: [
+        ...book.skips || [],
+        {
+          at: nowIso,
+          day,
+          book: cfg.id,
+          side: pick?.side || (book.side === "long" ? "CE" : "PE"),
+          mode: book.mode,
+          structure: book.structure,
+          contract: pick ? `${pick.side} ${pick.strike}` : cfg.label,
+          premium: null,
+          lot: pick?.lotSize || book.lot,
+          costRs: null,
+          budgetRs: 0,
+          reason: "no-listed-contract"
+        }
+      ].slice(-20)
     };
   }
   const fill = liveBuyPrice(side.ask, side.last);
@@ -2347,7 +2364,24 @@ function huntBindOption(book, cfg, pair, side, nowMin, nowIso) {
       status: "watching",
       livePts: 0,
       liveRs: 0,
-      reason: "skipped: no live quote"
+      reason: "skipped: no live quote",
+      skips: [
+        ...book.skips || [],
+        {
+          at: nowIso,
+          day,
+          book: cfg.id,
+          side: pick.side,
+          mode: book.mode,
+          structure: book.structure,
+          contract: pick.instrument.tradingSymbol,
+          premium: null,
+          lot: pick.lotSize,
+          costRs: null,
+          budgetRs: 0,
+          reason: "no-live-quote"
+        }
+      ].slice(-20)
     };
   }
   const bound = bindOptionFill(book, cfg, fill.price, pick, null, nowMin);
@@ -2375,23 +2409,34 @@ function tickPaperHunt(args) {
         evolve: args.evolve
       });
       if (next.side !== "flat" && !next.optionSymbol) {
-        next = huntBindOption(next, cfg, pair, next.side === "long" ? q?.ce || { bid: null, ask: null, last: null } : q?.pe || { bid: null, ask: null, last: null }, args.nowMin, args.nowIso);
+        next = huntBindOption(
+          next,
+          cfg,
+          pair,
+          next.side === "long" ? q?.ce || { bid: null, ask: null, last: null } : q?.pe || { bid: null, ask: null, last: null },
+          args.nowMin,
+          args.nowIso,
+          args.day
+        );
       }
       nextBooks.push(next);
     }
   }
   const stats = nextBooks.map(statOf);
+  const skipNote = nextBooks.find((b) => /skipped:/.test(b.reason))?.reason || "";
   return compactHunt({
     day: args.day,
     trades: stats.reduce((s, r) => s + r.trades, 0),
     stats,
-    books: nextBooks
+    books: nextBooks,
+    feed: skipNote
   });
 }
 
 // ../palagai/src/app/core/paper-desk/paper-tick.run.ts
 var UNDERS2 = ["crude", "nifty", "bank", "sensex"];
 var NO_BUDGET_CAP = 1e7;
+var HIST_MINUTE_LOOKBACK_DAYS = 3;
 async function runPaperTick(io) {
   const now = io.now || /* @__PURE__ */ new Date();
   const day = istDay(now);
@@ -2435,16 +2480,10 @@ async function runPaperTick(io) {
   if (extraKeys.length) {
     quotes = { ...quotes, ...await io.fetchQuotes(extraKeys) || {} };
   }
-  const from = shiftDay(day, -8);
   const barCache = /* @__PURE__ */ new Map();
   for (const under of UNDERS2) {
     const inst = instOf(under, crude, nifty, bank, sensex);
-    let bars = [];
-    if (inst?.token) {
-      const candles = await io.fetchHistorical(String(inst.token), "minute", from, day);
-      bars = (candles || []).map(kiteBar).filter((b) => b.day);
-    }
-    barCache.set(under, bars);
+    barCache.set(under, inst?.token ? await loadMinuteBars(io.fetchHistorical, String(inst.token), day) : []);
   }
   const nextById = /* @__PURE__ */ new Map();
   for (const cfg of paperTickOrder(LIVE_PAPER_BOOKS)) {
@@ -2532,7 +2571,7 @@ async function runPaperTick(io) {
       underLast: lastPrice(quotes, under, inst?.tradingSymbol || "")
     });
   }
-  const hunt = tickPaperHunt({
+  const ticked = tickPaperHunt({
     prev: cur.hunt,
     day,
     nowMin,
@@ -2542,6 +2581,10 @@ async function runPaperTick(io) {
     picksByUnder: cheapByUnder,
     evolve: flags
   });
+  const hunt = {
+    ...ticked,
+    feed: barFeedLine(barCache, day) || ticked.feed || ""
+  };
   const snap = summarizePaper(books, {
     running: true,
     day,
@@ -2808,6 +2851,36 @@ function findNamed(csv, names) {
     }
   }
   return null;
+}
+function minuteDayWindows(day, lookbackDays = HIST_MINUTE_LOOKBACK_DAYS) {
+  const out = [day];
+  for (let i = 1; i <= lookbackDays; i += 1) out.push(shiftDay(day, -i));
+  return out;
+}
+async function loadMinuteBars(fetchHistorical, token, day) {
+  const bars = [];
+  for (const d of minuteDayWindows(day)) {
+    const candles = await fetchHistorical(token, "minute", d, d).catch(() => []);
+    for (const row of candles || []) {
+      const bar = kiteBar(row);
+      if (bar.day) bars.push(bar);
+    }
+  }
+  return bars;
+}
+function barFeedLine(barsByUnder, day) {
+  const counts = UNDERS2.map((under) => ({
+    under,
+    n: (barsByUnder.get(under) || []).filter((b) => b.day === day).length
+  }));
+  if (counts.every((c) => c.n === 0)) {
+    return "Kite sent no completed 1-min bars for today. Paper cannot open a ticket until those candles arrive.";
+  }
+  const missing = counts.filter((c) => c.n === 0).map((c) => c.under);
+  if (missing.length) {
+    return `Kite 1-min bars today: ${counts.map((c) => `${c.under} ${c.n}`).join(", ")}.`;
+  }
+  return "";
 }
 function kiteBar(row) {
   const raw = String(row[0] || "");
