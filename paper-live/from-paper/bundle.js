@@ -1264,7 +1264,7 @@ var PAPER_DESKS = [
   {
     id: "momentum",
     label: "Daily \u20B9370",
-    rule: "Paper always records. Live Kite on the Arise tab is Bank Nifty mom 0.6\xD7 both, Nifty 50 vwap stretch, and Sensex mom 0.8\xD7 no confirm only. Target nets \u20B9370 after charges, fill at the live bid. When target hits, Live cancels the resting SL and sells MARKET. Hunt stays paper-only. Not a guaranteed profit."
+    rule: "Paper always records. Index tickets from 09:45 IST after the 09:15\u201309:30 opening range. Live Kite on the Arise tab is Bank Nifty mom 0.6\xD7 both, Nifty 50 vwap stretch, and Sensex mom 0.8\xD7 no confirm only. Target nets \u20B9370 after charges, fill at the live bid. When target hits, Live cancels the resting SL and sells MARKET. Hunt stays paper-only. Not a guaranteed profit."
   }
 ];
 function deskPatch(under) {
@@ -1355,7 +1355,7 @@ function deskPatch(under) {
   };
 }
 var PAPER_MOMENTUM = { ...EXIT, ...deskPatch("nifty") };
-var PAPER_TEST_HONEST = "Index-proxy pick, not a lock. ATM CE (up) or PE (down), 1 lot at the live ask, exact charges. Live Kite on the Arise tab is Bank Nifty mom 0.6\xD7 both, Nifty 50 vwap stretch, and Sensex mom 0.8\xD7 no confirm only \u2014 today's paper hunt leaders, sample only. Daily bank \u20B9370 net after charges / stop \u20B9370. When the paper target hits, Live cancels the resting SL and sells MARKET. Hunt on all four names stays paper tickets \u2014 Live Kite never sees the hunt. Paper always records, Live on or off. Live Kite on a ticked book adds a 1 lot MARKET buy and a resting SL \u2014 a Kite reject does not drop the paper fill. A refresh does not arm Live. Nothing here is a guaranteed \u20B9370. Not a guaranteed profit.";
+var PAPER_TEST_HONEST = "Index-proxy pick, not a lock. ATM CE (up) or PE (down), 1 lot at the live ask, exact charges. Index tickets from 09:45 IST after the 09:15\u201309:30 opening range. Live Kite on the Arise tab is Bank Nifty mom 0.6\xD7 both, Nifty 50 vwap stretch, and Sensex mom 0.8\xD7 no confirm only \u2014 today's paper hunt leaders, sample only. Daily bank \u20B9370 net after charges / stop \u20B9370. When the paper target hits, Live cancels the resting SL and sells MARKET. Hunt on all four names stays paper tickets \u2014 Live Kite never sees the hunt. Paper always records, Live on or off. Live Kite on a ticked book adds a 1 lot MARKET buy and a resting SL \u2014 a Kite reject does not drop the paper fill. A refresh does not arm Live. Nothing here is a guaranteed \u20B9370. Not a guaranteed profit.";
 var LIVE_PAPER_BOOKS = OPTION_14K_LIST.map((plan) => ({
   ...option14kToPaperCfg(plan),
   ...EXIT,
@@ -2338,7 +2338,7 @@ var PAPER_HUNT_METHODS = [
 ];
 var PAPER_HUNT_CAP = PAPER_HUNT_MAX_TRADES * 4 * PAPER_HUNT_METHODS.length;
 var huntCapText = PAPER_HUNT_CAP.toLocaleString("en-IN");
-var PAPER_HUNT_HONEST = `Each of Nifty, Bank, Sensex and Crude Mini runs the same ${PAPER_HUNT_METHODS.length} methods (momentum, pattern, mix, rule and algo) as paper tickets. Each method may take up to 50 fills, so a full session can print up to ${huntCapText} paper tickets \u2014 not ${huntCapText} Kite orders. Every ticket stores max profit reached and max loss reached after entry. That is what that paper ticket did, not a guaranteed next move. EOD ranks the method. Start from the open; a late Start does not catch up stale bars. Live Kite never sees the hunt. Not a guaranteed profit.`;
+var PAPER_HUNT_HONEST = `Each of Nifty, Bank, Sensex and Crude Mini runs the same ${PAPER_HUNT_METHODS.length} methods (momentum, pattern, mix, rule and algo) as paper tickets. Each method may take up to 50 fills, so a full session can print up to ${huntCapText} paper tickets \u2014 not ${huntCapText} Kite orders. Every ticket stores max profit reached and max loss reached after entry. That is what that paper ticket did, not a guaranteed next move. EOD ranks the method. Index tickets from 09:45 IST after the 09:15\u201309:30 opening range. Crude Mini from 09:15 IST. Start before then; a late Start does not catch up stale bars. Live Kite never sees the hunt. Not a guaranteed profit.`;
 
 // ../palagai/src/app/core/paper-desk/paper-hunt.engine.ts
 var UNDERS = ["nifty", "bank", "sensex", "crude"];
