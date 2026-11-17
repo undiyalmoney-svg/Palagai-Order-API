@@ -1259,83 +1259,63 @@ var EXIT = {
   expiryAfterTomorrow: false,
   freshCross: true
 };
-var LIVE_TAKE_LINE = "Bank Nifty mix + MACD, Nifty 50 algo RSI 14 bounce, Sensex algo EMA 21 pullback, and Crude Mini algo Bollinger mean";
+var LIVE_TAKE_LINE = "mom 0.8\xD7 skip range on Bank Nifty, Nifty 50, Sensex, and Crude Mini (one fill, sit at \u20B9370, skip range mornings)";
 var INDEX_CLOCK = {
   orS: 9 * 60 + 15,
   orE: 9 * 60 + 30,
   entryS: 9 * 60 + 45,
-  maxTradesPerDay: 5,
+  maxTradesPerDay: 1,
   barMinutes: 1,
   minGapMin: 10,
   holdBars: 60,
   stopRs: LIVE_PAPER_STOP_RS,
   targetRs: LIVE_PAPER_TARGET_RS
 };
+var GREEN_DAY = {
+  strategy: "momentum",
+  primary: ALL("momentum"),
+  momK: 0.8,
+  mix: false,
+  skipStructures: ["range"],
+  maxTradesPerDay: 1,
+  minDayNetRs: LIVE_PAPER_BANK_RS,
+  noConfirm: false
+};
 var PAPER_DESKS = [
   {
     id: "momentum",
     label: "Daily \u20B9370",
-    rule: `Paper always records. Index tickets from 09:45 IST after the 09:15\u201309:30 opening range. Crude Mini from 09:15 IST. Live Kite on the Arise tab is ${LIVE_TAKE_LINE} only. Target nets \u20B9370 after charges, fill at the live bid. When target hits, Live cancels the resting SL and sells MARKET. Hunt stays paper-only. Not a guaranteed profit.`
+    rule: `Paper always records. Index tickets from 09:45 IST after the 09:15\u201309:30 opening range. Crude Mini from 09:15 IST. Live Kite on the Arise tab is ${LIVE_TAKE_LINE} only. Target nets \u20B9370 after charges, fill at the live bid. When target hits, Live cancels the resting SL and sells MARKET. Hunt stays paper-only. 8 of 10 green days is the aim, not a claim. Not a guaranteed profit.`
   }
 ];
 function deskPatch(under) {
   if (under === "crude") {
     return {
-      strategy: "rules",
-      primary: ALL("bb_mean"),
-      backup: {},
-      mix: false,
+      ...GREEN_DAY,
       orS: 9 * 60,
       orE: 9 * 60 + 15,
       entryS: 9 * 60 + 15,
-      maxTradesPerDay: 5,
       barMinutes: 1,
       minGapMin: 10,
       holdBars: 60,
       stopRs: LIVE_PAPER_CRUDE_STOP_RS,
       targetRs: LIVE_PAPER_CRUDE_TARGET_RS,
-      label: "Crude Mini \xB7 algo Bollinger mean"
+      label: "Crude Mini \xB7 mom 0.8\xD7 skip range"
     };
   }
   if (under === "bank") {
-    return {
-      ...INDEX_CLOCK,
-      strategy: "rules",
-      primary: ALL("macd"),
-      backup: {},
-      mix: true,
-      label: "Bank Nifty \xB7 mix + MACD"
-    };
+    return { ...INDEX_CLOCK, ...GREEN_DAY, label: "Bank Nifty \xB7 mom 0.8\xD7 skip range" };
   }
   if (under === "nifty") {
-    return {
-      ...INDEX_CLOCK,
-      strategy: "rules",
-      primary: ALL("rsi14"),
-      backup: {},
-      mix: false,
-      label: "Nifty 50 \xB7 algo RSI 14 bounce"
-    };
+    return { ...INDEX_CLOCK, ...GREEN_DAY, label: "Nifty 50 \xB7 mom 0.8\xD7 skip range" };
   }
   if (under === "sensex") {
-    return {
-      ...INDEX_CLOCK,
-      strategy: "rules",
-      primary: ALL("ema_pull"),
-      backup: {},
-      mix: false,
-      label: "Sensex \xB7 algo EMA 21 pullback"
-    };
+    return { ...INDEX_CLOCK, ...GREEN_DAY, label: "Sensex \xB7 mom 0.8\xD7 skip range" };
   }
-  return {
-    ...INDEX_CLOCK,
-    strategy: "momentum",
-    primary: ALL("momentum"),
-    momK: 0.8
-  };
+  return { ...INDEX_CLOCK, ...GREEN_DAY };
 }
 var PAPER_MOMENTUM = { ...EXIT, ...deskPatch("nifty") };
-var PAPER_TEST_HONEST = `Index-proxy pick, not a lock. ATM CE (up) or PE (down), 1 lot at the live ask, exact charges. Index tickets from 09:45 IST after the 09:15\u201309:30 opening range. Crude Mini from 09:15 IST. Live Kite on the Arise tab is ${LIVE_TAKE_LINE} only \u2014 today's paper hunt leaders, sample only. Daily bank \u20B9370 net after charges / stop \u20B9370. When the paper target hits, Live cancels the resting SL and sells MARKET. Hunt on all four names stays paper tickets \u2014 Live Kite never sees the hunt. Paper always records, Live on or off. Live Kite on a ticked book adds a 1 lot MARKET buy and a resting SL \u2014 a Kite reject does not drop the paper fill. A refresh does not arm Live. Nothing here is a guaranteed \u20B9370. Not a guaranteed profit.`;
+var PAPER_TEST_HONEST = `Index-proxy pick, not a lock. ATM CE (up) or PE (down), 1 lot at the live ask, exact charges. Index tickets from 09:45 IST after the 09:15\u201309:30 opening range. Crude Mini from 09:15 IST. Live Kite on the Arise tab is ${LIVE_TAKE_LINE} only \u2014 locked for more green/flat days, sample only, 8/10 not proven. Daily bank \u20B9370 net after charges / stop \u20B9370. When the paper target hits, Live cancels the resting SL and sells MARKET. Hunt on all four names stays paper tickets \u2014 Live Kite never sees the hunt. Paper always records, Live on or off. Live Kite on a ticked book adds a 1 lot MARKET buy and a resting SL \u2014 a Kite reject does not drop the paper fill. A refresh does not arm Live. Nothing here is a guaranteed \u20B9370. Not a guaranteed profit.`;
 var LIVE_PAPER_BOOKS = OPTION_14K_LIST.map((plan) => ({
   ...option14kToPaperCfg(plan),
   ...EXIT,
@@ -1863,7 +1843,9 @@ function tickBook(book, cfg, bars, last, day, nowMin, instrument, optionBars = [
   const next = {
     ...book,
     fills: [...book.fills],
-    instrument: instrument || book.instrument
+    instrument: instrument || book.instrument,
+    // Persist keeps yesterday's Start name; cfg is the method that actually ticks.
+    label: cfg.label || book.label
   };
   const done = completedBars(bars, day, nowMin, cfg.barMinutes ?? 5);
   const underLast = [...done].reverse().find((b) => b.day === day)?.close ?? null;
