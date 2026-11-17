@@ -15,9 +15,13 @@ const store = require('./store');
 const orders = require('./orders');
 
 const TICK_MS = 8_000;
+const CSV_EXCHANGES = ['NSE', 'NFO', 'BFO', 'BSE', 'MCX'];
+const CSV_TTL_MS = 30 * 60 * 1000;
 const placing = new Set();
 let timer = null;
 let busy = false;
+let csvAt = 0;
+let csvDump = '';
 let getAuthorization = async () => null;
 let saveAuthorization = () => false;
 let engine = null;
@@ -47,18 +51,23 @@ function captureAuth(userId, header) {
 }
 
 async function dumpCsv(authorization) {
+  if (csvDump && Date.now() - csvAt < CSV_TTL_MS) return csvDump;
+  const dumps = await Promise.all(
+    CSV_EXCHANGES.map((ex) => fetchInstrumentsCsv(authorization, ex).catch(() => '')),
+  );
   const chunks = [];
-  for (const ex of ['NSE', 'NFO', 'BFO', 'BSE', 'MCX']) {
-    try {
-      const csv = await fetchInstrumentsCsv(authorization, ex);
-      const lines = String(csv || '').split(/\r?\n/);
-      if (!chunks.length && lines[0]) chunks.push(lines[0]);
-      chunks.push(lines.slice(1).join('\n'));
-    } catch {
-      /* one exchange missing is fine */
-    }
+  for (const csv of dumps) {
+    const lines = String(csv || '').split(/\r?\n/);
+    if (!lines[0]) continue;
+    if (!chunks.length) chunks.push(lines[0]);
+    chunks.push(lines.slice(1).join('\n'));
   }
-  return chunks.join('\n');
+  const joined = chunks.join('\n');
+  if (joined.length > 80) {
+    csvDump = joined;
+    csvAt = Date.now();
+  }
+  return joined;
 }
 
 function candlesOf(rows) {

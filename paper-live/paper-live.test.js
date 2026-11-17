@@ -103,6 +103,15 @@ test('evolve ships bid-through so the judge can apply the next patch', () => {
   assert.equal(state.evolve.applied[0].id, 'option-tick-exit-when-bid-through-level');
 });
 
+test('droplet dumps five instrument CSVs together and reuses them for half an hour', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const js = fs.readFileSync(path.join(__dirname, 'worker.js'), 'utf8');
+  assert.match(js, /CSV_TTL_MS/);
+  assert.match(js, /Promise\.all\(/);
+  assert.match(js, /CSV_EXCHANGES\.map/);
+});
+
 test('paper tick bundle hunts named methods including algos as paper tickets', () => {
   const fs = require('fs');
   const path = require('path');
