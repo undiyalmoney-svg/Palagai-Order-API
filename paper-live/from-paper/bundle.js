@@ -1863,7 +1863,9 @@ function tickBook(book, cfg, bars, last, day, nowMin, instrument, optionBars = [
   const next = {
     ...book,
     fills: [...book.fills],
-    instrument: instrument || book.instrument
+    instrument: instrument || book.instrument,
+    // Persist keeps yesterday's Start name; cfg is the method that actually ticks.
+    label: cfg.label || book.label
   };
   const done = completedBars(bars, day, nowMin, cfg.barMinutes ?? 5);
   const underLast = [...done].reverse().find((b) => b.day === day)?.close ?? null;
