@@ -906,7 +906,8 @@ function bookSignal(mode, bars, i, cfg) {
 }
 
 // ../palagai/src/app/core/paper-desk/arise-stocks.ts
-var ARISE_STOCK_QTY = 50;
+var ARISE_STOCK_BANK_RS = 370;
+var ARISE_STOCK_DAY_MOVE_PCT = 0.01;
 var ARISE_STOCKS = [
   { id: "hdfcbank", label: "HDFC Bank", symbol: "HDFCBANK" },
   { id: "reliance", label: "Reliance", symbol: "RELIANCE" },
@@ -920,6 +921,12 @@ function isAriseStock(under) {
 }
 function ariseStockOf(under) {
   return ARISE_STOCKS.find((s) => s.id === under);
+}
+function ariseStockQty(last) {
+  const px = Number(last);
+  const move = px * ARISE_STOCK_DAY_MOVE_PCT;
+  if (!(px > 0) || !(move > 0) || !Number.isFinite(move)) return 0;
+  return Math.max(1, Math.round(ARISE_STOCK_BANK_RS / move));
 }
 
 // ../palagai/src/app/core/paper-desk/paper-mix.util.ts
@@ -1276,18 +1283,7 @@ var EXIT = {
   expiryAfterTomorrow: false,
   freshCross: true
 };
-var LIVE_TAKE_METHOD = {
-  bank: "mom 0.8\xD7 skip range",
-  nifty: "mom 0.8\xD7 skip range",
-  sensex: "mom 0.8\xD7 skip range",
-  crude: "mom 0.8\xD7 skip range",
-  hdfcbank: `mom 0.8\xD7 skip range \xB7 ${ARISE_STOCK_QTY} shares`,
-  reliance: `mom 0.8\xD7 skip range \xB7 ${ARISE_STOCK_QTY} shares`,
-  icicibank: `mom 0.8\xD7 skip range \xB7 ${ARISE_STOCK_QTY} shares`,
-  infy: `mom 0.8\xD7 skip range \xB7 ${ARISE_STOCK_QTY} shares`,
-  tcs: `mom 0.8\xD7 skip range \xB7 ${ARISE_STOCK_QTY} shares`
-};
-var LIVE_TAKE_LINE = `mom 0.8\xD7 skip range on Bank Nifty, Nifty 50, Sensex, Crude Mini, and five cash names at ${ARISE_STOCK_QTY} shares (one fill, sit at \u20B9370, skip range mornings)`;
+var LIVE_TAKE_LINE = "mom 0.8\xD7 skip range on Bank Nifty, Nifty 50, Sensex, Crude Mini, and five cash names sized so a 1% day is \u20B9370 (one fill, sit at \u20B9370, skip range mornings)";
 var INDEX_CLOCK = {
   orS: 9 * 60 + 15,
   orE: 9 * 60 + 30,
@@ -1313,7 +1309,7 @@ var PAPER_DESKS = [
   {
     id: "momentum",
     label: "Daily \u20B9370",
-    rule: `Paper always records. Index tickets from 09:45 IST after the 09:15\u201309:30 opening range. Crude Mini from 09:15 IST. Cash stocks from 09:45 IST, 50 shares. Live Kite on the Arise tab is ${LIVE_TAKE_LINE} only. Target nets \u20B9370 after charges, fill at the live bid. When target hits, Live cancels the resting SL and sells MARKET. Hunt stays paper-only. 8 of 10 green days is the aim, not a claim. Not a guaranteed profit.`
+    rule: `Paper always records. Index tickets from 09:45 IST after the 09:15\u201309:30 opening range. Crude Mini from 09:15 IST. Cash stocks from 09:45 IST, share count so a 1% day is \u20B9370. Live Kite on the Arise tab is ${LIVE_TAKE_LINE} only. Target nets \u20B9370 after charges, fill at the live bid. When target hits, Live cancels the resting SL and sells MARKET. Hunt stays paper-only. 8 of 10 green days is the aim, not a claim. Not a guaranteed profit.`
   }
 ];
 function deskPatch(under) {
@@ -1351,7 +1347,7 @@ function deskPatch(under) {
   return { ...INDEX_CLOCK, ...GREEN_DAY };
 }
 var PAPER_MOMENTUM = { ...EXIT, ...deskPatch("nifty") };
-var PAPER_TEST_HONEST = `Index-proxy pick, not a lock. ATM CE (up) or PE (down), 1 lot at the live ask, exact charges. Index tickets from 09:45 IST after the 09:15\u201309:30 opening range. Crude Mini from 09:15 IST. Cash stocks 50 shares from 09:45 IST. Live Kite on the Arise tab is ${LIVE_TAKE_LINE} only \u2014 locked for more green/flat days, sample only, 8/10 not proven. Daily bank \u20B9370 net after charges / stop \u20B9370. When the paper target hits, Live cancels the resting SL and sells MARKET. Hunt on all four names stays paper tickets \u2014 Live Kite never sees the hunt. Paper always records, Live on or off. Live Kite on a ticked book adds a 1 lot MARKET buy and a resting SL \u2014 a Kite reject does not drop the paper fill. A refresh does not arm Live. Nothing here is a guaranteed \u20B9370. Not a guaranteed profit.`;
+var PAPER_TEST_HONEST = `Index-proxy pick, not a lock. ATM CE (up) or PE (down), 1 lot at the live ask, exact charges. Index tickets from 09:45 IST after the 09:15\u201309:30 opening range. Crude Mini from 09:15 IST. Cash stocks from 09:45 IST, qty so a 1% day is \u20B9370. Live Kite on the Arise tab is ${LIVE_TAKE_LINE} only \u2014 locked for more green/flat days, sample only, 8/10 not proven. Daily bank \u20B9370 net after charges / stop \u20B9370. When the paper target hits, Live cancels the resting SL and sells MARKET. Hunt on all four names stays paper tickets \u2014 Live Kite never sees the hunt. Paper always records, Live on or off. Live Kite on a ticked book adds a 1 lot MARKET buy and a resting SL \u2014 a Kite reject does not drop the paper fill. A refresh does not arm Live. Nothing here is a guaranteed \u20B9370. Not a guaranteed profit.`;
 var LIVE_PAPER_BOOKS = [
   ...OPTION_14K_LIST.map((plan) => ({
     ...option14kToPaperCfg(plan),
@@ -1369,12 +1365,11 @@ var LIVE_PAPER_BOOKS = [
     id: `${stock.id}-momentum`,
     under: stock.id,
     desk: "momentum",
-    product: `MIS \xD7${ARISE_STOCK_QTY}`,
+    product: "MIS \xB7 1% day = \u20B9370",
     kind: "eq",
     buyOption: false,
     atm: false,
-    qty: ARISE_STOCK_QTY,
-    rsPt: ARISE_STOCK_QTY,
+    rsPt: 1,
     nseSymbol: stock.symbol,
     misPct: 0.2,
     onlyDir: 1
@@ -1546,7 +1541,7 @@ function emptyBook(cfg) {
 function capitalUsedOf(cfg, book) {
   if (cfg.capitalRs) return cfg.capitalRs;
   const px = book.last ?? book.entry ?? 0;
-  const qty = cfg.qty || cfg.rsPt || 0;
+  const qty = book.lot || cfg.qty || (cfg.kind === "eq" ? ariseStockQty(px) : cfg.rsPt) || 0;
   const pct = cfg.misPct ?? 0.2;
   if (!(px > 0) || !(qty > 0)) return 0;
   return Math.round(px * qty * pct);
@@ -1862,7 +1857,7 @@ function openAt(book, cfg, dir, entry, mode, atMin, day) {
   book.side = d === 1 ? "long" : "short";
   book.entry = entry;
   if (cfg.kind === "eq" || cfg.kind === "fut") {
-    const lot = cfg.qty || book.lot || 1;
+    const lot = cfg.kind === "eq" ? ariseStockQty(entry) || 1 : cfg.qty || book.lot || 1;
     let stop = entry * (cfg.stopPct || 15e-4);
     let tgt = entry * (cfg.targetPct || 25e-4);
     if (cfg.stopRs != null && lot > 0) stop = cfg.stopRs / lot;
@@ -2800,7 +2795,7 @@ async function runPaperTick(io) {
         ...next,
         optionSymbol: inst.tradingSymbol,
         optionToken: inst.token,
-        lot: cfg.qty || next.lot,
+        lot: next.side !== "flat" && next.lot ? next.lot : ariseStockQty(underLast ?? next.last ?? 0) || next.lot,
         instrument: inst.tradingSymbol
       };
     }
