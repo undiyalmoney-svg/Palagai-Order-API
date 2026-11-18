@@ -6,7 +6,10 @@ const BUY_TAG = 'PALAGAI_PAPER';
 const SL_TAG = 'PALAGAI_PAPER_SL';
 const EXIT_TAG = 'PALAGAI_PAPER_X';
 
+const STOCKS = new Set(['hdfcbank', 'reliance', 'icicibank', 'infy', 'tcs']);
+
 function exchangeOf(under) {
+  if (STOCKS.has(under)) return 'NSE';
   if (under === 'crude') return 'MCX';
   if (under === 'sensex') return 'BFO';
   return 'NFO';
@@ -48,8 +51,22 @@ function stopFields(book) {
   const trig = roundToTick(Number(book.sl), 0.05);
   if (!(trig > 0) || trig >= 1e9) return null;
   const under = book.under || '';
+  const exchange = exchangeOf(under);
+  if (exchange === 'NSE') {
+    return {
+      exchange,
+      tradingsymbol: book.optionSymbol,
+      transaction_type: 'SELL',
+      order_type: 'SL-M',
+      quantity: String(qtyOf(under, book.lot)),
+      product: 'MIS',
+      validity: 'DAY',
+      trigger_price: trig.toFixed(2),
+      tag: SL_TAG,
+    };
+  }
   return {
-    exchange: exchangeOf(under),
+    exchange,
     tradingsymbol: book.optionSymbol,
     transaction_type: 'SELL',
     order_type: 'SL',

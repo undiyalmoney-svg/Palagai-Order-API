@@ -54,6 +54,25 @@ test('buy is MARKET MIS tagged PALAGAI_PAPER; Crude Mini qty is 1; Sensex is BFO
   assert.equal(sl.tag, orders.SL_TAG);
   assert.ok(Number(sl.price) < Number(sl.trigger_price));
   assert.equal(orders.buyFields({ ...nifty, optionToken: 0 }), null);
+  const stock = orders.buyFields({
+    under: 'reliance',
+    optionSymbol: 'RELIANCE',
+    optionToken: 738561,
+    lot: 50,
+  });
+  assert.equal(stock.exchange, 'NSE');
+  assert.equal(stock.quantity, '50');
+  const stockSl = orders.stopFields({
+    under: 'reliance',
+    optionSymbol: 'RELIANCE',
+    optionToken: 738561,
+    lot: 50,
+    sl: 1392.6,
+  });
+  assert.equal(stockSl.exchange, 'NSE');
+  assert.equal(stockSl.order_type, 'SL-M');
+  assert.equal(stockSl.quantity, '50');
+  assert.equal(stockSl.price, undefined);
 });
 
 test('a successful BUY id blocks another place; a reject does not', () => {

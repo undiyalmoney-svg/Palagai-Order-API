@@ -7,10 +7,10 @@ const fs = require('fs');
 const path = require('path');
 
 const FILE = path.join(__dirname, '..', 'data', 'paper-live', 'state.json');
-const UNDERS = ['nifty', 'bank', 'sensex', 'crude'];
+const UNDERS = ['nifty', 'bank', 'sensex', 'crude', 'hdfcbank', 'reliance', 'icicibank', 'infy', 'tcs'];
 
 function emptyBooks() {
-  return { nifty: false, bank: false, sensex: false, crude: false };
+  return Object.fromEntries(UNDERS.map((u) => [u, false]));
 }
 
 function todayIst(now = new Date()) {

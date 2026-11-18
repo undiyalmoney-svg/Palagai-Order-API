@@ -905,6 +905,23 @@ function bookSignal(mode, bars, i, cfg) {
   return 0;
 }
 
+// ../palagai/src/app/core/paper-desk/arise-stocks.ts
+var ARISE_STOCK_QTY = 50;
+var ARISE_STOCKS = [
+  { id: "hdfcbank", label: "HDFC Bank", symbol: "HDFCBANK" },
+  { id: "reliance", label: "Reliance", symbol: "RELIANCE" },
+  { id: "icicibank", label: "ICICI Bank", symbol: "ICICIBANK" },
+  { id: "infy", label: "Infosys", symbol: "INFY" },
+  { id: "tcs", label: "TCS", symbol: "TCS" }
+];
+var STOCK_IDS = ARISE_STOCKS.map((s) => s.id);
+function isAriseStock(under) {
+  return STOCK_IDS.includes(under);
+}
+function ariseStockOf(under) {
+  return ARISE_STOCKS.find((s) => s.id === under);
+}
+
 // ../palagai/src/app/core/paper-desk/paper-mix.util.ts
 var MIX_MODES = ["momentum", "orb_break", "pdhl", "vwap_fade", "trap"];
 var MIX_CONTINUATION = /* @__PURE__ */ new Set(["momentum", "orb_break", "pdhl"]);
@@ -1259,7 +1276,18 @@ var EXIT = {
   expiryAfterTomorrow: false,
   freshCross: true
 };
-var LIVE_TAKE_LINE = "mom 0.8\xD7 skip range on Bank Nifty, Nifty 50, Sensex, and Crude Mini (one fill, sit at \u20B9370, skip range mornings)";
+var LIVE_TAKE_METHOD = {
+  bank: "mom 0.8\xD7 skip range",
+  nifty: "mom 0.8\xD7 skip range",
+  sensex: "mom 0.8\xD7 skip range",
+  crude: "mom 0.8\xD7 skip range",
+  hdfcbank: `mom 0.8\xD7 skip range \xB7 ${ARISE_STOCK_QTY} shares`,
+  reliance: `mom 0.8\xD7 skip range \xB7 ${ARISE_STOCK_QTY} shares`,
+  icicibank: `mom 0.8\xD7 skip range \xB7 ${ARISE_STOCK_QTY} shares`,
+  infy: `mom 0.8\xD7 skip range \xB7 ${ARISE_STOCK_QTY} shares`,
+  tcs: `mom 0.8\xD7 skip range \xB7 ${ARISE_STOCK_QTY} shares`
+};
+var LIVE_TAKE_LINE = `mom 0.8\xD7 skip range on Bank Nifty, Nifty 50, Sensex, Crude Mini, and five cash names at ${ARISE_STOCK_QTY} shares (one fill, sit at \u20B9370, skip range mornings)`;
 var INDEX_CLOCK = {
   orS: 9 * 60 + 15,
   orE: 9 * 60 + 30,
@@ -1285,7 +1313,7 @@ var PAPER_DESKS = [
   {
     id: "momentum",
     label: "Daily \u20B9370",
-    rule: `Paper always records. Index tickets from 09:45 IST after the 09:15\u201309:30 opening range. Crude Mini from 09:15 IST. Live Kite on the Arise tab is ${LIVE_TAKE_LINE} only. Target nets \u20B9370 after charges, fill at the live bid. When target hits, Live cancels the resting SL and sells MARKET. Hunt stays paper-only. 8 of 10 green days is the aim, not a claim. Not a guaranteed profit.`
+    rule: `Paper always records. Index tickets from 09:45 IST after the 09:15\u201309:30 opening range. Crude Mini from 09:15 IST. Cash stocks from 09:45 IST, 50 shares. Live Kite on the Arise tab is ${LIVE_TAKE_LINE} only. Target nets \u20B9370 after charges, fill at the live bid. When target hits, Live cancels the resting SL and sells MARKET. Hunt stays paper-only. 8 of 10 green days is the aim, not a claim. Not a guaranteed profit.`
   }
 ];
 function deskPatch(under) {
@@ -1312,19 +1340,46 @@ function deskPatch(under) {
   if (under === "sensex") {
     return { ...INDEX_CLOCK, ...GREEN_DAY, label: "Sensex \xB7 mom 0.8\xD7 skip range" };
   }
+  if (isAriseStock(under)) {
+    const stock = ariseStockOf(under);
+    return {
+      ...INDEX_CLOCK,
+      ...GREEN_DAY,
+      label: `${stock?.label || under} \xB7 mom 0.8\xD7 skip range`
+    };
+  }
   return { ...INDEX_CLOCK, ...GREEN_DAY };
 }
 var PAPER_MOMENTUM = { ...EXIT, ...deskPatch("nifty") };
-var PAPER_TEST_HONEST = `Index-proxy pick, not a lock. ATM CE (up) or PE (down), 1 lot at the live ask, exact charges. Index tickets from 09:45 IST after the 09:15\u201309:30 opening range. Crude Mini from 09:15 IST. Live Kite on the Arise tab is ${LIVE_TAKE_LINE} only \u2014 locked for more green/flat days, sample only, 8/10 not proven. Daily bank \u20B9370 net after charges / stop \u20B9370. When the paper target hits, Live cancels the resting SL and sells MARKET. Hunt on all four names stays paper tickets \u2014 Live Kite never sees the hunt. Paper always records, Live on or off. Live Kite on a ticked book adds a 1 lot MARKET buy and a resting SL \u2014 a Kite reject does not drop the paper fill. A refresh does not arm Live. Nothing here is a guaranteed \u20B9370. Not a guaranteed profit.`;
-var LIVE_PAPER_BOOKS = OPTION_14K_LIST.map((plan) => ({
-  ...option14kToPaperCfg(plan),
-  ...EXIT,
-  ...deskPatch(plan.id),
-  id: `${plan.id}-momentum`,
-  under: plan.id,
-  desk: "momentum",
-  product: `ATM CE/PE \xD7${plan.lot}`
-}));
+var PAPER_TEST_HONEST = `Index-proxy pick, not a lock. ATM CE (up) or PE (down), 1 lot at the live ask, exact charges. Index tickets from 09:45 IST after the 09:15\u201309:30 opening range. Crude Mini from 09:15 IST. Cash stocks 50 shares from 09:45 IST. Live Kite on the Arise tab is ${LIVE_TAKE_LINE} only \u2014 locked for more green/flat days, sample only, 8/10 not proven. Daily bank \u20B9370 net after charges / stop \u20B9370. When the paper target hits, Live cancels the resting SL and sells MARKET. Hunt on all four names stays paper tickets \u2014 Live Kite never sees the hunt. Paper always records, Live on or off. Live Kite on a ticked book adds a 1 lot MARKET buy and a resting SL \u2014 a Kite reject does not drop the paper fill. A refresh does not arm Live. Nothing here is a guaranteed \u20B9370. Not a guaranteed profit.`;
+var LIVE_PAPER_BOOKS = [
+  ...OPTION_14K_LIST.map((plan) => ({
+    ...option14kToPaperCfg(plan),
+    ...EXIT,
+    ...deskPatch(plan.id),
+    id: `${plan.id}-momentum`,
+    under: plan.id,
+    desk: "momentum",
+    product: `ATM CE/PE \xD7${plan.lot}`
+  })),
+  ...ARISE_STOCKS.map((stock) => ({
+    ...option14kToPaperCfg(OPTION_14K_BOOKS.nifty),
+    ...EXIT,
+    ...deskPatch(stock.id),
+    id: `${stock.id}-momentum`,
+    under: stock.id,
+    desk: "momentum",
+    product: `MIS \xD7${ARISE_STOCK_QTY}`,
+    kind: "eq",
+    buyOption: false,
+    atm: false,
+    qty: ARISE_STOCK_QTY,
+    rsPt: ARISE_STOCK_QTY,
+    nseSymbol: stock.symbol,
+    misPct: 0.2,
+    onlyDir: 1
+  }))
+];
 var SCALP_EXIT = {
   buyOption: false,
   strategy: "watch",
@@ -1395,7 +1450,10 @@ var PAPER_SCALP_BOOKS = [
 ];
 var ALL_PAPER_BOOKS = LIVE_PAPER_BOOKS;
 function underOf(id) {
-  const u = id.split("-")[0];
+  return id.split("-")[0] || "nifty";
+}
+function optionUnderOf(id) {
+  const u = underOf(id);
   return u === "crude" || u === "nifty" || u === "bank" || u === "sensex" ? u : "nifty";
 }
 function paperTickOrder(cfgs) {
@@ -1404,7 +1462,9 @@ function paperTickOrder(cfgs) {
     if (u === "bank") return 0;
     if (u === "sensex") return 1;
     if (u === "nifty") return 2;
-    return 3;
+    if (u === "crude") return 3;
+    const stock = ARISE_STOCKS.findIndex((s) => s.id === u);
+    return stock >= 0 ? 4 + stock : 9;
   };
   return [...cfgs].sort((a, b) => rank(a.id) - rank(b.id));
 }
@@ -1431,7 +1491,7 @@ function expiryShort(expiry) {
 }
 function optionPickLabel(pick) {
   if (!pick.optionType || pick.strike == null) return pick.optionSymbol || "";
-  const name = OPTION_14K_BOOKS[underOf(pick.id)]?.name ?? pick.id.toUpperCase();
+  const name = OPTION_14K_BOOKS[optionUnderOf(pick.id)]?.name ?? pick.id.toUpperCase();
   const exp = expiryShort(pick.expiry);
   return `${name} ${pick.strike} ${pick.optionType}${exp ? ` \xB7 exp ${exp}` : ""}`;
 }
@@ -1802,12 +1862,23 @@ function openAt(book, cfg, dir, entry, mode, atMin, day) {
   book.side = d === 1 ? "long" : "short";
   book.entry = entry;
   if (cfg.kind === "eq" || cfg.kind === "fut") {
-    const stop = entry * (cfg.stopPct || 15e-4);
-    const tgt = entry * (cfg.targetPct || 25e-4);
+    const lot = cfg.qty || book.lot || 1;
+    let stop = entry * (cfg.stopPct || 15e-4);
+    let tgt = entry * (cfg.targetPct || 25e-4);
+    if (cfg.stopRs != null && lot > 0) stop = cfg.stopRs / lot;
+    if (cfg.targetRs != null && lot > 0) {
+      tgt = cfg.targetRs / lot;
+      if (cfg.kind === "eq" && entry > 0) {
+        for (let i = 0; i < 3; i++) {
+          const charges = equityMisRoundTripCharges(entry, Math.max(0, entry + d * tgt), lot);
+          tgt = (cfg.targetRs + charges) / lot;
+        }
+      }
+    }
     book.sl = Math.round((entry - d * stop) * 100) / 100;
     book.tp = Math.round((entry + d * tgt) * 100) / 100;
     book.scratch = book.sl;
-    book.lot = cfg.qty || book.lot;
+    book.lot = lot;
   } else if (isOptionBuy(cfg)) {
     book.sl = Math.max(0.05, entry - cfg.sl);
     book.tp = entry + cfg.tp;
@@ -2110,7 +2181,17 @@ function nightLog(session) {
 }
 
 // ../palagai/src/app/core/paper-desk/paper-live-order.util.ts
-var PAPER_LIVE_UNDERS = ["nifty", "bank", "sensex", "crude"];
+var PAPER_LIVE_UNDERS = [
+  "nifty",
+  "bank",
+  "sensex",
+  "crude",
+  "hdfcbank",
+  "reliance",
+  "icicibank",
+  "infy",
+  "tcs"
+];
 function paperLiveArmed(live, books) {
   return !!live && PAPER_LIVE_UNDERS.some((u) => !!books[u]);
 }
@@ -2617,7 +2698,9 @@ function kiteBar(row) {
 }
 
 // ../palagai/src/app/core/paper-desk/paper-tick.run.ts
-var UNDERS2 = ["crude", "nifty", "bank", "sensex"];
+var OPTION_UNDERS = ["crude", "nifty", "bank", "sensex"];
+var STOCK_UNDERS = ARISE_STOCKS.map((s) => s.id);
+var UNDERS2 = [...OPTION_UNDERS, ...STOCK_UNDERS];
 var NO_BUDGET_CAP = 1e7;
 var HIST_MINUTE_LOOKBACK_DAYS = 3;
 async function runPaperTick(io) {
@@ -2636,20 +2719,23 @@ async function runPaperTick(io) {
   const nifty = findNamed(dump, ["NIFTY 50"]) || { tradingSymbol: "NIFTY 50", token: 256265, exchange: "NSE" };
   const bank = findNamed(dump, ["NIFTY BANK"]) || { tradingSymbol: "NIFTY BANK", token: 260105, exchange: "NSE" };
   const sensex = findNamed(dump, ["SENSEX"]) || { tradingSymbol: "SENSEX", token: 265, exchange: "BSE" };
+  const stocks = Object.fromEntries(ARISE_STOCKS.map((s) => [s.id, findEquity(dump, s.symbol)]));
+  const named = { crude, nifty, bank, sensex, ...stocks };
   const underKeys = [
     crude ? `MCX:${crude.tradingSymbol}` : "",
     "NSE:NIFTY 50",
     "NSE:NIFTY BANK",
-    "BSE:SENSEX"
+    "BSE:SENSEX",
+    ...ARISE_STOCKS.map((s) => `NSE:${s.symbol}`)
   ].filter(Boolean);
   const openOptKeys = cur.books.filter((b) => b.side !== "flat" && b.optionSymbol).map((b) => optionKey(b));
   const keys = [.../* @__PURE__ */ new Set([...underKeys, ...openOptKeys])];
   let quotes = keys.length ? await io.fetchQuotes(keys) || {} : {};
   const cheapByUnder = /* @__PURE__ */ new Map();
   const cheapKeys = [];
-  const asOfCfg = LIVE_PAPER_BOOKS[0];
-  for (const under of UNDERS2) {
-    const inst = instOf(under, crude, nifty, bank, sensex);
+  const asOfCfg = LIVE_PAPER_BOOKS.find((b) => b.buyOption) || LIVE_PAPER_BOOKS[0];
+  for (const under of OPTION_UNDERS) {
+    const inst = named[under];
     const spot = lastPrice(quotes, under, inst?.tradingSymbol || "") ?? 0;
     const pair = cheapPair(chain, under, spot, pickAsOf(asOfCfg, now), asOfCfg.atm ? 0 : void 0);
     cheapByUnder.set(under, pair);
@@ -2666,7 +2752,7 @@ async function runPaperTick(io) {
   const barCache = new Map(
     await Promise.all(
       UNDERS2.map(async (under) => {
-        const inst = instOf(under, crude, nifty, bank, sensex);
+        const inst = named[under];
         const bars = inst?.token ? await loadMinuteBars(io.fetchHistorical, String(inst.token), day) : [];
         return [under, bars];
       })
@@ -2675,7 +2761,7 @@ async function runPaperTick(io) {
   const nextById = /* @__PURE__ */ new Map();
   for (const cfg of paperTickOrder(LIVE_PAPER_BOOKS)) {
     const under = underOf(cfg.id);
-    const inst = instOf(under, crude, nifty, bank, sensex);
+    const inst = named[under];
     const prev = cur.books.find((b) => b.id === cfg.id) || emptySession(day).books.find((b) => b.id === cfg.id);
     const bars = barCache.get(under) || [];
     const underLast = lastPrice(quotes, under, inst?.tradingSymbol || "");
@@ -2709,6 +2795,15 @@ async function runPaperTick(io) {
       optionBars,
       { bid: optBid, ask: optAsk, blockOpen: indexDeskBlockReason(cfg.id, peers, day), evolve: flags }
     );
+    if (cfg.kind === "eq" && inst) {
+      next = {
+        ...next,
+        optionSymbol: inst.tradingSymbol,
+        optionToken: inst.token,
+        lot: cfg.qty || next.lot,
+        instrument: inst.tradingSymbol
+      };
+    }
     if (cfg.buyOption && needsOption(next)) {
       const spot = underLast ?? 0;
       const pair = cheapByUnder.get(under);
@@ -2750,8 +2845,8 @@ async function runPaperTick(io) {
   }
   const books = LIVE_PAPER_BOOKS.map((c) => nextById.get(c.id) || cur.books.find((b) => b.id === c.id));
   const quotesByUnder = /* @__PURE__ */ new Map();
-  for (const under of UNDERS2) {
-    const inst = instOf(under, crude, nifty, bank, sensex);
+  for (const under of OPTION_UNDERS) {
+    const inst = named[under];
     const pair = cheapByUnder.get(under);
     quotesByUnder.set(under, {
       ce: huntSideQuote(quotes, pair?.ce),
@@ -2789,7 +2884,7 @@ async function runPaperTick(io) {
   return { ...snap, evolve: after.state };
 }
 async function bindCheap(book, cfg, chain, spot, quotes, nowMin, io, pair, now) {
-  const id = underOf(cfg.id);
+  const id = optionUnderOf(cfg.id);
   const pick = (book.side === "long" ? pair?.ce : pair?.pe) || pickCheapOtm({
     instruments: chain,
     book: id,
@@ -3043,6 +3138,19 @@ function findNamed(csv, names) {
   }
   return null;
 }
+function findEquity(csv, symbol) {
+  const want = symbol.toUpperCase();
+  for (const line of csv.split(/\r?\n/).slice(1)) {
+    const cols = splitCsvLine2(line);
+    if (cols.length < 12) continue;
+    const sym = cols[2].trim().toUpperCase();
+    const itype = cols[9].trim().toUpperCase();
+    if (sym === want && itype === "EQ") {
+      return { tradingSymbol: cols[2].trim(), token: Number(cols[0]) || 0, exchange: cols[11].trim() || "NSE" };
+    }
+  }
+  return null;
+}
 function minuteDayWindows(day, lookbackDays = HIST_MINUTE_LOOKBACK_DAYS) {
   const out = [day];
   for (let i = 1; i <= lookbackDays; i += 1) out.push(shiftDay(day, -i));
@@ -3082,18 +3190,16 @@ function optionMarkLast(args) {
   if (args.side !== "flat") return prem;
   return prem;
 }
-function instOf(under, crude, nifty, bank, sensex) {
-  return under === "crude" ? crude : under === "nifty" ? nifty : under === "bank" ? bank : sensex;
-}
 function optionKey(book) {
   const under = underOf(book.id);
-  const ex = under === "crude" ? "MCX" : under === "sensex" ? "BFO" : "NFO";
+  const ex = isAriseStock(under) ? "NSE" : under === "crude" ? "MCX" : under === "sensex" ? "BFO" : "NFO";
   return `${ex}:${book.optionSymbol}`;
 }
 function underKeyFor(id, symbol, exchange) {
   if (id === "nifty") return "NSE:NIFTY 50";
   if (id === "bank") return "NSE:NIFTY BANK";
   if (id === "sensex") return "BSE:SENSEX";
+  if (isAriseStock(id)) return `NSE:${symbol || ""}`;
   return `${exchange || "MCX"}:${symbol || ""}`;
 }
 function findQuote(quotes, key) {
@@ -3138,6 +3244,10 @@ function lastPrice(quotes, id, symbol) {
   if (want) {
     const n = Number(findQuote(quotes, want)?.last_price);
     return Number.isFinite(n) && n > 0 ? n : null;
+  }
+  if (isAriseStock(id) && symbol) {
+    const n = Number(findQuote(quotes, `NSE:${symbol}`)?.last_price);
+    if (Number.isFinite(n) && n > 0) return n;
   }
   if (id === "crude" && symbol) {
     const exact = findQuote(quotes, `MCX:${symbol}`);
