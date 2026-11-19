@@ -1256,6 +1256,7 @@ function equityMisRoundTripCharges(entry, exit, qty) {
 
 // ../palagai/src/app/core/paper-desk/live-paper.engine.ts
 var ALL = (mode) => ({ trend: mode, range: mode, quiet: mode, stand: mode });
+var LIVE_PAPER_MAX_STOP_RS = 370;
 var LIVE_PAPER_BANK_RS = 370;
 var LIVE_PAPER_TARGET_RS = 370;
 var LIVE_PAPER_STOP_RS = 370;
@@ -1303,6 +1304,7 @@ var GREEN_DAY = {
   skipStructures: ["range"],
   maxTradesPerDay: 1,
   minDayNetRs: LIVE_PAPER_BANK_RS,
+  maxStopRs: LIVE_PAPER_MAX_STOP_RS,
   noConfirm: false
 };
 var PAPER_DESKS = [

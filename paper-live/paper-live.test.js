@@ -53,6 +53,7 @@ test('buy is MARKET MIS tagged PALAGAI_PAPER; Crude Mini qty is 1; Sensex is BFO
   assert.equal(sl.order_type, 'SL');
   assert.equal(sl.tag, orders.SL_TAG);
   assert.ok(Number(sl.price) < Number(sl.trigger_price));
+  assert.ok((Number(sl.trigger_price) - Number(sl.price)) * 20 <= 81);
   assert.equal(orders.buyFields({ ...nifty, optionToken: 0 }), null);
   const stock = orders.buyFields({
     under: 'reliance',
@@ -73,6 +74,28 @@ test('buy is MARKET MIS tagged PALAGAI_PAPER; Crude Mini qty is 1; Sensex is BFO
   assert.equal(stockSl.order_type, 'SL-M');
   assert.equal(stockSl.quantity, '50');
   assert.equal(stockSl.price, undefined);
+});
+
+test('F&O SL limit is ₹80 extra, not 10% of premium (~₹1,400 on Bank/Nifty)', () => {
+  const bank = orders.stopFields({
+    under: 'bank',
+    optionSymbol: 'BANKNIFTY26NOV62300CE',
+    optionToken: 11,
+    lot: 30,
+    sl: 383.75,
+  });
+  assert.equal(bank.order_type, 'SL');
+  const extra = (Number(bank.trigger_price) - Number(bank.price)) * 30;
+  assert.ok(extra <= 82, `extra ₹${extra}`);
+  assert.ok((383.75 - 383.75 * 0.9) * 30 > 1100);
+  const nifty = orders.stopFields({
+    under: 'nifty',
+    optionSymbol: 'NIFTY26NOV25250PE',
+    optionToken: 12,
+    lot: 65,
+    sl: 165.2,
+  });
+  assert.ok((Number(nifty.trigger_price) - Number(nifty.price)) * 65 <= 84);
 });
 
 test('a successful BUY id blocks another place; a reject does not', () => {

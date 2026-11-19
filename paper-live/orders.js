@@ -26,6 +26,17 @@ function roundToTick(value, tick) {
   return Math.round(value / t) * t;
 }
 
+/** Extra rupees the F&O SL LIMIT may sit below the ₹370 trigger. 10% of premium was ~₹1,400 on Nifty/Bank. */
+const SL_LIMIT_SLIP_RS = 80;
+
+function slLimitPrice(trigger, lot, tick) {
+  const t = tick > 0 ? tick : 0.05;
+  const trig = roundToTick(Number(trigger), t);
+  const qty = Math.max(1, Math.floor(Number(lot) || 0) || 1);
+  const drop = SL_LIMIT_SLIP_RS / qty;
+  return roundToTick(Math.max(t, trig - drop), t);
+}
+
 function ticketOk(book) {
   return !!(book && Number(book.optionToken) > 0 && String(book.optionSymbol || '').trim());
 }
@@ -74,7 +85,7 @@ function stopFields(book) {
     product: 'MIS',
     validity: 'DAY',
     trigger_price: trig.toFixed(2),
-    price: roundToTick(Math.max(0.05, trig * 0.9), 0.05).toFixed(2),
+    price: slLimitPrice(trig, book.lot, 0.05).toFixed(2),
     tag: SL_TAG,
   };
 }
