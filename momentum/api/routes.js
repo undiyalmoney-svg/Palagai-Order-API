@@ -189,6 +189,8 @@ function createMomentumRouter(app, { auth = siteAuth } = {}) {
   attachChartsProtect(router);
   const { attachPaperLive } = require('../../paper-live/routes');
   attachPaperLive(router);
+  const { attachSniper } = require('../../sniper/routes');
+  attachSniper(router);
 
   return router;
 }

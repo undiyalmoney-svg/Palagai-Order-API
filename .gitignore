@@ -42,3 +42,6 @@ data/crude-live/
 
 # Paper Live blotter / arm (runtime)
 data/paper-live/
+
+# 5-Minute Sniper blotter / arm (runtime)
+data/sniper/
