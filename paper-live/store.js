@@ -8,6 +8,7 @@ const path = require('path');
 
 const FILE = path.join(__dirname, '..', 'data', 'paper-live', 'state.json');
 const UNDERS = ['nifty', 'bank', 'sensex', 'crude', 'hdfcbank', 'reliance', 'icicibank', 'infy', 'tcs'];
+const LIVE_TAKE = ['nifty', 'bank', 'sensex'];
 
 function emptyBooks() {
   return Object.fromEntries(UNDERS.map((u) => [u, false]));
@@ -72,7 +73,7 @@ function save(state) {
 }
 
 function liveArmed(state) {
-  return !!state.live && UNDERS.some((u) => !!state.books[u]);
+  return !!state.live && LIVE_TAKE.some((u) => !!state.books[u]);
 }
 
 function publicView(state) {
@@ -91,4 +92,4 @@ function publicView(state) {
   };
 }
 
-module.exports = { FILE, UNDERS, empty, emptyBooks, emptyEvolve, load, save, liveArmed, publicView, todayIst };
+module.exports = { FILE, UNDERS, LIVE_TAKE, empty, emptyBooks, emptyEvolve, load, save, liveArmed, publicView, todayIst };

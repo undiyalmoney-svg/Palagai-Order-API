@@ -11,6 +11,8 @@ test('live is armed only when Live is on and a book is ticked', () => {
   off.live = true;
   assert.equal(store.liveArmed(off), false);
   off.books.crude = true;
+  assert.equal(store.liveArmed(off), false);
+  off.books.bank = true;
   assert.equal(store.liveArmed(off), true);
 });
 
@@ -118,6 +120,20 @@ test('paper tick bundle exports runPaperTick', () => {
   assert.equal(typeof paper.runPaperTick, 'function');
   assert.equal(typeof paper.underOf, 'function');
   assert.equal(typeof paper.paperLiveArmedFor, 'function');
+  const books = {
+    nifty: false,
+    bank: true,
+    sensex: false,
+    crude: true,
+    hdfcbank: true,
+    reliance: false,
+    icicibank: false,
+    infy: false,
+    tcs: false,
+  };
+  assert.equal(paper.paperLiveArmedFor(true, books, 'bank'), true);
+  assert.equal(paper.paperLiveArmedFor(true, books, 'crude'), false);
+  assert.equal(paper.paperLiveArmedFor(true, books, 'hdfcbank'), false);
 });
 
 test('a new IST day keeps Live radio and book checks', () => {

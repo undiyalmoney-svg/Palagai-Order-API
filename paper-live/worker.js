@@ -98,9 +98,9 @@ async function overlayBook(authorization, state, prev, next) {
       kiteSlOrderId: prev.kiteSlOrderId,
     });
   }
-  const armed = eng
-    ? eng.paperLiveArmedFor(state.live, state.books, under)
-    : !!(state.live && state.books[under]);
+  const armed =
+    store.LIVE_TAKE.includes(under) &&
+    (eng ? eng.paperLiveArmedFor(state.live, state.books, under) : !!(state.live && state.books[under]));
   if (!armed) return next;
   if (next.side !== 'flat' && next.optionSymbol && Number(next.optionToken) > 0) {
     return enterBook(authorization, next);
