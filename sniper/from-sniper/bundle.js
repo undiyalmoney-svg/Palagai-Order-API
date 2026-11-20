@@ -875,7 +875,8 @@ function tickSniperBook(book, cfg, bars, day, nowMin, nowIso, spot, opt, pick) {
   return next;
 }
 function summarizeSniper(session, patch = {}) {
-  const books = session.books.map((b) => ({
+  const src = patch.books ?? session.books;
+  const books = src.map((b) => ({
     ...b,
     peakCapital: Math.max(b.peakCapital, b.capital),
     troughCapital: Math.min(b.troughCapital, b.capital)
