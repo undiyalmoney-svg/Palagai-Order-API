@@ -63,6 +63,23 @@ function save(state) {
   fs.renameSync(tmp, paths.FILE);
 }
 
+function sessionActivity(session) {
+  const books = session && Array.isArray(session.books) ? session.books : [];
+  return books.reduce((n, b) => {
+    const fills = Array.isArray(b.fills) ? b.fills.length : 0;
+    const skips = Array.isArray(b.skips) ? b.skips.length : 0;
+    const open = b.side && b.side !== 'flat' ? 1 : 0;
+    const reason = String(b.reason || '').trim() ? 1 : 0;
+    return n + fills + skips + open + reason;
+  }, 0);
+}
+
+function takeSession(current, incoming) {
+  if (!incoming || typeof incoming !== 'object' || !Array.isArray(incoming.books)) return current || null;
+  if (sessionActivity(incoming) > 0 || sessionActivity(current) === 0) return incoming;
+  return current;
+}
+
 function liveArmed(state) {
   return !!state.live;
 }
@@ -82,4 +99,4 @@ function publicView(state) {
   };
 }
 
-module.exports = { FILE, paths, empty, load, save, liveArmed, publicView, todayIst };
+module.exports = { FILE, paths, empty, load, save, liveArmed, publicView, todayIst, sessionActivity, takeSession };

@@ -84,6 +84,20 @@ test('same-day restart keeps fills so a second ticket is not opened after pm2', 
   }
 });
 
+test('an empty tab PUT does not wipe a droplet session that already has skips or fills', () => {
+  const live = {
+    day: '2026-11-20',
+    books: [{ id: 'nifty', side: 'flat', reason: 'missed 09:40 open', fills: [], skips: [{ min: 580, reason: 'missed' }] }],
+  };
+  const empty = {
+    day: '2026-11-20',
+    books: [{ id: 'nifty', side: 'flat', reason: '', fills: [], skips: [] }],
+  };
+  assert.equal(store.takeSession(live, empty), live);
+  assert.equal(store.takeSession(empty, live), live);
+  assert.equal(store.takeSession(null, empty), empty);
+});
+
 test('a new IST day keeps Start/Live but wipes the session for a fresh blotter', () => {
   const today = store.todayIst(new Date('2026-11-19T10:00:00+05:30'));
   const state = store.empty(today);

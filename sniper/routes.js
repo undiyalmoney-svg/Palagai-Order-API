@@ -25,7 +25,7 @@ function attachSniper(router) {
     if (typeof body.running === 'boolean') state.running = body.running;
     if (typeof body.live === 'boolean') state.live = body.live;
     if (body.session && typeof body.session === 'object' && Array.isArray(body.session.books)) {
-      state.session = body.session;
+      state.session = store.takeSession(state.session, body.session);
     }
     if (header && state.userId) worker.captureAuth(state.userId, header);
     state.sessionOk = !!(header || state.sessionOk);
