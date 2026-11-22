@@ -454,7 +454,7 @@ var SNIPER_BOOKS = [
     underExchange: "MCX"
   }
 ];
-var SNIPER_HONEST = "5-Minute Sniper is an experiment, not Arise. Previous completed 5-minute candle: green buys ATM CE, red buys ATM PE, doji skips. Each of Nifty 50, Bank Nifty, Sensex and Crude Mini starts at \u20B950,000. Max loss \u20B9100 per ticket after Kite charges. Index 09:20\u201315:25 IST. Crude Mini 09:05\u201323:25 IST on MCX. Paper records on the droplet with the tab closed. Live Kite needs an extra confirm. Not a guaranteed profit.";
+var SNIPER_HONEST = "5-Minute Sniper is an experiment, not Arise. Fade the previous completed 5-minute candle: green buys ATM PE, red buys ATM CE, doji skips. Each of Nifty 50, Bank Nifty, Sensex and Crude Mini starts at \u20B950,000. Max loss \u20B9100 per ticket after Kite charges. Index 09:20\u201315:25 IST. Crude Mini 09:05\u201323:25 IST on MCX. Paper records on the droplet with the tab closed. Live Kite needs an extra confirm. Not a guaranteed profit.";
 
 // ../palagai/src/app/core/sniper/sniper-clock.ts
 function sniperIstDay(d = /* @__PURE__ */ new Date()) {
@@ -619,6 +619,11 @@ function candleDir(bar) {
   if (bar.close > bar.open) return "green";
   if (bar.close < bar.open) return "red";
   return "doji";
+}
+function sniperFadeType(dir) {
+  if (dir === "green") return "PE";
+  if (dir === "red") return "CE";
+  return null;
 }
 function emptySniperBook(cfg, capital = SNIPER_CAPITAL_RS) {
   return {
@@ -831,7 +836,8 @@ function tickSniperBook(book, cfg, bars, day, nowMin, nowIso, spot, opt, pick) {
     return skip(next, slot, nowIso, `skipped: no completed candle at ${hhmm(prevMin)}`);
   }
   const dir = candleDir(candle);
-  if (dir === "doji") {
+  const fade = sniperFadeType(dir);
+  if (dir === "doji" || !fade) {
     return skip(next, slot, nowIso, `skipped: doji at ${hhmm(prevMin)}`);
   }
   if (spot == null || !(spot > 0)) {
@@ -839,6 +845,9 @@ function tickSniperBook(book, cfg, bars, day, nowMin, nowIso, spot, opt, pick) {
   }
   if (!pick || !pick.listed || !pick.optionSymbol) {
     return skip(next, slot, nowIso, "skipped: no listed ATM");
+  }
+  if (pick.optionType !== fade) {
+    return skip(next, slot, nowIso, `skipped: need fade ${fade} not ${pick.optionType}`);
   }
   const fillPx = ask ?? last;
   if (fillPx == null || !(fillPx > 0)) {
@@ -869,7 +878,7 @@ function tickSniperBook(book, cfg, bars, day, nowMin, nowIso, spot, opt, pick) {
   next.entryAsk = ask;
   next.last = fillPx;
   next.status = "open";
-  next.reason = `${dir} ${pick.optionType} ${pick.strike} \xB7 hold to ${hhmm(slot + SNIPER_BAR_MIN)}`;
+  next.reason = `${dir} fade ${pick.optionType} ${pick.strike} \xB7 hold to ${hhmm(slot + SNIPER_BAR_MIN)}`;
   next.exception = false;
   markBook(next, fillPx, cfg.venue);
   return next;
@@ -993,11 +1002,11 @@ async function load5m(fetchHistorical, token, day) {
   const candles = await fetchHistorical(token, "5minute", day, day).catch(() => []);
   return (candles || []).map(asBar).filter((b) => b.day);
 }
-function atmPick(chain, cfg, dir, spot, asOf) {
+function atmPick(chain, cfg, optionType, spot, asOf) {
   const picked = pickCheapOtm({
     instruments: chain,
     book: cfg.id,
-    direction: dir === "green" ? "BUY" : "SELL",
+    direction: optionType === "CE" ? "BUY" : "SELL",
     spot,
     asOf,
     premiumBudgetRs: 1e7,
@@ -1053,9 +1062,9 @@ async function runSniperTick(io) {
     const book = raw.books.find((b) => b.id === cfg.id);
     const bars = completedSniperBars(barsBy.get(cfg.id) || [], day, nowMin);
     const signal = barAt(bars, day, sniperPrevCandleMin(cfg, nowMin));
-    const dir = book?.side === "long" && book.optionType ? book.optionType === "CE" ? "green" : "red" : signal ? candleDir(signal) : null;
-    if (spot && dir && dir !== "doji") {
-      const pick = atmPick(chain, cfg, dir, spot, now);
+    const fadeType = book?.side === "long" && (book.optionType === "CE" || book.optionType === "PE") ? book.optionType : signal ? sniperFadeType(candleDir(signal)) : null;
+    if (spot && fadeType) {
+      const pick = atmPick(chain, cfg, fadeType, spot, now);
       picks.set(cfg.id, pick);
       if (pick?.listed) extra.push(optionKey(cfg.exchange, pick.optionSymbol));
     } else {
