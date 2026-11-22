@@ -405,7 +405,7 @@ function pickCheapOtm(params) {
 var SNIPER_CAPITAL_RS = 5e4;
 var SNIPER_MAX_LOSS_RS = 100;
 var SNIPER_BAR_MIN = 5;
-var SNIPER_ENTRY_GRACE_MIN = 1;
+var SNIPER_ENTRY_GRACE_MIN = 2;
 var SNIPER_TICK_RS = 0.05;
 var SNIPER_DAY_FLOOR_RS = 25e3;
 var SNIPER_BOOKS = [
@@ -700,6 +700,13 @@ function skip(book, min, at, reason) {
     skips: [...book.skips, { at, min, reason }].slice(-400)
   };
 }
+function wait(book, reason) {
+  return {
+    ...book,
+    status: "watching",
+    reason
+  };
+}
 function closeFill(book, cfg, exit, exitMin, at, day, reason, bid, ask, incomplete = false) {
   if (book.side !== "long" || book.entry == null || !(book.qty > 0)) return { ...book, side: "flat", exception: false };
   const charges = sniperCharges(book.entry, exit, book.qty, cfg.venue);
@@ -833,7 +840,7 @@ function tickSniperBook(book, cfg, bars, day, nowMin, nowIso, spot, opt, pick) {
   const prevMin = sniperPrevCandleMin(cfg, nowMin);
   const candle = barAt(done, day, prevMin);
   if (!candle) {
-    return skip(next, slot, nowIso, `skipped: no completed candle at ${hhmm(prevMin)}`);
+    return wait(next, `waiting completed candle at ${hhmm(prevMin)}`);
   }
   const dir = candleDir(candle);
   const fade = sniperFadeType(dir);
@@ -841,21 +848,21 @@ function tickSniperBook(book, cfg, bars, day, nowMin, nowIso, spot, opt, pick) {
     return skip(next, slot, nowIso, `skipped: doji at ${hhmm(prevMin)}`);
   }
   if (spot == null || !(spot > 0)) {
-    return skip(next, slot, nowIso, "skipped: no spot");
+    return wait(next, "waiting spot");
   }
   if (!pick || !pick.listed || !pick.optionSymbol) {
-    return skip(next, slot, nowIso, "skipped: no listed ATM");
+    return wait(next, "waiting listed ATM");
   }
   if (pick.optionType !== fade) {
-    return skip(next, slot, nowIso, `skipped: need fade ${fade} not ${pick.optionType}`);
+    return wait(next, `waiting fade ${fade} not ${pick.optionType}`);
   }
   const fillPx = ask ?? last;
   if (fillPx == null || !(fillPx > 0)) {
-    return skip(next, slot, nowIso, "skipped: no option quote");
+    return wait(next, "waiting option quote");
   }
   const size = sniperSize(next.capital, fillPx, pick.lotSize, cfg.venue);
   if (!size.lots) {
-    return skip(next, slot, nowIso, `skipped: ${size.skip}`);
+    return wait(next, `waiting size: ${size.skip}`);
   }
   next.side = "long";
   next.dir = dir;
@@ -895,7 +902,9 @@ function summarizeSniper(session, patch = {}) {
     ...patch,
     books,
     honest: SNIPER_HONEST,
-    incomplete: books.some((b) => b.fills.some((f) => f.incomplete) || /no completed candle|no listed ATM|no option quote/.test(b.reason))
+    incomplete: books.some(
+      (b) => b.fills.some((f) => f.incomplete) || /waiting completed candle|waiting listed ATM|waiting option quote|waiting spot/.test(b.reason)
+    )
   };
 }
 

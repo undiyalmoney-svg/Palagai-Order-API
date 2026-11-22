@@ -227,10 +227,13 @@ async function tickOnce() {
     store.save(state);
   } catch (err) {
     const stateErr = store.load();
-    stateErr.lastError = err.message || String(err);
+    const msg = err.message || String(err);
+    stateErr.lastError = /api_key|access_token/i.test(msg)
+      ? 'Kite token expired. Open Token, then Start 5-Minute Sniper before 09:05 IST.'
+      : msg;
     stateErr.lastTick = new Date().toISOString();
     store.save(stateErr);
-    console.error('[sniper]', err.message || err);
+    console.error('[sniper]', msg);
   } finally {
     busy = false;
   }
