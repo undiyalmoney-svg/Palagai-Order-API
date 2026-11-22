@@ -85,17 +85,58 @@ test('same-day restart keeps fills so a second ticket is not opened after pm2', 
 });
 
 test('an empty tab PUT does not wipe a droplet session that already has skips or fills', () => {
+  const at = new Date('2026-11-20T12:00:00+05:30');
   const live = {
     day: '2026-11-20',
     books: [{ id: 'nifty', side: 'flat', reason: 'missed 09:40 open', fills: [], skips: [{ min: 580, reason: 'missed' }] }],
   };
-  const empty = {
+  const emptySess = {
     day: '2026-11-20',
     books: [{ id: 'nifty', side: 'flat', reason: '', fills: [], skips: [] }],
   };
-  assert.equal(store.takeSession(live, empty), live);
-  assert.equal(store.takeSession(empty, live), live);
-  assert.equal(store.takeSession(null, empty), empty);
+  assert.equal(store.takeSession(live, emptySess, at), live);
+  assert.equal(store.takeSession(emptySess, live, at), live);
+  assert.equal(store.takeSession(null, emptySess, at), emptySess);
+});
+
+test('a Friday tab PUT does not land on Monday’s blotter', () => {
+  const monday = new Date('2026-11-23T09:10:00+05:30');
+  const friday = {
+    day: '2026-11-20',
+    books: [{ id: 'nifty', fills: [{ netRs: -98 }], skips: [] }],
+  };
+  assert.equal(store.takeSession(null, friday, monday), null);
+});
+
+test('a new IST day archives fills then keeps Start for a fresh blotter', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sniper-'));
+  const file = path.join(dir, 'state.json');
+  const days = path.join(dir, 'days');
+  const origFile = store.paths.FILE;
+  const origDays = store.paths.DAYS;
+  store.paths.FILE = file;
+  store.paths.DAYS = days;
+  try {
+    const friday = new Date('2026-11-20T16:00:00+05:30');
+    const state = store.empty(store.todayIst(friday));
+    state.running = true;
+    state.live = false;
+    state.userId = 'u1';
+    state.session = {
+      day: '2026-11-20',
+      books: [{ id: 'nifty', fills: [{ netRs: -98.4, entryMin: 560 }], skips: [] }],
+    };
+    store.save(state);
+    const monday = store.load(new Date('2026-11-23T09:10:00+05:30'));
+    assert.equal(monday.running, true);
+    assert.equal(monday.session, null);
+    const archived = JSON.parse(fs.readFileSync(path.join(days, '2026-11-20.json'), 'utf8'));
+    assert.equal(archived.session.books[0].fills[0].netRs, -98.4);
+  } finally {
+    store.paths.FILE = origFile;
+    store.paths.DAYS = origDays;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('a new IST day keeps Start/Live but wipes the session for a fresh blotter', () => {
@@ -139,5 +180,6 @@ test('droplet dumps five instrument CSVs together and reuses them for half an ho
   assert.match(js, /Promise\.all\(/);
   assert.match(js, /CSV_EXCHANGES\.map/);
   assert.match(js, /runSniperTick/);
+  assert.match(js, /Kite token expired/);
   assert.doesNotMatch(js, /runPaperTick/);
 });

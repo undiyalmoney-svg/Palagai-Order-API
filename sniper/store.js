@@ -7,8 +7,23 @@
 const fs = require('fs');
 const path = require('path');
 
-const FILE = path.join(__dirname, '..', 'data', 'sniper', 'state.json');
-const paths = { FILE };
+const DIR = path.join(__dirname, '..', 'data', 'sniper');
+const FILE = path.join(DIR, 'state.json');
+const DAYS = path.join(DIR, 'days');
+const paths = { FILE, DAYS };
+
+function archiveDay(raw) {
+  if (!raw || !raw.date) return;
+  const books = raw.session && Array.isArray(raw.session.books) ? raw.session.books : [];
+  const has = books.some((b) => (Array.isArray(b.fills) && b.fills.length) || (Array.isArray(b.skips) && b.skips.length));
+  if (!has) return;
+  try {
+    fs.mkdirSync(paths.DAYS, { recursive: true });
+    fs.writeFileSync(path.join(paths.DAYS, `${raw.date}.json`), JSON.stringify(raw, null, 2));
+  } catch (err) {
+    console.error('[sniper] archive', err.message || err);
+  }
+}
 
 function todayIst(now = new Date()) {
   return now.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
@@ -37,6 +52,7 @@ function load(now = new Date()) {
     const keepRunning = raw.running === true;
     const userId = raw.userId || null;
     if (raw.date !== today) {
+      archiveDay(raw);
       return { ...empty(today), live: keepLive, running: keepRunning, userId };
     }
     const session =
@@ -74,8 +90,10 @@ function sessionActivity(session) {
   }, 0);
 }
 
-function takeSession(current, incoming) {
+function takeSession(current, incoming, now = new Date()) {
   if (!incoming || typeof incoming !== 'object' || !Array.isArray(incoming.books)) return current || null;
+  const day = todayIst(now);
+  if (incoming.day && incoming.day !== day) return current || null;
   if (sessionActivity(incoming) > 0 || sessionActivity(current) === 0) return incoming;
   return current;
 }
@@ -99,4 +117,4 @@ function publicView(state) {
   };
 }
 
-module.exports = { FILE, paths, empty, load, save, liveArmed, publicView, todayIst, sessionActivity, takeSession };
+module.exports = { FILE, paths, empty, load, save, liveArmed, publicView, todayIst, sessionActivity, takeSession, archiveDay };
