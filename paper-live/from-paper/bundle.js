@@ -1045,7 +1045,7 @@ function judgeOf(fills) {
   const through = fills.filter(fillThroughStop);
   const same = fillsSamePoll(fills);
   if (through.length) {
-    const change = "In tickBook, do not let barsHandleExit skip the 8s hitExit when the live bid is already through SL, scratch, or TP. Keep tooSoon and the fill-minute skip. A lagged 1-min option candle must not block a bid that is already through the stop.";
+    const change = "In tickBook, do not let barsHandleExit or tooSoon skip the 8s hitExit when the live bid is already through SL, scratch, or TP. Fill the option SL at the written \u20B9370 level, not the crashed bid. A lagged 1-min option candle must not block a bid that is already through the stop.";
     const why = same ? ` ${through.length} books stopped on the same poll, sold through the SL. That is a lagged candle, not two independent hits.` : " The fill sold through the written SL. The live bid was not checked while option candles lagged.";
     return {
       changeId: PAPER_REVIEW_BID_THROUGH,
@@ -1109,7 +1109,7 @@ var THROUGH_SL = (log) => (log.fills || []).some((f) => {
 var PAPER_JUDGE_PATCHES = [
   {
     id: PAPER_PATCH_BID_THROUGH,
-    change: "In tickBook, do not let barsHandleExit skip the 8s hitExit when the live bid is already through SL, scratch, or TP. Keep tooSoon and the fill-minute skip.",
+    change: "In tickBook, do not let barsHandleExit or tooSoon skip the 8s hitExit when the live bid is already through SL, scratch, or TP. Fill the option SL at the written \u20B9370 level, not the crashed bid.",
     evidence: THROUGH_SL
   },
   {
@@ -1605,9 +1605,18 @@ function optionNetTargetPts(cfg, prem, lot) {
   return r(pts);
 }
 function optionBoundStops(cfg, prem, lot, rangePts = null) {
-  if (cfg.stopRs != null && cfg.targetRs != null && lot > 0) return optionRupeeStopPts(cfg, lot);
-  if (cfg.stopPct != null && cfg.targetPct != null) return optionPctStopPts(cfg, prem, lot);
-  return optionStopPts(cfg, rangePts);
+  const r = (n) => Math.round(n * 100) / 100;
+  const stop = cfg.stopRs != null && cfg.targetRs != null && lot > 0 ? optionRupeeStopPts(cfg, lot) : cfg.stopPct != null && cfg.targetPct != null ? optionPctStopPts(cfg, prem, lot) : optionStopPts(cfg, rangePts);
+  const cap = cfg.maxStopRs ?? cfg.stopRs ?? LIVE_PAPER_STOP_RS;
+  if (lot > 0 && cap > 0 && stop.sl > cap / lot) return { sl: r(cap / lot), tp: stop.tp };
+  return stop;
+}
+function optionCappedSl(cfg, entry, lot, written) {
+  const r = (n) => Math.round(n * 100) / 100;
+  const cap = cfg.maxStopRs ?? cfg.stopRs ?? LIVE_PAPER_STOP_RS;
+  const floor = lot > 0 && cap > 0 ? r(entry - cap / lot) : written ?? 0.05;
+  const sl = written != null ? Math.max(written, floor) : floor;
+  return Math.max(0.05, sl);
 }
 function bindOptionFill(book, cfg, prem, pick, rangePts = null, atMin) {
   if (book.side === "flat" || prem <= 0) return book;
@@ -1702,9 +1711,10 @@ function markLive(book, last, cfg, underLast) {
   const pts = isOptionBuy(cfg) ? px - book.entry : (book.side === "long" ? 1 : -1) * (px - book.entry);
   book.livePts = Math.round(pts * 10) / 10;
   book.liveRs = netRs(cfg, book, book.entry, px, pts);
-  if (px != null) {
-    book.peakPx = book.peakPx == null ? px : Math.max(book.peakPx, px);
-    book.troughPx = book.troughPx == null ? px : Math.min(book.troughPx, px);
+  const peak = isOptionBuy(cfg) ? optionPremiumPx(px, underLast) : px;
+  if (peak != null) {
+    book.peakPx = book.peakPx == null ? peak : Math.max(book.peakPx, peak);
+    book.troughPx = book.troughPx == null ? peak : Math.min(book.troughPx, peak);
   }
 }
 function closeAt(book, cfg, exitPx, reason, day, nowMin, underLast) {
@@ -1714,8 +1724,11 @@ function closeAt(book, cfg, exitPx, reason, day, nowMin, underLast) {
   const rs = netRs(cfg, book, book.entry, exitPx, pts);
   const qty = book.lot || cfg.qty || cfg.rsPt;
   const charges = cfg.kind === "eq" ? equityMisRoundTripCharges(book.entry, Math.max(0, exitPx), qty) : cfg.kind === "fut" ? futuresRoundTripCharges(book.entry, Math.max(0, exitPx), qty, venueForBook(cfg.under || cfg.id)) : isOptionBuy(cfg) ? optionRoundTripCharges(book.entry, Math.max(0, exitPx), qty, venueForBook(cfg.under || cfg.id)) : LIVE_PAPER_CHARGE;
-  const hi = book.peakPx != null ? Math.max(book.peakPx, exitPx) : exitPx;
-  const lo = book.troughPx != null ? Math.min(book.troughPx, exitPx) : exitPx;
+  const exitMark = isOptionBuy(cfg) ? optionPremiumPx(exitPx, underLast) ?? exitPx : exitPx;
+  const peakMark = isOptionBuy(cfg) ? optionPremiumPx(book.peakPx, underLast) : book.peakPx;
+  const troughMark = isOptionBuy(cfg) ? optionPremiumPx(book.troughPx, underLast) : book.troughPx;
+  const hi = peakMark != null ? Math.max(peakMark, exitMark) : exitMark;
+  const lo = troughMark != null ? Math.min(troughMark, exitMark) : exitMark;
   const mfePts = isOptionBuy(cfg) ? hi - book.entry : (book.side === "long" ? 1 : -1) * (hi - book.entry);
   const maePts = isOptionBuy(cfg) ? lo - book.entry : (book.side === "long" ? 1 : -1) * (lo - book.entry);
   book.fills.push({
@@ -1791,17 +1804,18 @@ function hitExit(book, high, low, close, cfg, day, open = close, nowMin, fillBid
     const bidPx = optionPremiumPx(fillBid, underLast);
     const hi = optionPremiumPx(high, underLast);
     const lo = optionPremiumPx(low, underLast);
-    const openPx = optionPremiumPx(open, underLast) ?? hi ?? lo;
     if (bidPx == null && hi == null && lo == null) return false;
+    const sl = optionCappedSl(cfg, book.entry, book.lot || cfg.qty || cfg.rsPt, book.sl);
+    const scratch = Math.max(book.scratch, sl);
     const fill = (reason, px) => {
       closeAt(book, cfg, px, reason, day, nowMin, underLast);
       return book.side === "flat";
     };
-    if (bidPx != null && bidPx <= book.sl) return fill("sl", bidPx);
-    if (bidPx == null && lo != null && lo <= book.sl) return fill("sl", Math.min(book.sl, openPx ?? book.sl));
-    if (bidPx != null && bidPx <= book.scratch) return fill("scratch", bidPx);
-    if (bidPx == null && lo != null && lo <= book.scratch) {
-      return fill("scratch", Math.min(book.scratch, openPx ?? book.scratch));
+    if (bidPx != null && bidPx <= sl) return fill("sl", sl);
+    if (bidPx == null && lo != null && lo <= sl) return fill("sl", sl);
+    if (bidPx != null && bidPx <= scratch) return fill("scratch", scratch);
+    if (bidPx == null && lo != null && lo <= scratch) {
+      return fill("scratch", scratch);
     }
     if (bidPx != null && bidPx >= book.tp) return fill("tp", bidPx);
     if (bidPx == null && hi != null && hi >= book.tp) return fill("tp", book.tp);
@@ -1962,6 +1976,13 @@ function tickBook(book, cfg, bars, last, day, nowMin, instrument, optionBars = [
   const barMin = cfg.barMinutes ?? 5;
   const sellPx = isOptionBuy(cfg) ? optBid ?? optLast : last;
   if (next.side === "long" || next.side === "short") {
+    if (isOptionBuy(cfg) && next.entry != null && next.sl != null) {
+      const capped = optionCappedSl(cfg, next.entry, next.lot || cfg.qty || cfg.rsPt, next.sl);
+      if (capped > next.sl) {
+        next.sl = capped;
+        if (next.scratch != null && next.scratch < capped) next.scratch = capped;
+      }
+    }
     const exitBars = isOptionBuy(cfg) ? completedBars(optionBars, day, nowMin, barMin) : done;
     for (const bar of exitBars) {
       if (bar.day !== day || bar.min <= next.lastBarMin) continue;
@@ -1988,7 +2009,7 @@ function tickBook(book, cfg, bars, last, day, nowMin, instrument, optionBars = [
     const bid = optBid;
     const bidThrough = exec.evolve?.bidThroughTick !== false && isOptionBuy(cfg) && bid != null && (next.sl != null && bid <= next.sl || next.scratch != null && bid <= next.scratch || next.tp != null && bid >= next.tp);
     const barsHandleExit = isOptionBuy(cfg) && optionBars.length > 0 && !bidThrough;
-    if ((next.side === "long" || next.side === "short") && tickExitPx != null && !tooSoon && !barsHandleExit) {
+    if ((next.side === "long" || next.side === "short") && tickExitPx != null && (!tooSoon || bidThrough) && !barsHandleExit) {
       hitExit(next, tickExitPx, tickExitPx, tickExitPx, cfg, day, tickExitPx, nowMin, bid, underLast);
     }
   }
