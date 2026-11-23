@@ -8,7 +8,7 @@ const path = require('path');
 const store = require('./store');
 const orders = require('./orders');
 
-test('live is armed when Live is on — all four sniper books can place', () => {
+test('live is armed when Live is on — Nifty, Bank and Sensex can place', () => {
   const off = store.empty('2026-11-19');
   assert.equal(store.liveArmed(off), false);
   off.live = true;
@@ -169,7 +169,9 @@ test('sniper tick bundle exports runSniperTick and emptySniperSession', () => {
   assert.equal(typeof sniper.emptySniperSession, 'function');
   assert.equal(typeof sniper.sniperIstDay, 'function');
   const session = sniper.emptySniperSession('2026-11-19');
-  assert.equal(session.books.length, 4);
+  assert.equal(session.books.length, 3);
+  assert.deepEqual(session.books.map((b) => b.id), ['nifty', 'bank', 'sensex']);
+  assert.equal(session.stopRs, 750);
   assert.equal(session.mode, 'paper');
   assert.equal(session.liveArmed, false);
 });
