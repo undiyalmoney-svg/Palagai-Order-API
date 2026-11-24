@@ -8,7 +8,7 @@ const path = require('path');
 const store = require('./store');
 const orders = require('./orders');
 
-test('live is armed when Live is on — Nifty, Bank and Sensex can place', () => {
+test('live is armed when Live is on — Bank PE can place', () => {
   const off = store.empty('2026-11-19');
   assert.equal(store.liveArmed(off), false);
   off.live = true;
@@ -26,6 +26,18 @@ test('buy is MARKET MIS tagged PALAGAI_SNIPER; Crude Mini uses book qty; Sensex 
     qty: 65,
     sl: 90,
   };
+  const bankPe = {
+    id: 'bank',
+    optionSymbol: 'BANKNIFTY26NOV52000PE',
+    optionToken: 11,
+    qty: 30,
+    sl: 76,
+  };
+  const bankBuy = orders.buyFields(bankPe);
+  assert.equal(bankBuy.exchange, 'NFO');
+  assert.equal(bankBuy.tradingsymbol, 'BANKNIFTY26NOV52000PE');
+  assert.equal(bankBuy.order_type, 'MARKET');
+  assert.equal(bankBuy.quantity, '30');
   const buy = orders.buyFields(nifty);
   assert.equal(buy.exchange, 'NFO');
   assert.equal(buy.tradingsymbol, nifty.optionSymbol);
@@ -169,9 +181,10 @@ test('sniper tick bundle exports runSniperTick and emptySniperSession', () => {
   assert.equal(typeof sniper.emptySniperSession, 'function');
   assert.equal(typeof sniper.sniperIstDay, 'function');
   const session = sniper.emptySniperSession('2026-11-19');
-  assert.equal(session.books.length, 3);
-  assert.deepEqual(session.books.map((b) => b.id), ['nifty', 'bank', 'sensex']);
+  assert.equal(session.books.length, 1);
+  assert.deepEqual(session.books.map((b) => b.id), ['bank']);
   assert.equal(session.stopRs, 750);
+  assert.equal(session.targetRs, 750);
   assert.equal(session.mode, 'paper');
   assert.equal(session.liveArmed, false);
 });

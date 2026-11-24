@@ -403,25 +403,15 @@ function pickCheapOtm(params) {
 
 // ../palagai/src/app/core/sniper/sniper.models.ts
 var SNIPER_STOP_RS = 750;
-var SNIPER_TARGET_RS = 1e3;
+var SNIPER_TARGET_RS = 750;
 var SNIPER_DEFAULT_LOTS = 1;
 var SNIPER_BAR_MIN = 5;
 var SNIPER_OPEN_MIN = 9 * 60 + 15;
 var SNIPER_OR_END_MIN = 9 * 60 + 30;
 var SNIPER_TICK_RS = 0.05;
-var SNIPER_STRONG_RED = 0.6;
+var SNIPER_STRONG_RED = 0.4;
+var SNIPER_PULSE_KEEP = 40;
 var SNIPER_BOOKS = [
-  {
-    id: "nifty",
-    label: "Nifty 50",
-    openMin: SNIPER_OPEN_MIN,
-    lastEntryMin: 15 * 60 + 15,
-    flatMin: 15 * 60 + 30,
-    venue: "NSE",
-    exchange: "NFO",
-    underNames: ["NIFTY 50"],
-    underExchange: "NSE"
-  },
   {
     id: "bank",
     label: "Bank Nifty",
@@ -432,20 +422,9 @@ var SNIPER_BOOKS = [
     exchange: "NFO",
     underNames: ["NIFTY BANK"],
     underExchange: "NSE"
-  },
-  {
-    id: "sensex",
-    label: "Sensex",
-    openMin: SNIPER_OPEN_MIN,
-    lastEntryMin: 15 * 60 + 15,
-    flatMin: 15 * 60 + 30,
-    venue: "BSE",
-    exchange: "BFO",
-    underNames: ["SENSEX"],
-    underExchange: "BSE"
   }
 ];
-var SNIPER_HONEST = "Sniper. First ORB cut. One trade. Token on the Token page.";
+var SNIPER_HONEST = "Bank Nifty PE. Down ORB only. 40% red tagged at its high. One trade. SL \u20B9750, sell \u20B9750. Token on the Token page.";
 
 // ../palagai/src/app/core/sniper/sniper-clock.ts
 function sniperIstDay(d = /* @__PURE__ */ new Date()) {
@@ -682,14 +661,24 @@ function emptySniperBook(cfg) {
     kiteSlOrderId: "",
     kiteNote: "",
     kiteHalt: false,
-    exception: false
+    exception: false,
+    spot: null,
+    minute: null,
+    minutes: [],
+    forming5m: null,
+    peBid: null,
+    peAsk: null,
+    peLast: null,
+    pulse: []
   };
 }
 function emptySniperSession(day, asOf = (/* @__PURE__ */ new Date()).toISOString(), keep) {
   const books = SNIPER_BOOKS.map((cfg) => {
     const b = emptySniperBook(cfg);
     const prev = keep?.books?.find((x) => x.id === cfg.id);
-    if (prev) b.watch = prev.watch !== false;
+    if (prev) {
+      b.pulse = Array.isArray(prev.pulse) ? prev.pulse.slice(-SNIPER_PULSE_KEEP) : [];
+    }
     return b;
   });
   return {
@@ -699,8 +688,8 @@ function emptySniperSession(day, asOf = (/* @__PURE__ */ new Date()).toISOString
     paperOn: keep?.paperOn !== false,
     liveArmed: keep?.liveArmed === true,
     lots: Math.max(1, Math.floor(Number(keep?.lots) || SNIPER_DEFAULT_LOTS)),
-    stopRs: Number(keep?.stopRs) > 0 ? Number(keep?.stopRs) : SNIPER_STOP_RS,
-    targetRs: Number(keep?.targetRs) > 0 ? Number(keep?.targetRs) : SNIPER_TARGET_RS,
+    stopRs: SNIPER_STOP_RS,
+    targetRs: SNIPER_TARGET_RS,
     selected: "",
     replayDay: "",
     startedAt: "",
@@ -780,29 +769,79 @@ function closeFill(book, cfg, exit, exitMin, at, day, reason, bid, ask, incomple
   };
 }
 function nearbyBars(bars) {
-  return bars.filter((b) => b.min >= SNIPER_OPEN_MIN).slice(-12);
+  return bars.filter((b) => b.min >= SNIPER_OPEN_MIN).slice(-24);
+}
+function completedMinutes(bars, day, nowMin) {
+  return (bars || []).filter((b) => b.day < day || b.day === day && b.min + 1 <= nowMin);
+}
+function formingMinuteBar(bars, day, nowMin, spot) {
+  const exact = (bars || []).find((b) => b.day === day && b.min === nowMin);
+  if (exact) return exact;
+  const done = completedMinutes(bars, day, nowMin);
+  const last = done.length ? done[done.length - 1] : null;
+  if (spot == null && !last) return null;
+  const open = last ? last.close : spot;
+  const px = spot != null ? spot : last.close;
+  return {
+    day,
+    min: nowMin,
+    open,
+    high: Math.max(open, px),
+    low: Math.min(open, px),
+    close: px
+  };
+}
+function formingFiveBar(minutes, day, nowMin) {
+  const start = nowMin - nowMin % SNIPER_BAR_MIN;
+  const slice = (minutes || []).filter((b) => b.day === day && b.min >= start && b.min <= nowMin);
+  if (!slice.length) return null;
+  return {
+    day,
+    min: start,
+    open: slice[0].open,
+    high: Math.max(...slice.map((b) => b.high)),
+    low: Math.min(...slice.map((b) => b.low)),
+    close: slice[slice.length - 1].close
+  };
+}
+function sniperPulseLine(book, nowMin) {
+  const t = hhmm(nowMin);
+  const spot = book.spot != null ? `Bank ${book.spot}` : "Bank \u2014";
+  const pe = book.optionSymbol ? ` \xB7 ${book.optionSymbol}${book.peAsk != null ? ` ask ${book.peAsk}` : book.peLast != null ? ` last ${book.peLast}` : ""}` : "";
+  if (book.side === "long") {
+    const live = book.liveRs ? ` \xB7 live \u20B9${book.liveRs}` : "";
+    return `${t} ${spot}${pe}${live} \xB7 SL \u20B9${book.sl ?? SNIPER_STOP_RS} sell \u20B9${book.tp ?? SNIPER_TARGET_RS}`;
+  }
+  if (book.fills.length) {
+    const last = book.fills[book.fills.length - 1];
+    return `${t} ${spot} \xB7 closed ${last.reason} \u20B9${last.netRs}${pe}`;
+  }
+  if (book.cut === "up") {
+    return `${t} ${spot} \xB7 up ORB \xB7 skip CE \xB7 no trade today`;
+  }
+  return `${t} ${spot}${pe} \xB7 ${book.reason || "watching"}`;
+}
+function appendPulse(book, nowMin, nowIso) {
+  const text = sniperPulseLine(book, nowMin);
+  const row = { min: nowMin, at: nowIso, spot: book.spot, peLast: book.peLast, text };
+  const prev = Array.isArray(book.pulse) ? book.pulse.filter((p) => p.min !== nowMin) : [];
+  return [...prev, row].slice(-SNIPER_PULSE_KEEP);
 }
 function paintOrb(book, bars, day, nowMin) {
-  const next = { ...book, bars: nearbyBars(bars) };
+  const next = { ...book, bars: nearbyBars(bars), watch: true };
   const or = sniperOrbLevels(bars, day);
   next.orReady = sniperOrbReady(nowMin) && !!or;
   next.orHigh = or?.high ?? null;
   next.orLow = or?.low ?? null;
-  if (!next.watch) {
-    next.event = "off";
-    next.status = "off";
-    next.reason = "off";
-    return next;
-  }
   if (next.cut || next.side === "long" || next.fills.length > 0 || next.event === "parked") {
     return next;
   }
   next.event = "watching";
   next.status = "watching";
-  next.reason = nowMin < SNIPER_OPEN_MIN || !next.orReady ? `ORB ${hhmm(SNIPER_OPEN_MIN)}\u2013${hhmm(SNIPER_OR_END_MIN)}` : `ORB ${next.orLow}\u2013${next.orHigh}`;
+  next.reason = nowMin < SNIPER_OPEN_MIN || !next.orReady ? `ORB ${hhmm(SNIPER_OPEN_MIN)}\u2013${hhmm(SNIPER_OR_END_MIN)}` : `ORB ${next.orLow}\u2013${next.orHigh} \xB7 wait first close below`;
   return next;
 }
-function firstCut(books, barsBy, day) {
+function firstCut(books, barsBy) {
   let best = null;
   for (const book of books) {
     if (!book.watch || !book.orReady || book.orHigh == null || book.orLow == null) continue;
@@ -818,15 +857,6 @@ function firstCut(books, barsBy, day) {
     }
   }
   return best ? { id: best.id, dir: best.dir, min: best.min, color: best.color } : null;
-}
-function parkBook(book, winner) {
-  if (book.side === "long" || book.fills.length) return book;
-  return {
-    ...book,
-    event: "parked",
-    status: "parked",
-    reason: `idle \xB7 ${winner} first`
-  };
 }
 function manageOpen(book, cfg, day, nowMin, nowIso, opt, stopRs, targetRs) {
   const next = { ...book, fills: [...book.fills], skips: [...book.skips] };
@@ -851,28 +881,58 @@ function manageOpen(book, cfg, day, nowMin, nowIso, opt, stopRs, targetRs) {
   if (nowMin >= cfg.flatMin) {
     return closeFill(next, cfg, mark, nowMin, nowIso, day, "eod", bid, opt.ask);
   }
-  next.reason = `open ${next.optionType} \xB7 SL \u20B9${next.sl}`;
+  next.reason = `open PE \xB7 SL \u20B9${next.sl} \xB7 sell \u20B9${next.tp}`;
   next.status = "open";
   next.event = "trade_taken";
   return next;
 }
-function tickSniperDesk(session, barsBy, spots, feed, day, nowMin, nowIso) {
-  const lots = Math.max(1, Math.floor(Number(session.lots) || SNIPER_DEFAULT_LOTS));
-  const stopRs = Number(session.stopRs) > 0 ? Number(session.stopRs) : SNIPER_STOP_RS;
-  const targetRs = Number(session.targetRs) > 0 ? Number(session.targetRs) : SNIPER_TARGET_RS;
-  const allowEntry = session.paperOn !== false || session.liveArmed === true;
-  const done = {
-    nifty: completedSniperBars(barsBy.nifty || [], day, nowMin),
-    bank: completedSniperBars(barsBy.bank || [], day, nowMin),
-    sensex: completedSniperBars(barsBy.sensex || [], day, nowMin)
+function stampLive(book, spots, feed, minutesBy, day, nowMin, nowIso) {
+  const opt = feed[book.id]?.opt || { bid: null, ask: null, last: null };
+  const pick = feed[book.id]?.pick || null;
+  const spot = spots[book.id] ?? book.spot ?? null;
+  const rawMins = minutesBy[book.id] || [];
+  const minute = formingMinuteBar(rawMins, day, nowMin, spot);
+  const doneMins = completedMinutes(rawMins, day, nowMin);
+  const minutes = [...doneMins, ...minute && minute.min === nowMin ? [minute] : []];
+  const next = {
+    ...book,
+    watch: true,
+    spot,
+    minute,
+    minutes: nearbyBars(minutes).slice(-20),
+    forming5m: formingFiveBar(minutes, day, nowMin),
+    peBid: opt.bid,
+    peAsk: opt.ask,
+    peLast: opt.last ?? book.last
   };
-  let books = session.books.map(
-    (b) => paintOrb({ ...b, fills: [...b.fills], skips: [...b.skips] }, done[b.id], day, nowMin)
-  );
+  if (next.side === "flat" && !next.fills.length && pick?.listed) {
+    next.optionType = pick.optionType;
+    next.strike = pick.strike;
+    next.expiry = pick.expiry;
+    next.optionSymbol = pick.optionSymbol;
+    next.optionToken = pick.optionToken;
+    next.lotSize = pick.lotSize;
+  }
+  next.pulse = appendPulse(next, nowMin, nowIso);
+  return next;
+}
+function tickSniperDesk(session, barsBy, spots, feed, day, nowMin, nowIso, minutesBy = {}) {
+  const lots = Math.max(1, Math.floor(Number(session.lots) || SNIPER_DEFAULT_LOTS));
+  const stopRs = SNIPER_STOP_RS;
+  const targetRs = SNIPER_TARGET_RS;
+  const allowEntry = session.paperOn !== false || session.liveArmed === true;
+  const done = {};
+  for (const cfg of SNIPER_BOOKS) {
+    done[cfg.id] = completedSniperBars(barsBy[cfg.id] || [], day, nowMin);
+  }
+  let books = SNIPER_BOOKS.map((cfg) => {
+    const prev = session.books.find((b) => b.id === cfg.id) || emptySniperBook(cfg);
+    return paintOrb({ ...prev, fills: [...prev.fills], skips: [...prev.skips], pulse: [...prev.pulse || []] }, done[cfg.id] || [], day, nowMin);
+  });
   const taken = books.some((b) => b.side === "long" || b.fills.length > 0);
-  let selected = session.selected;
+  let selected = session.selected === "bank" ? "bank" : "";
   if (!selected && !taken) {
-    const cut = firstCut(books, done, day);
+    const cut = firstCut(books, done);
     if (cut) {
       selected = cut.id;
       books = books.map(
@@ -882,43 +942,47 @@ function tickSniperDesk(session, barsBy, spots, feed, day, nowMin, nowIso) {
           cutMin: cut.min,
           cutColor: cut.color,
           breakDir: cut.dir,
-          event: "orb_break",
-          status: "cut",
-          reason: `ORB break ${cut.dir} ${hhmm(cut.min)}`
+          event: cut.dir === "up" ? "parked" : "orb_break",
+          status: cut.dir === "up" ? "skip" : "cut",
+          reason: cut.dir === "up" ? `up ORB ${hhmm(cut.min)} \xB7 skip CE \xB7 no trade today` : `ORB break down ${hhmm(cut.min)} \xB7 wait 40% red`
         } : b
       );
     }
   } else if (selected) {
     books = books.map((b) => b.id === selected && !b.cut ? { ...b, cut: b.breakDir || b.cut, status: b.status } : b);
   }
-  const winner = books.find((b) => b.id === selected)?.label || selected;
   books = books.map((book) => {
     const cfg = SNIPER_BOOKS.find((c) => c.id === book.id) || SNIPER_BOOKS[0];
     const opt = feed[book.id]?.opt || { bid: null, ask: null, last: null };
     const pick = feed[book.id]?.pick || null;
     const spot = spots[book.id] ?? null;
-    const bars = done[book.id];
+    const bars = done[book.id] || [];
     if (book.side === "long" && book.entry != null) {
       return manageOpen(book, cfg, day, nowMin, nowIso, opt, stopRs, targetRs);
     }
     if (book.fills.length) {
       return { ...book, event: "trade_closed", status: "done", reason: book.reason || "done" };
     }
-    if (selected && book.id !== selected) {
-      return parkBook(book, winner);
-    }
     if (book.id !== selected) return book;
+    const breakDir = book.cut || book.breakDir;
+    if (breakDir === "up") {
+      return {
+        ...book,
+        event: "parked",
+        status: "skip",
+        reason: book.reason || `up ORB \xB7 skip CE \xB7 no trade today`
+      };
+    }
     if (nowMin >= cfg.flatMin) return { ...book, event: book.event || "orb_break", reason: "session closed" };
     if (nowMin > cfg.lastEntryMin) return { ...book, event: book.event || "orb_break", reason: "last entry passed" };
     if (!allowEntry) return { ...book, event: book.event || "orb_break", reason: book.reason || "paper off" };
-    const breakDir = book.cut || book.breakDir;
     if (!breakDir || book.cutMin == null) {
       return { ...book, event: "orb_break", reason: "ORB break" };
     }
     const after = bars.filter((b) => b.min >= book.cutMin);
     const red = after.find((b) => sniperStrongRed(b)) || null;
     if (!red) {
-      return { ...book, breakDir, event: "orb_break", reason: `ORB break ${breakDir} \xB7 wait red` };
+      return { ...book, breakDir, event: "orb_break", reason: `ORB break down \xB7 wait 40% red` };
     }
     const green = sniperHighGreen(bars, red.min);
     const indexSl = green ? green.low : red.low;
@@ -930,22 +994,25 @@ function tickSniperDesk(session, barsBy, spots, feed, day, nowMin, nowIso) {
         redHigh: red.high,
         indexSl,
         event: "breakout_candle",
-        reason: `breakout ${hhmm(red.min)} \xB7 wait ${red.high}`
+        reason: `40% red ${hhmm(red.min)} \xB7 wait tag ${red.high}`
       };
     }
     if (spot == null || !(spot > 0)) {
-      return { ...book, breakDir, redHigh: red.high, indexSl, event: "found_entry", reason: "waiting spot" };
+      return { ...book, breakDir, redHigh: red.high, indexSl, event: "found_entry", reason: "waiting Bank spot" };
     }
-    const want = breakDir === "up" ? "CE" : "PE";
+    const want = sniperWantType(breakDir);
+    if (want !== "PE") {
+      return { ...book, breakDir, redHigh: red.high, indexSl, event: "parked", reason: "skip CE \xB7 no trade today" };
+    }
     if (!pick || !pick.listed || !pick.optionSymbol) {
-      return { ...book, breakDir, redHigh: red.high, indexSl, event: "found_entry", reason: "waiting ATM" };
+      return { ...book, breakDir, redHigh: red.high, indexSl, event: "found_entry", reason: "waiting ATM PE" };
     }
-    if (pick.optionType !== want) {
-      return { ...book, breakDir, redHigh: red.high, indexSl, event: "found_entry", reason: `waiting ${want}` };
+    if (pick.optionType !== "PE") {
+      return { ...book, breakDir, redHigh: red.high, indexSl, event: "found_entry", reason: "waiting PE" };
     }
     const fillPx = opt.ask ?? opt.last;
     if (fillPx == null || !(fillPx > 0)) {
-      return { ...book, breakDir, redHigh: red.high, indexSl, event: "found_entry", reason: "waiting quote" };
+      return { ...book, breakDir, redHigh: red.high, indexSl, event: "found_entry", reason: "waiting PE quote" };
     }
     const size = sniperSize(lots, pick.lotSize, fillPx, cfg.venue, stopRs, targetRs);
     if (!size.lots) {
@@ -956,7 +1023,7 @@ function tickSniperDesk(session, barsBy, spots, feed, day, nowMin, nowIso) {
       side: "long",
       dir: "red",
       breakDir,
-      optionType: pick.optionType,
+      optionType: "PE",
       strike: pick.strike,
       expiry: pick.expiry,
       optionSymbol: pick.optionSymbol,
@@ -967,6 +1034,7 @@ function tickSniperDesk(session, barsBy, spots, feed, day, nowMin, nowIso) {
       entry: fillPx,
       sl: size.sl,
       tp: size.tp,
+      stopRs,
       indexSl,
       redHigh: red.high,
       entryMin: nowMin,
@@ -979,12 +1047,13 @@ function tickSniperDesk(session, barsBy, spots, feed, day, nowMin, nowIso) {
       last: fillPx,
       status: "open",
       event: "trade_taken",
-      reason: `open ${pick.optionType} \xB7 SL \u20B9${size.sl}`,
+      reason: `open PE \xB7 SL \u20B9${size.sl} \xB7 sell \u20B9${size.tp}`,
       exception: false
     };
     markBook(next, fillPx, cfg.venue);
     return next;
   });
+  books = books.map((b) => stampLive(b, spots, feed, minutesBy, day, nowMin, nowIso));
   return summarizeSniper(session, {
     day,
     lots,
@@ -1005,15 +1074,16 @@ function summarizeSniper(session, patch = {}) {
   return {
     ...session,
     ...patch,
+    stopRs: SNIPER_STOP_RS,
+    targetRs: SNIPER_TARGET_RS,
     books,
     honest: SNIPER_HONEST,
     incomplete: books.some(
-      (b) => b.fills.some((f) => f.incomplete) || /waiting ATM|waiting quote|waiting spot/.test(b.reason)
+      (b) => b.fills.some((f) => f.incomplete) || /waiting ATM|waiting quote|waiting PE|waiting Bank/.test(b.reason)
     )
   };
 }
 function sniperWantType(dir) {
-  if (dir === "up") return "CE";
   if (dir === "down") return "PE";
   return null;
 }
@@ -1078,9 +1148,7 @@ function lastOf(quotes, key) {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 function underKey(cfg) {
-  if (cfg.id === "nifty") return "NSE:NIFTY 50";
-  if (cfg.id === "bank") return "NSE:NIFTY BANK";
-  return "BSE:SENSEX";
+  return `${cfg.underExchange}:${cfg.underNames[0]}`;
 }
 function optionKey(exchange, symbol) {
   return `${exchange}:${symbol}`;
@@ -1097,9 +1165,9 @@ function asBar(row) {
   const b = kiteBar(row);
   return { day: b.day, min: b.min, open: b.open, high: b.high, low: b.low, close: b.close };
 }
-async function load5m(fetchHistorical, token, day) {
+async function loadBars(fetchHistorical, token, day, interval) {
   if (!token) return [];
-  const candles = await fetchHistorical(token, "5minute", day, day).catch(() => []);
+  const candles = await fetchHistorical(token, interval, day, day).catch(() => []);
   return (candles || []).map(asBar).filter((b) => b.day);
 }
 function atmPick(chain, cfg, optionType, spot, asOf) {
@@ -1124,9 +1192,7 @@ function atmPick(chain, cfg, optionType, spot, asOf) {
   };
 }
 var FALLBACK = {
-  nifty: { tradingSymbol: "NIFTY 50", token: 256265, exchange: "NSE" },
-  bank: { tradingSymbol: "NIFTY BANK", token: 260105, exchange: "NSE" },
-  sensex: { tradingSymbol: "SENSEX", token: 265, exchange: "BSE" }
+  bank: { tradingSymbol: "NIFTY BANK", token: 260105, exchange: "NSE" }
 };
 async function runSniperTick(io) {
   const now = io.now || /* @__PURE__ */ new Date();
@@ -1135,41 +1201,48 @@ async function runSniperTick(io) {
   const raw = io.session.day === day ? io.session : emptySniperSession(day, now.toISOString(), io.session);
   const csv = String(await io.fetchCsv() || "");
   const chain = parseKiteInstrumentsCsv(csv);
-  const named = {
-    nifty: findNamed(csv, ["NIFTY 50"]) || FALLBACK.nifty,
-    bank: findNamed(csv, ["NIFTY BANK"]) || FALLBACK.bank,
-    sensex: findNamed(csv, ["SENSEX"]) || FALLBACK.sensex
-  };
+  const named = {};
+  for (const cfg of SNIPER_BOOKS) {
+    named[cfg.id] = findNamed(csv, cfg.underNames) || FALLBACK[cfg.id];
+  }
   const underKeys = SNIPER_BOOKS.map((cfg) => underKey(cfg)).filter(Boolean);
   const openKeys = raw.books.filter((b) => b.side !== "flat" && b.optionSymbol).map((b) => optionKey(SNIPER_BOOKS.find((c) => c.id === b.id)?.exchange || "NFO", b.optionSymbol));
   let quotes = await io.fetchQuotes([.../* @__PURE__ */ new Set([...underKeys, ...openKeys])]);
-  const barsBy = {
-    nifty: [],
-    bank: [],
-    sensex: []
-  };
+  const barsBy = {};
+  const minutesBy = {};
   await Promise.all(
     SNIPER_BOOKS.map(async (cfg) => {
       const inst = named[cfg.id];
-      barsBy[cfg.id] = inst?.token ? await load5m(io.fetchHistorical, String(inst.token), day) : [];
+      if (!inst?.token) {
+        barsBy[cfg.id] = [];
+        minutesBy[cfg.id] = [];
+        return;
+      }
+      const token = String(inst.token);
+      const [five, one] = await Promise.all([
+        loadBars(io.fetchHistorical, token, day, "5minute"),
+        loadBars(io.fetchHistorical, token, day, "minute")
+      ]);
+      barsBy[cfg.id] = five;
+      minutesBy[cfg.id] = one;
     })
   );
   const nowIso = now.toISOString();
-  const spots = {
-    nifty: lastOf(quotes, underKey(SNIPER_BOOKS[0])),
-    bank: lastOf(quotes, underKey(SNIPER_BOOKS[1])),
-    sensex: lastOf(quotes, underKey(SNIPER_BOOKS[2]))
-  };
-  const probe = raw.selected || raw.books.some((b) => b.side === "long" || b.fills.length > 0) ? raw : tickSniperDesk(raw, barsBy, spots, {}, day, nowMin, nowIso);
+  const spots = {};
+  for (const cfg of SNIPER_BOOKS) {
+    spots[cfg.id] = lastOf(quotes, underKey(cfg));
+  }
+  const probe = raw.selected || raw.books.some((b) => b.side === "long" || b.fills.length > 0) ? raw : tickSniperDesk(raw, barsBy, spots, {}, day, nowMin, nowIso, minutesBy);
   const selected = probe.selected;
-  const want = selected ? sniperWantType(probe.books.find((b) => b.id === selected)?.cut || probe.books.find((b) => b.id === selected)?.breakDir || "") : null;
+  const cutDir = probe.books.find((b) => b.id === selected)?.cut || probe.books.find((b) => b.id === selected)?.breakDir || "";
+  const want = selected ? sniperWantType(cutDir) : "PE";
   const extra = [];
   const picks = /* @__PURE__ */ new Map();
   for (const cfg of SNIPER_BOOKS) {
     const book = probe.books.find((b) => b.id === cfg.id);
     const spot = spots[cfg.id];
     const openType = book?.side === "long" && (book.optionType === "CE" || book.optionType === "PE") ? book.optionType : null;
-    const fadeType = cfg.id === selected ? openType || want : openType;
+    const fadeType = openType || want || "PE";
     if (spot && fadeType) {
       const pick = atmPick(chain, cfg, fadeType, spot, now);
       picks.set(cfg.id, pick);
@@ -1180,11 +1253,7 @@ async function runSniperTick(io) {
   }
   const need = extra.filter((k) => !underKeys.includes(k) && !openKeys.includes(k));
   if (need.length) quotes = { ...quotes, ...await io.fetchQuotes(need) || {} };
-  const feed = {
-    nifty: { opt: { bid: null, ask: null, last: null }, pick: null },
-    bank: { opt: { bid: null, ask: null, last: null }, pick: null },
-    sensex: { opt: { bid: null, ask: null, last: null }, pick: null }
-  };
+  const feed = {};
   for (const cfg of SNIPER_BOOKS) {
     const prev = probe.books.find((b) => b.id === cfg.id);
     const pick = picks.get(cfg.id) || null;
@@ -1201,7 +1270,7 @@ async function runSniperTick(io) {
       }
     };
   }
-  const next = tickSniperDesk(probe, barsBy, spots, feed, day, nowMin, nowIso);
+  const next = tickSniperDesk(probe, barsBy, spots, feed, day, nowMin, nowIso, minutesBy);
   return summarizeSniper(raw, {
     ...next,
     running: true,

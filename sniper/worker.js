@@ -1,6 +1,6 @@
 /**
- * 5-Minute Sniper worker — droplet keeps ticking paper and placing PALAGAI_SNIPER
- * after the tab closes. Independent of Arise / paper-live.
+ * 5-Minute Sniper worker — Bank Nifty PE, paper + live PALAGAI_SNIPER after the tab closes.
+ * Independent of Arise / paper-live.
  */
 'use strict';
 
